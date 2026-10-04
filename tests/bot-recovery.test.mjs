@@ -21,6 +21,9 @@ async function harness(t, mode = 'success') {
   const root = await mkdtemp(resolve('tmp/bot-recovery-'));
   const data = join(root, 'data'); const port = await freePort();
   const calls = []; const sessions = new Map(); let rejectCancel = false;
+  let releaseStop;
+  let stopReceived;
+  const stopRequested = new Promise(resolve => { stopReceived = resolve; });
   const runner = createServer(async (request, response) => {
     const chunks = []; for await (const chunk of request) chunks.push(chunk);
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : null;
@@ -36,6 +39,11 @@ async function harness(t, mode = 'success') {
       if (mode === 'persistence-failure') await chmod(join(data, 'bot-starts'), 0o500);
       reply(202, session);
     } else if (request.method === 'DELETE') {
+      if (mode === 'slow-stop' && !url.searchParams.has('requestId')) {
+        const stopped = new Promise(resolve => { releaseStop = resolve; });
+        stopReceived();
+        await stopped;
+      }
       if (rejectCancel) { reply(503, { error: 'Fixture runner cancellation unavailable' }); return; }
       const id = url.pathname.split('/').at(-1); const session = sessions.get(id);
       if (session && session.requestId === url.searchParams.get('requestId')) session.status = 'stopping';
@@ -53,6 +61,7 @@ async function harness(t, mode = 'success') {
     const timer = setTimeout(() => child.kill('SIGKILL'), 2000); await exited; clearTimeout(timer);
   };
   t.after(async () => {
+    releaseStop?.();
     await stop(); runner.closeAllConnections(); await new Promise(resolve => runner.close(resolve));
     await chmod(join(data, 'bot-starts'), 0o700).catch(() => {});
     await rm(root, { recursive: true, force: true });
@@ -74,8 +83,29 @@ async function harness(t, mode = 'success') {
   };
   const meeting = await api('/meetings', 'POST', { title: 'Runner recovery fixture', mode: 'online', consent: true }, 201);
   const startBot = (expected = 202) => api('/integrations/bot', 'POST', { meetingId: meeting.id, url: 'https://meet.google.com/abc-defg-hij', consent: true }, expected);
-  return { root, data, calls, sessions, meeting, startBot, api, start, stop, allowCancel: () => { rejectCancel = false; } };
+  return { root, data, calls, sessions, meeting, startBot, api, start, stop, stopRequested, releaseStop: () => releaseStop?.(), allowCancel: () => { rejectCancel = false; } };
 }
+
+/** A slow stop without a reservation must not serialize unrelated recording starts. */
+test('a stalled plain stop does not block a new recording start', { timeout: 8000 }, async t => {
+  const h = await harness(t, 'slow-stop');
+  await h.startBot();
+  const other = await h.api('/meetings', 'POST', { title: 'Independent recording', mode: 'online', consent: true }, 201);
+  const stopping = h.api(`/integrations/bot?meetingId=${h.meeting.id}`, 'DELETE');
+  await h.stopRequested;
+  let timer;
+  try {
+    const started = await Promise.race([
+      h.api('/integrations/bot', 'POST', { meetingId: other.id, url: 'https://meet.google.com/abc-defg-hij', consent: true }, 202),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('A plain stop held the recording-start lock')), 2000); }),
+    ]);
+    assert.equal(started.meetingId, other.id);
+  } finally {
+    clearTimeout(timer);
+    h.releaseStop();
+    await stopping;
+  }
+});
 
 /** Confirm that successful acceptance leaves no unresolved start reservation. */
 test('recording acceptance publishes a stable start ID and shares a generated credential', async t => {

@@ -79,9 +79,11 @@ export async function getDownloadedModels() {
 /** Download an allowlisted speech model and verify it is usable from the local cache. */
 export function downloadModel(id, onProgress) {
   assertModel(id);
+  const token = generation;
   return serial(async () => {
     if (typeof caches === 'undefined') throw new Error('Model storage requires a secure browser context. Open Echo Voice on localhost.');
     await navigator.storage?.persist?.().catch(() => false);
+    if (token !== generation) throw cancelled();
     await callWorker('download', id, onProgress);
   });
 }

@@ -1,5 +1,6 @@
 """Runner tests require only Python's standard library; no meeting is joined."""
 import importlib.util
+import io
 import json
 import tempfile
 import threading
@@ -18,6 +19,45 @@ SCRATCH.mkdir(exist_ok=True)
 
 class RunnerTests(unittest.TestCase):
     """Exercise runner trust and retry boundaries without Google or browser access."""
+    def test_doctor_inspects_existing_credentials_without_writing_them(self):
+        """Doctor reports real credential validity and keeps a missing library untouched."""
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root:
+            data = Path(root) / "library"
+
+            def doctor():
+                output = io.StringIO()
+                with patch.object(runner, "DATA_ROOT", data), patch.object(runner, "DATA", data / "bot"), patch.object(runner, "readiness", return_value=(False, "fixture")), patch.object(runner.sys, "argv", ["meet_runner.py", "--doctor"]), patch("sys.stdout", output):
+                    self.assertEqual(runner.main(), 1)
+                return json.loads(output.getvalue())["tokenConfigured"]
+
+            self.assertFalse(doctor())
+            self.assertFalse(data.exists())
+            folder = data / "credentials"
+            folder.mkdir(parents=True)
+            token = folder / "runner-token"
+            for content, expected in ((b"a" * 64, True), (b"short", False), (b"!" * 64, False), (b"\xff" * 64, False)):
+                with self.subTest(content=content):
+                    token.write_bytes(content)
+                    before = token.stat()
+                    self.assertEqual(doctor(), expected)
+                    self.assertEqual(token.read_bytes(), content)
+                    self.assertEqual(token.stat().st_mtime_ns, before.st_mtime_ns)
+                    self.assertEqual(token.stat().st_mode, before.st_mode)
+            token.write_text("a" * 64)
+            with patch.object(Path, "read_text", side_effect=PermissionError("fixture unreadable token")):
+                self.assertFalse(doctor())
+            token.rename(folder / "valid-token")
+            token.symlink_to(folder / "valid-token")
+            self.assertFalse(doctor())
+            token.unlink()
+            token.mkdir()
+            self.assertFalse(doctor())
+            token.rmdir()
+            (folder / "valid-token").rename(token)
+            folder.rename(data / "linked-credentials")
+            folder.symlink_to(data / "linked-credentials", target_is_directory=True)
+            self.assertFalse(doctor())
+
     def test_only_standard_google_meet_urls(self):
         self.assertEqual(runner.validate_url("https://meet.google.com/abc-defg-hij?authuser=0"), "https://meet.google.com/abc-defg-hij")
         for url in ("https://meet.google.com.evil.test/abc-defg-hij", "http://meet.google.com/abc-defg-hij", "https://user@meet.google.com/abc-defg-hij", "https://meet.google.com:443/abc-defg-hij", "http://127.0.0.1", "https://zoom.us/j/123"):

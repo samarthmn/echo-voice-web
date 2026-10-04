@@ -27,3 +27,16 @@ Validation passed:
 - LLM-directed agent-browser review in a fresh isolated Brave profile: visible search outline, model metadata sourced from the shared catalog, mobile model cards without horizontal overflow, and plaintext 502, empty 404, structured 422, and malformed 200 response feedback. Reload restored all temporary response hooks and catalog metadata.
 
 No real Calendar grant, Meet admission, microphone capture, or cloud generation was needed for these changes. Recorder protocol tests use local doubles and never join Google Meet. Existing platform and external-integration qualification limits continue to apply. The isolated browser, test server, and task scratch were cleaned after verification; personal tabs and the user's library were preserved.
+
+## Follow-up CodeRabbit review — 2026-10-04
+
+All four unresolved follow-up findings were valid:
+
+| Review note | Fix |
+| --- | --- |
+| Cancel cleared the Models busy state before the download settled | Only download cleanup clears busy. A generation check after storage persistence also prevents a cancelled download from starting its worker later. |
+| Admission failure always claimed five minutes | The deadline and error message now use the same configured timeout in seconds. |
+| Runner `--doctor` always reported no credential | Doctor inspects the existing shared credential without creating or changing files. Missing, malformed, unreadable, non-UTF-8, directory, and symlink credentials report false. Validation matches the runner initializer's accepted token syntax. |
+| A plain Stop bot request held the global start lock during runner I/O | The lock still protects pending-start cancellation, but is released before a plain session DELETE. |
+
+Validation passed: 25 Rust tests, 47 JavaScript/REST tests, five Python tests, Rust formatting, server Clippy with warnings denied, and the release WebAssembly/browser asset build. New regression checks reproduced the persistence cancellation, credential false negative, and stalled-stop lock bugs before the fixes, then passed after them. An isolated Brave browser check confirmed that Cancel retains busy until the download settles and that a subsequent download completes normally. Browser downloads were mocked; no model files or real meeting sessions were created.

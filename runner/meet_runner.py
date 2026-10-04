@@ -162,7 +162,8 @@ class Session:
                     return
                 join.first.click(timeout=15_000)
                 self.set_state("waiting", "Waiting for the host to admit Echo Voice - Recording. No meeting audio is being recorded yet.")
-                deadline = time.monotonic() + CONFIG["runner"]["admissionTimeoutSeconds"]
+                admission_timeout = CONFIG["runner"]["admissionTimeoutSeconds"]
+                deadline = time.monotonic() + admission_timeout
                 leave = page.get_by_role("button", name=re.compile("leave call", re.I))
                 while not self.stop_event.is_set():
                     if leave.count() and leave.first.is_visible():
@@ -170,7 +171,7 @@ class Session:
                     if page.get_by_text(re.compile("request.*denied|can.t join this.*call|meeting.*ended|no one responded", re.I)).count():
                         raise RuntimeError("The host declined entry, the meeting ended, or guest access is blocked.")
                     if time.monotonic() > deadline:
-                        raise RuntimeError("No host admitted the recording guest within five minutes. Ask the host to admit it, then start a new recording.")
+                        raise RuntimeError(f"No host admitted the recording guest within {admission_timeout} seconds. Ask the host to admit it, then start a new recording.")
                     page.wait_for_timeout(1000)
                 if not self.stop_event.is_set():
                     log = open(self.folder / "capture.log", "wb")
@@ -441,7 +442,15 @@ def main():
     args = parser.parse_args()
     if args.doctor:
         ready, detail = readiness()
-        print(json.dumps({"ready": ready, "detail": detail, "tokenConfigured": len(TOKEN) >= 32, "dataDirectory": str(DATA)}))
+        folder = DATA_ROOT / "credentials"
+        token_file = folder / "runner-token"
+        try:
+            configured = (not folder.is_symlink() and not token_file.is_symlink()
+                          and token_file.is_file()
+                          and re.fullmatch(r"[A-Za-z0-9_-]{32,}", token_file.read_text(encoding="utf8")) is not None)
+        except (OSError, UnicodeError):
+            configured = False
+        print(json.dumps({"ready": ready, "detail": detail, "tokenConfigured": configured, "dataDirectory": str(DATA)}))
         return 0 if ready else 1
     TOKEN = runner_token(DATA_ROOT)
     DATA.mkdir(parents=True, exist_ok=True, mode=0o700)

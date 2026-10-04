@@ -791,7 +791,7 @@ async fn bot_status(Query(query): Query<HashMap<String, String>>) -> Result<Json
 /// Cancel unresolved start intent or request the active guest to leave its meeting.
 async fn bot_stop(Query(query): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
     let id = validate_id(query.get("meetingId").map(String::as_str))?;
-    let _guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let pending = start_file(id);
     if pending.exists() {
         cancel_start(id, &pending).await?;
@@ -799,6 +799,7 @@ async fn bot_stop(Query(query): Query<HashMap<String, String>>) -> Result<Json<V
             json!({"meetingId":id,"status":"stopping","detail":"The uncertain start was cancelled. Waiting for the runner to finish."}),
         ));
     }
+    drop(guard);
     Ok(Json(
         runner_json(Method::DELETE, &format!("/sessions/{id}"), None, 10).await?,
     ))

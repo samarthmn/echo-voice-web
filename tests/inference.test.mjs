@@ -62,6 +62,34 @@ test('transcription refuses uncached models before decoding or starting a worker
   assert.equal(workerCalls.length, count);
 });
 
+test('cancelling during storage persistence prevents a worker download and permits a later retry', async () => {
+  const originalPersist = navigator.storage.persist;
+  let releasePersistence;
+  navigator.storage.persist = () => new Promise(resolve => { releasePersistence = resolve; });
+  const count = workerCalls.length;
+  try {
+    const download = inference.downloadModel(tiny);
+    const rejected = assert.rejects(download, error => error.name === 'AbortError');
+    await turn();
+    assert.equal(typeof releasePersistence, 'function');
+    inference.cancelInference();
+    releasePersistence(true);
+    await turn();
+    // Settle an unexpected worker so the regression fails without hanging the queue.
+    if (workerCalls.length > count) instances.at(-1).finish();
+    await rejected;
+    assert.equal(workerCalls.length, count);
+  } finally {
+    navigator.storage.persist = originalPersist;
+    inference.cancelInference();
+  }
+  const retry = inference.downloadModel(base);
+  await turn();
+  instances.at(-1).finish();
+  await retry;
+  assert.equal(workerCalls.length, count + 1);
+});
+
 test('removal deletes only selected model files and its complete marker', async () => {
   const files = await caches.open(MODEL_CACHE); const manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const tinyPath = `https://huggingface.co/${tiny}/resolve/main/model.onnx`;
