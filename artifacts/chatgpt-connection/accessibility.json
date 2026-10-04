@@ -1,0 +1,30 @@
+[
+  {
+    "name": "disconnected-desktop",
+    "violations": []
+  },
+  {
+    "name": "sign-in-pending-desktop",
+    "violations": []
+  },
+  {
+    "name": "sign-in-pending-mobile",
+    "violations": []
+  },
+  {
+    "name": "connected-mobile",
+    "violations": []
+  },
+  {
+    "name": "connected-desktop",
+    "violations": []
+  },
+  {
+    "name": "allowance-unavailable-mobile",
+    "violations": []
+  },
+  {
+    "name": "helper-missing-mobile",
+    "violations": []
+  }
+]

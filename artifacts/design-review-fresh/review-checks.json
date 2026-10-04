@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-04",
+  "viewports": [
+    {
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "pageErrors": [],
+  "blockedRequests": [],
+  "baselineHiddenNavigation": {
+    "focusedItems": [
+      "echovoice",
+      "Overview",
+      "All meetings",
+      "Calendar",
+      "Local models",
+      "Our local-first promise",
+      "Settings",
+      "Setup & help"
+    ],
+    "navigationBounds": {
+      "x": -225,
+      "right": -21
+    }
+  },
+  "recheckedTabSequence": [
+    "Skip to content",
+    "Open navigation"
+  ],
+  "settingsRoundtrip": {
+    "draftName": "Alex review draft",
+    "draftProvider": "chatgpt",
+    "persistedProvider": "ollama",
+    "discardRestored": true
+  },
+  "consent": {
+    "nativeModal": true,
+    "initialFocus": "Cancel",
+    "escapeRestores": "Generate meeting notes",
+    "mobileRect": {
+      "x": 16,
+      "y": 150.921875,
+      "width": 358,
+      "height": 542.15625
+    }
+  },
+  "modelMobileWidth": {
+    "viewport": 390,
+    "document": 390
+  },
+  "retryRecoveredToFixtureAccount": true
+}

@@ -1,0 +1,692 @@
+{
+  "pageErrors": [],
+  "consoleErrors": [],
+  "screens": [
+    {
+      "name": "review-notes",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-notes-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "The important parts of your conversation, with the words behind them.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "The team explored a calmer meeting experience: stay present in the conversation while Echo",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "0:00",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "0:42",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "The first release focuses on a simple journey from recording to a verifiable transcript, s",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "1:21",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "Keep meeting processing local and make every generated note traceable to the original conv",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "0:42",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "1:21",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "3:25",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "Allow recording before model setup is complete.",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "review-transcript",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-transcript-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "6 passages · Click a timestamp to revisit a moment.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "I’d like us to step back and think about what a good meeting actually feels like. We shoul",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Exactly. The goal is to be a little more present. Let the tools remember the details, so w",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Let’s keep the first version simple. Record a conversation, get a transcript, then turn it",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "I can put together a draft of the onboarding flow by Friday. We should make it clear where",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "I’ll review the first-use experience and the microphone permission flow. If someone says n",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "That sounds good. We’ve agreed to keep processing local, make each note traceable, and pri",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "review-moments",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-moments-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "A few words, a useful idea, a moment you want to remember.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "review-details",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-details-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Original files, processing choices, and a history you can trust.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "settings-general",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-general-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": [
+        {
+          "text": "The small things that make it yours.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Used to personalize your local workspace.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Choose a multilingual speech model for other languages.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Local models turn conversations into something useful.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Models download to this browser and process audio locally.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "The name of a model installed in your local Ollama library.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Transcription runs after recording. Speaker labels can be reviewed manually; automatic spe",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgb(248, 247, 251)"
+        }
+      ]
+    },
+    {
+      "name": "settings-vocabulary",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-vocabulary-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": [
+        {
+          "text": "Enabled aliases replace exact phrases in new transcripts. Past versions keep the vocabular",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgb(248, 247, 251)"
+        }
+      ]
+    },
+    {
+      "name": "settings-storage",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-storage-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": [
+        {
+          "text": "Audio and meeting records, under your control.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Echo Voice librarySpace available for future conversations",
+          "size": "11px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Your library and your models live in different places. Meeting files live in the folder ab",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgb(248, 247, 251)"
+        }
+      ]
+    },
+    {
+      "name": "settings-help",
+      "size": "desktop",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-help-desktop-after.png",
+      "overflow": {
+        "width": 1440,
+        "scrollWidth": 1440
+      },
+      "textMetrics": []
+    },
+    {
+      "name": "review-notes",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-notes-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "The important parts of your conversation, with the words behind them.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "The team explored a calmer meeting experience: stay present in the conversation while Echo",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "0:00",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "0:42",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "The first release focuses on a simple journey from recording to a verifiable transcript, s",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "1:21",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "Keep meeting processing local and make every generated note traceable to the original conv",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "0:42",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "1:21",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "3:25",
+          "size": "11px",
+          "color": "rgb(99, 81, 138)",
+          "background": "rgb(242, 237, 249)"
+        },
+        {
+          "text": "Allow recording before model setup is complete.",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "review-transcript",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-transcript-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "6 passages · Click a timestamp to revisit a moment.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "I’d like us to step back and think about what a good meeting actually feels like. We shoul",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Exactly. The goal is to be a little more present. Let the tools remember the details, so w",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Let’s keep the first version simple. Record a conversation, get a transcript, then turn it",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "I can put together a draft of the onboarding flow by Friday. We should make it clear where",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "I’ll review the first-use experience and the microphone permission flow. If someone says n",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "That sounds good. We’ve agreed to keep processing local, make each note traceable, and pri",
+          "size": "14px",
+          "color": "rgb(84, 77, 97)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "review-moments",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-moments-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "A few words, a useful idea, a moment you want to remember.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "review-details",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/review-details-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": [
+        {
+          "text": "2026-10-02 · 10:00:0024:10In personReady to review",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Original files, processing choices, and a history you can trust.",
+          "size": "11px",
+          "color": "rgb(110, 101, 122)",
+          "background": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "name": "settings-general",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-general-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": [
+        {
+          "text": "The small things that make it yours.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Used to personalize your local workspace.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Choose a multilingual speech model for other languages.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Local models turn conversations into something useful.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Models download to this browser and process audio locally.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "The name of a model installed in your local Ollama library.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Transcription runs after recording. Speaker labels can be reviewed manually; automatic spe",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgb(248, 247, 251)"
+        }
+      ]
+    },
+    {
+      "name": "settings-vocabulary",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-vocabulary-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": [
+        {
+          "text": "Enabled aliases replace exact phrases in new transcripts. Past versions keep the vocabular",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgb(248, 247, 251)"
+        }
+      ]
+    },
+    {
+      "name": "settings-storage",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-storage-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": [
+        {
+          "text": "Audio and meeting records, under your control.",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Echo Voice librarySpace available for future conversations",
+          "size": "11px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Your library and your models live in different places. Meeting files live in the folder ab",
+          "size": "12px",
+          "color": "rgb(108, 96, 120)",
+          "background": "rgb(248, 247, 251)"
+        }
+      ]
+    },
+    {
+      "name": "settings-help",
+      "size": "mobile",
+      "path": "/workspace/echo-voice-web/artifacts/ui-review/settings-help-mobile-after.png",
+      "overflow": {
+        "width": 390,
+        "scrollWidth": 390
+      },
+      "textMetrics": []
+    }
+  ],
+  "focus": [
+    {
+      "screen": "transcript-desktop",
+      "element": "<button class=\"review-tab review-tab-active\" aria-current=\"page\" data-dioxus-id=\"561\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" width=\"16\" height=\"16\"><path d=\"m11 5-6 4H2v6h3l6 4Zm4 3a5 5 0 0 1 0 8m3-11a9 9 0 0 1 0 14\"></path></svg><span>Transcript</span><!--placeholder--></button>"
+    },
+    {
+      "screen": "transcript-mobile",
+      "element": "<button class=\"review-tab review-tab-active\" aria-current=\"page\" data-dioxus-id=\"561\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" width=\"16\" height=\"16\"><path d=\"m11 5-6 4H2v6h3l6 4Zm4 3a5 5 0 0 1 0 8m3-11a9 9 0 0 1 0 14\"></path></svg><span>Transcript</span><!--placeholder--></button>"
+    }
+  ],
+  "axe": [
+    {
+      "name": "review-notes",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "review-transcript",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "review-moments",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "review-details",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "settings-general",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "settings-vocabulary",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "settings-storage",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "settings-help",
+      "size": "desktop",
+      "violations": []
+    },
+    {
+      "name": "review-notes",
+      "size": "mobile",
+      "violations": []
+    },
+    {
+      "name": "review-transcript",
+      "size": "mobile",
+      "violations": []
+    },
+    {
+      "name": "review-moments",
+      "size": "mobile",
+      "violations": []
+    },
+    {
+      "name": "review-details",
+      "size": "mobile",
+      "violations": []
+    },
+    {
+      "name": "settings-general",
+      "size": "mobile",
+      "violations": []
+    },
+    {
+      "name": "settings-vocabulary",
+      "size": "mobile",
+      "violations": []
+    },
+    {
+      "name": "settings-storage",
+      "size": "mobile",
+      "violations": []
+    },
+    {
+      "name": "settings-help",
+      "size": "mobile",
+      "violations": []
+    }
+  ]
+}
