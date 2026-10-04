@@ -79,7 +79,7 @@ try {
       const distinct = getComputedStyle(passage).backgroundColor !== getComputedStyle(probe).backgroundColor;
       probe.remove(); return distinct;
     }), theme + ' selected passage has a distinct background');
-    const button = page.getByRole('button', { name: 'Bookmark current time', exact: true });
+    const button = page.getByRole('button', { name: 'Bookmark current playback time', exact: true });
     await page.keyboard.press('Tab');
     await button.focus();
     assert.ok(await button.evaluate(element => {
@@ -172,9 +172,9 @@ try {
   })), 'Every mobile review tab must be fully visible with a comfortable touch target');
   await page.locator('.review-tab').filter({ hasText: 'Details' }).click();
   await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeDisabled();
-  await page.getByLabel('Speech recognition', { exact: true }).selectOption('onnx-community/whisper-large-v3');
+  await page.getByRole('combobox', { name: /^Speech recognition/ }).selectOption('onnx-community/whisper-large-v3');
   await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeEnabled();
-  await page.getByLabel('Speech recognition', { exact: true }).selectOption('onnx-community/whisper-large-v3-turbo');
+  await page.getByRole('combobox', { name: /^Speech recognition/ }).selectOption('onnx-community/whisper-large-v3-turbo');
   await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeDisabled();
   const transcriptHistory = page.locator('.review-detail-card').filter({ has: page.getByRole('heading', { name: /Transcript history/ }) });
   await transcriptHistory.getByRole('button', { name: 'Restore', exact: true }).last().click();

@@ -155,7 +155,7 @@ try {
 
   // First notes remain local by default, even when a ChatGPT model is configured.
   await openMeeting(emptyMeeting);
-  await expect(page.getByRole('heading', { name: 'Your conversation, distilled.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No notes yet' })).toBeVisible();
   await expect(page.locator('.review-notes-provider-info')).toContainText('On your computer');
   await page.getByRole('button', { name: 'Generate meeting notes', exact: true }).click();
   await expect(page.locator('.review-draft-label')).toContainText('Local · Ollama');
