@@ -32,7 +32,9 @@ const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const MAX_AUDIO: usize = 512 * 1024 * 1024;
 const BOT_IMPORT_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 static TOKEN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static BOT_START_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+/// Register optional Calendar OAuth and authenticated local recorder operations.
 pub fn routes() -> Router {
     Router::new()
         .route("/integrations/status", get(status))
@@ -69,21 +71,24 @@ struct GoogleConfig {
     secret: String,
     redirect: String,
 }
+/// Combine Google OAuth credentials with the callback address in shared runtime config.
 fn google_config() -> GoogleConfig {
     GoogleConfig {
         id: std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
         secret: std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default(),
-        redirect: std::env::var("GOOGLE_REDIRECT_URI")
-            .unwrap_or_else(|_| "http://localhost:3000/api/integrations/google/callback".into()),
+        redirect: crate::config::get().google_redirect_uri.clone(),
     }
 }
+/// Require both OAuth credentials before presenting Calendar connection as available.
 fn google_configured() -> bool {
     let c = google_config();
     !c.id.is_empty() && !c.secret.is_empty()
 }
+/// Locate private Google tokens beneath the active library's credentials folder.
 fn credentials_file() -> PathBuf {
     store::data_dir().join("credentials/google.json")
 }
+/// Read saved Google tokens while distinguishing disconnected state from corrupt credentials.
 fn read_tokens() -> Result<Option<Tokens>, ApiError> {
     match fs::read(credentials_file()) {
         Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|_| {
@@ -96,6 +101,7 @@ fn read_tokens() -> Result<Option<Tokens>, ApiError> {
         Err(e) => Err(e.into()),
     }
 }
+/// Atomically publish Google credentials with private file and directory permissions.
 fn save_tokens(tokens: &Tokens) -> Result<(), ApiError> {
     let file = credentials_file();
     let parent = file.parent().unwrap();
@@ -128,6 +134,7 @@ fn save_tokens(tokens: &Tokens) -> Result<(), ApiError> {
     let _ = fs::remove_file(temporary);
     result
 }
+/// Create a bounded Google HTTP client that never follows redirects automatically.
 fn client(seconds: u64) -> Result<Client, ApiError> {
     Client::builder()
         .timeout(Duration::from_secs(seconds))
@@ -135,6 +142,7 @@ fn client(seconds: u64) -> Result<Client, ApiError> {
         .build()
         .map_err(|_| ApiError::new(500, "Could not initialize a local integration client."))
 }
+/// Reject non-local or credential-bearing integration URLs before making requests.
 fn loopback_url(raw: &str) -> Result<Url, ApiError> {
     let u = Url::parse(raw)
         .map_err(|_| ApiError::new(503, "The integration URL must be a loopback HTTP URL."))?;
@@ -153,9 +161,11 @@ fn loopback_url(raw: &str) -> Result<Url, ApiError> {
     }
     Ok(u)
 }
+/// Generate unpredictable material for the OAuth state and PKCE verifier.
 fn random_secret() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
+/// Build the Calendar authorization URL and its short-lived state cookie.
 fn authorization() -> Result<(String, String, bool), ApiError> {
     if !google_configured() {
         return Err(ApiError::new(503, "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, then restart Echo Voice. See docs/integrations.md."));
@@ -189,6 +199,7 @@ fn authorization() -> Result<(String, String, bool), ApiError> {
         callback.scheme() == "https",
     ))
 }
+/// Require a matching unexpired state cookie before accepting an OAuth callback.
 fn validate_state(cookie: Option<&str>, received: Option<&str>) -> Result<String, ApiError> {
     let failure =
         || ApiError::bad("Calendar security check failed or expired. Connect your calendar again.");
@@ -212,6 +223,7 @@ fn validate_state(cookie: Option<&str>, received: Option<&str>) -> Result<String
     }
     Ok(parsed.verifier)
 }
+/// Extract the exact OAuth cookie name without accepting substring matches.
 fn cookie_value(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::COOKIE)?
@@ -223,6 +235,7 @@ fn cookie_value(headers: &HeaderMap) -> Option<String> {
             (k == COOKIE).then(|| v.to_owned())
         })
 }
+/// Normalize the callback host and redirect into Google's consent flow.
 async fn connect(headers: HeaderMap) -> Result<Response, ApiError> {
     // Keep the state cookie on the same loopback host as Google's callback.
     // A user may open 127.0.0.1 while their OAuth client names localhost.
@@ -255,6 +268,7 @@ async fn connect(headers: HeaderMap) -> Result<Response, ApiError> {
     );
     Ok(response)
 }
+/// Require a successful Google response and return concise errors on service failures.
 async fn google_response(
     response: Result<reqwest::Response, reqwest::Error>,
 ) -> Result<Value, ApiError> {
@@ -272,6 +286,7 @@ async fn google_response(
         _ => Err(ApiError::new(502,"Google Calendar is unavailable. Retry shortly.")),
     }
 }
+/// Exchange the verified OAuth code and persist the resulting account tokens.
 async fn finish_authorization(code: &str, verifier: &str) -> Result<(), ApiError> {
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let c = google_config();
@@ -313,6 +328,7 @@ async fn finish_authorization(code: &str, verifier: &str) -> Result<(), ApiError
         email: profile["email"].as_str().map(str::to_owned),
     })
 }
+/// Complete a state-checked callback and clear the one-use cookie on success or failure.
 async fn callback(headers: HeaderMap, Query(query): Query<HashMap<String, String>>) -> Response {
     let result = async {
         let cookie = cookie_value(&headers);
@@ -350,6 +366,7 @@ async fn callback(headers: HeaderMap, Query(query): Query<HashMap<String, String
     );
     response
 }
+/// Delete saved Google credentials while retaining meeting data.
 async fn disconnect() -> Result<Json<Value>, ApiError> {
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     match fs::remove_file(credentials_file()) {
@@ -359,6 +376,7 @@ async fn disconnect() -> Result<Json<Value>, ApiError> {
     }
     Ok(Json(json!({"disconnected":true})))
 }
+/// Refresh expired Google access tokens under a lock and preserve the refresh credential.
 async fn access_token() -> Result<Tokens, ApiError> {
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let mut saved = read_tokens()?
@@ -401,6 +419,7 @@ async fn access_token() -> Result<Tokens, ApiError> {
     save_tokens(&saved)?;
     Ok(saved)
 }
+/// Classify recognized conferencing hosts without implying unsupported runner capabilities.
 fn meeting_provider(raw: &str) -> &'static str {
     let Ok(url) = Url::parse(raw) else {
         return "other";
@@ -415,6 +434,7 @@ fn meeting_provider(raw: &str) -> &'static str {
         _ => "other",
     }
 }
+/// Find a Calendar event's conferencing destination from structured fields or description text.
 fn event_url(event: &Value) -> Option<String> {
     let mut candidates = Vec::new();
     if let Some(url) = event["hangoutLink"].as_str() {
@@ -445,6 +465,7 @@ fn event_url(event: &Value) -> Option<String> {
         .into_iter()
         .find(|u| meeting_provider(u) != "other")
 }
+/// Expose the event fields needed by the local calendar UI.
 fn normalize_event(event: &Value) -> Option<Value> {
     if event["status"] == "cancelled" {
         return None;
@@ -463,6 +484,7 @@ fn normalize_event(event: &Value) -> Option<Value> {
     }
     Some(value)
 }
+/// Fetch the upcoming calendar window using a connected Google account.
 async fn calendar() -> Result<Json<Value>, ApiError> {
     let tokens = access_token().await?;
     let start = (Utc::now() - ChronoDuration::hours(1)).to_rfc3339();
@@ -493,6 +515,7 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
     Ok(Json(json!({"events":events})))
 }
 
+/// Reject missing or path-unsafe meeting and recording-start identifiers.
 fn validate_id(raw: Option<&str>) -> Result<&str, ApiError> {
     let id = raw.ok_or_else(|| ApiError::bad("A valid meeting ID is required."))?;
     if id.is_empty()
@@ -506,6 +529,7 @@ fn validate_id(raw: Option<&str>) -> Result<&str, ApiError> {
     }
     Ok(id)
 }
+/// Canonicalize standard Google Meet codes and reject other conferencing destinations.
 fn validate_meet_url(raw: &str) -> Result<String, ApiError> {
     let fail = || {
         ApiError::new(422,"The local runner supports standard Google Meet links only. Zoom and Teams are not available.")
@@ -532,9 +556,9 @@ fn validate_meet_url(raw: &str) -> Result<String, ApiError> {
     }
     Ok(format!("https://meet.google.com{p}"))
 }
+/// Read the configured loopback runner address and its generated per-library credential.
 fn runner_config() -> Result<(String, String), ApiError> {
-    let raw =
-        std::env::var("ECHO_BOT_RUNNER_URL").unwrap_or_else(|_| "http://127.0.0.1:8765".into());
+    let raw = crate::config::get().runner.url.clone();
     let url = loopback_url(&raw)?;
     if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
         return Err(ApiError::new(
@@ -544,9 +568,10 @@ fn runner_config() -> Result<(String, String), ApiError> {
     }
     Ok((
         url.origin().ascii_serialization(),
-        std::env::var("ECHO_BOT_TOKEN").unwrap_or_default(),
+        crate::config::runner_token(&store::data_dir())?,
     ))
 }
+/// Call the local runner directly with bearer authentication, no proxy, and no redirects.
 async fn runner_request(
     method: Method,
     endpoint: &str,
@@ -554,12 +579,6 @@ async fn runner_request(
     timeout: u64,
 ) -> Result<reqwest::Response, ApiError> {
     let (origin, token) = runner_config()?;
-    if token.is_empty() {
-        return Err(ApiError::new(
-            503,
-            "Set ECHO_BOT_TOKEN and start the local Google Meet runner. See docs/integrations.md.",
-        ));
-    }
     let direct = Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(timeout))
@@ -594,6 +613,7 @@ async fn runner_request(
     }
     Ok(response)
 }
+/// Decode a successful runner response or report an invalid protocol payload.
 async fn runner_json(
     method: Method,
     endpoint: &str,
@@ -611,6 +631,7 @@ async fn runner_json(
             )
         })
 }
+/// Report optional Google and runner setup without returning either integration's credentials.
 async fn status() -> Result<Json<Value>, ApiError> {
     let tokens = read_tokens()?;
     let mut google = json!({"configured":google_configured(),"connected":tokens.is_some()});
@@ -635,7 +656,9 @@ async fn status() -> Result<Json<Value>, ApiError> {
     }
     Ok(Json(json!({"google":google,"runner":runner})))
 }
+/// Persist a unique start reservation before joining and compensate any ambiguous acceptance.
 async fn bot_start(Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let _guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let id = validate_id(body["meetingId"].as_str())?;
     if body["consent"] != true {
         return Err(ApiError::new(
@@ -647,16 +670,107 @@ async fn bot_start(Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>),
     if store::get_meeting(id)?.is_none() {
         return Err(ApiError::not_found());
     }
-    let session = runner_json(
+    let pending = start_file(id);
+    if pending.exists() {
+        cancel_start(id, &pending).await?;
+    }
+    let request_id = Uuid::new_v4().to_string();
+    crate::config::write_private(
+        &pending,
+        &serde_json::to_vec(&json!({"meetingId":id,"requestId":request_id}))?,
+    )?;
+    // Reserve first so deletion cannot race acceptance; no database write follows joining.
+    if let Err(error) = store::update_meeting(id, json!({"meetingUrl":url,"consent":true})) {
+        fs::remove_file(&pending)?;
+        return Err(error);
+    }
+    let result = runner_json(
         Method::POST,
         "/sessions",
-        Some(json!({"meetingId":id,"url":url,"consent":true})),
+        Some(json!({"meetingId":id,"requestId":request_id,"url":url,"consent":true})),
         10,
     )
-    .await?;
-    store::update_meeting(id, json!({"meetingUrl":url,"consent":true}))?;
+    .await;
+    let session = match result {
+        Ok(session) if session["meetingId"] == id && session["requestId"] == request_id => {
+            match fs::remove_file(&pending) {
+                Ok(()) => session,
+                Err(error) => {
+                    cancel_start(id, &pending).await?;
+                    return Err(error.into());
+                }
+            }
+        }
+        other => {
+            cancel_start(id, &pending).await?;
+            return Err(other.err().unwrap_or_else(|| ApiError::new(502, "The runner returned an unrecognized start ID. That recording attempt was cancelled.")));
+        }
+    };
     Ok((StatusCode::ACCEPTED, Json(session)))
 }
+
+/// Durable start reservations also protect meetings from deletion during ambiguity.
+fn start_file(id: &str) -> PathBuf {
+    store::data_dir()
+        .join("bot-starts")
+        .join(format!("{id}.json"))
+}
+
+/// Cancellation is scoped to a start ID and fences off a delayed POST in the runner.
+async fn cancel_start(id: &str, pending: &std::path::Path) -> Result<(), ApiError> {
+    let state: Value = serde_json::from_slice(&fs::read(pending)?)?;
+    let request_id = validate_id(state["requestId"].as_str())?;
+    let result = runner_json(
+        Method::DELETE,
+        &format!("/sessions/{id}?requestId={request_id}"),
+        None,
+        10,
+    )
+    .await;
+    if !result.as_ref().is_ok_and(|state| {
+        state["meetingId"] == id
+            && state["requestId"] == request_id
+            && matches!(
+                state["status"].as_str(),
+                Some("stopping" | "completed" | "failed")
+            )
+    }) {
+        return Err(ApiError::new(503, "The recording start could not be confirmed or cancelled. It may still be active. Keep the runner available and use Stop bot; Echo will keep retrying cancellation."));
+    }
+    fs::remove_file(pending)?;
+    Ok(())
+}
+
+/// Recover interrupted starts before serving, then retry while an offline runner returns.
+pub async fn recover_bot_starts() {
+    reconcile_starts().await;
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            reconcile_starts().await;
+        }
+    });
+}
+
+/// Serialize reconciliation with starts so an in-flight accepted attempt is not cancelled.
+async fn reconcile_starts() {
+    let _guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let Ok(files) = fs::read_dir(store::data_dir().join("bot-starts")) else {
+        return;
+    };
+    for file in files.flatten() {
+        let path = file.path();
+        let Some(id) = path.file_stem().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if path.extension().is_some_and(|v| v == "json") && validate_id(Some(id)).is_ok() {
+            if let Err(error) = cancel_start(id, &path).await {
+                tracing::warn!("Pending recording cancellation: {}", error.message);
+            }
+        }
+    }
+}
+/// Reconcile runner recording and completion states with the meeting lifecycle.
 async fn bot_status(Query(query): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
     let id = validate_id(query.get("meetingId").map(String::as_str))?;
     let session = runner_json(Method::GET, &format!("/sessions/{id}"), None, 10).await?;
@@ -674,12 +788,22 @@ async fn bot_status(Query(query): Query<HashMap<String, String>>) -> Result<Json
     }
     Ok(Json(session))
 }
+/// Cancel unresolved start intent or request the active guest to leave its meeting.
 async fn bot_stop(Query(query): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
     let id = validate_id(query.get("meetingId").map(String::as_str))?;
+    let _guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let pending = start_file(id);
+    if pending.exists() {
+        cancel_start(id, &pending).await?;
+        return Ok(Json(
+            json!({"meetingId":id,"status":"stopping","detail":"The uncertain start was cancelled. Waiting for the runner to finish."}),
+        ));
+    }
     Ok(Json(
         runner_json(Method::DELETE, &format!("/sessions/{id}"), None, 10).await?,
     ))
 }
+/// Retrieve a bounded WAV from the runner without losing the original on transfer failure.
 async fn audio_bytes(id: &str) -> Result<Vec<u8>, ApiError> {
     let mut response =
         runner_request(Method::GET, &format!("/sessions/{id}/audio"), None, 60).await?;
@@ -701,6 +825,7 @@ async fn audio_bytes(id: &str) -> Result<Vec<u8>, ApiError> {
     }
     Ok(bytes)
 }
+/// Download finalized runner audio as a local attachment.
 async fn bot_audio(Query(query): Query<HashMap<String, String>>) -> Result<Response, ApiError> {
     let id = validate_id(query.get("meetingId").map(String::as_str))?;
     let bytes = audio_bytes(id).await?;
@@ -716,6 +841,7 @@ async fn bot_audio(Query(query): Query<HashMap<String, String>>) -> Result<Respo
     )
         .into_response())
 }
+/// Split runner audio into deterministic store-sized chunks for resumable import.
 fn persist_bot_audio(
     bytes: &[u8],
     mut persist: impl FnMut(&[u8], i64) -> Result<(), ApiError>,
@@ -726,6 +852,7 @@ fn persist_bot_audio(
     Ok(())
 }
 
+/// Import finalized runner audio idempotently while retaining existing processed results on retries.
 async fn bot_import(Query(query): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
     let id = validate_id(query.get("meetingId").map(String::as_str))?;
     let meeting = store::get_meeting(id)?.ok_or_else(ApiError::not_found)?;

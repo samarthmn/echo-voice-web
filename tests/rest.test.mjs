@@ -16,8 +16,7 @@ async function freePort() {
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
 async function launch(directory, port) {
-  const env = { ...process.env, ECHO_DATA_DIR: directory, ECHO_BIND: `127.0.0.1:${port}`, ECHO_BOT_TOKEN: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' };
-  delete env.ECHO_ALLOWED_ORIGIN;
+  const env = { ...process.env, ECHO_DATA_DIR: directory, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' };
   const child = spawn(executable, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = ''; let failure; child.on('error', error => { failure = error; });
   child.stdout.on('data', chunk => { logs += chunk; }); child.stderr.on('data', chunk => { logs += chunk; });
@@ -103,7 +102,7 @@ test('real Rust REST server preserves meeting lifecycle, audio, history, privacy
     const restored = await api(`/meetings/${id}`); assert.equal(restored.transcripts.length, 2); assert.equal(restored.notes.length, 1); assert.equal(restored.moments.length, 1);
     const restoredAudio = await fetch(`${server.base}${track.url}`); assert.deepEqual(Buffer.from(await restoredAudio.arrayBuffer()), Buffer.concat([wav, tail]));
     const storage = await api('/storage'); assert.equal(storage.meetings, 1); assert.ok(storage.bytes > track.bytes); assert.ok(storage.availableBytes > 0); assert.equal(storage.path, directory);
-    const absentRunner = await api('/integrations/status'); assert.equal(absentRunner.runner.configured, false); assert.equal(absentRunner.google.configured, false);
+    const absentRunner = await api('/integrations/status'); assert.equal(absentRunner.runner.configured, true); assert.equal(absentRunner.runner.reachable, false); assert.equal(absentRunner.google.configured, false);
     await api('/integrations/bot', { method: 'POST', body: { meetingId: id, consent: false, url: 'https://meet.google.com/abc-defg-hij' }, status: 422 });
     const csrfCallback = await rawGet(`${server.base}/api/integrations/google/callback?code=fake&state=fake`, { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' }); assert.equal(csrfCallback.status, 303); assert.match(csrfCallback.headers.location, /calendar=error/);
     // Exercise the route-specific multipart and archive limits above the 8 MB JSON default.

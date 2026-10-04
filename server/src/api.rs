@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 type ApiResult<T> = Result<T, ApiError>;
 type Payload = Result<Json<Value>, JsonRejection>;
+/// Convert extractor failures into actionable JSON errors shared by API clients.
 fn payload(value: Payload) -> ApiResult<Value> {
     value.map(|v| v.0).map_err(|e| {
         ApiError::new(
@@ -21,6 +22,7 @@ fn payload(value: Payload) -> ApiResult<Value> {
     })
 }
 
+/// Register meeting, vocabulary, settings, backup, and audio endpoints with size limits.
 pub fn routes() -> Router {
     Router::new()
         .route("/health", get(health))
@@ -53,76 +55,95 @@ pub fn routes() -> Router {
         )
         .layer(DefaultBodyLimit::max(8 * 1024 * 1024))
 }
+/// Report local storage readiness without exposing private paths or credentials.
 async fn health() -> ApiResult<Json<Value>> {
     store::init()?;
     Ok(Json(
         json!({"status":"ok","version":env!("CARGO_PKG_VERSION"),"storage":"local","framework":"Dioxus + Axum"}),
     ))
 }
+/// Return the saved meeting library.
 async fn list() -> ApiResult<Json<Value>> {
     Ok(Json(json!({"meetings":store::list_meetings()?})))
 }
+/// Validate creation input and return the new meeting with HTTP 201.
 async fn create(value: Payload) -> ApiResult<(StatusCode, Json<Value>)> {
     Ok((
         StatusCode::CREATED,
         Json(store::create_meeting(payload(value)?)?),
     ))
 }
+/// Return a meeting or the deleted-meeting error.
 async fn read(Path(id): Path<String>) -> ApiResult<Json<Value>> {
     Ok(Json(
         store::get_meeting(&id)?.ok_or_else(ApiError::not_found)?,
     ))
 }
+/// Apply an allowlisted meeting patch through the store.
 async fn update(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::update_meeting(&id, payload(value)?)?))
 }
+/// Remove an inactive meeting and return a deletion acknowledgement.
 async fn delete(Path(id): Path<String>) -> ApiResult<Json<Value>> {
     store::delete_meeting(&id)?;
     Ok(Json(json!({"ok":true})))
 }
+/// Append a transcript version to the requested meeting.
 async fn transcript(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::add_transcript(&id, payload(value)?)?))
 }
+/// Append supplied evidence-linked notes to the requested meeting.
 async fn notes(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::add_notes(&id, payload(value)?)?))
 }
+/// Create a timestamped bookmark within a meeting.
 async fn moment(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::add_moment(&id, payload(value)?)?))
 }
+/// Apply a validated patch to one bookmark.
 async fn edit_moment(
     Path((id, moment)): Path<(String, String)>,
     value: Payload,
 ) -> ApiResult<Json<Value>> {
     Ok(Json(store::update_moment(&id, &moment, payload(value)?)?))
 }
+/// Delete one bookmark without changing other saved history.
 async fn remove_moment(Path((id, moment)): Path<(String, String)>) -> ApiResult<Json<Value>> {
     Ok(Json(store::delete_moment(&id, &moment)?))
 }
+/// Return normalized workspace preferences.
 async fn settings() -> ApiResult<Json<Value>> {
     Ok(Json(store::get_settings()?))
 }
+/// Persist a validated workspace preference patch.
 async fn edit_settings(value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::update_settings(payload(value)?)?))
 }
+/// Return the shared transcription vocabulary.
 async fn vocabulary() -> ApiResult<Json<Value>> {
     Ok(Json(json!({"entries":store::list_vocabulary()?})))
 }
+/// Create a vocabulary entry with HTTP 201.
 async fn new_vocabulary(value: Payload) -> ApiResult<(StatusCode, Json<Value>)> {
     Ok((
         StatusCode::CREATED,
         Json(store::add_vocabulary(payload(value)?)?),
     ))
 }
+/// Update a term and its aliases through the store.
 async fn edit_vocabulary(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::update_vocabulary(&id, payload(value)?)?))
 }
+/// Delete a vocabulary entry and acknowledge completion.
 async fn remove_vocabulary(Path(id): Path<String>) -> ApiResult<Json<Value>> {
     store::delete_vocabulary(&id)?;
     Ok(Json(json!({"ok":true})))
 }
+/// Return library counts and managed disk usage.
 async fn storage() -> ApiResult<Json<Value>> {
     Ok(Json(store::storage_info()?))
 }
+/// Download a portable library backup that excludes integration credentials.
 async fn backup() -> ApiResult<Response> {
     let backup = store::export_library()?;
     download(
@@ -131,9 +152,11 @@ async fn backup() -> ApiResult<Response> {
         "echo-voice-library.json",
     )
 }
+/// Validate and import a portable library backup.
 async fn restore(value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::import_library(payload(value)?)?))
 }
+/// Download a meeting in the requested supported document format.
 async fn export(
     Path(id): Path<String>,
     Query(query): Query<HashMap<String, String>>,
@@ -142,6 +165,7 @@ async fn export(
         store::export_meeting(&id, query.get("format").map(String::as_str).unwrap_or("md"))?;
     download(body, mime, &filename)
 }
+/// Build a typed attachment response with a safely quoted filename.
 fn download(body: String, mime: &str, filename: &str) -> ApiResult<Response> {
     Response::builder()
         .header(header::CONTENT_TYPE, format!("{mime}; charset=utf-8"))
@@ -158,6 +182,7 @@ fn download(body: String, mime: &str, filename: &str) -> ApiResult<Response> {
             )
         })
 }
+/// Validate multipart audio and persist a bounded chunk with retry identity.
 async fn upload(
     Path(id): Path<String>,
     mut multipart: Multipart,
@@ -230,6 +255,7 @@ async fn upload(
     )?;
     Ok((StatusCode::CREATED, Json(result)))
 }
+/// Parse a single HTTP byte range, including suffix and open-ended requests.
 fn range(value: Option<&str>, size: u64) -> ApiResult<(u64, u64, bool)> {
     if size == 0 {
         return Err(ApiError::new(416, "The recording is empty."));
@@ -275,6 +301,7 @@ fn range(value: Option<&str>, size: u64) -> ApiResult<(u64, u64, bool)> {
     }
     Ok((start, end, true))
 }
+/// Stream ordered audio chunks with range support and private cache headers.
 async fn audio(
     Path((id, track_id)): Path<(String, String)>,
     headers: HeaderMap,

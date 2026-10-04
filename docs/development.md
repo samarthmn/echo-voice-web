@@ -92,31 +92,28 @@ Rebuild after changing Rust UI or browser bridge code, then reload the browser. 
 
 ## Configuration
 
-Basic recording works without a configuration file. To override defaults:
+Basic recording works with the shipped `echo.config.json`. Public runtime settings are initialized once at startup from that file; edit it and restart both the server and runner after changing shared settings.
+
+| Config field | Use |
+| --- | --- |
+| `bind` | Default `127.0.0.1:3000`. Only loopback IP listeners are accepted; public and wildcard interfaces are rejected. |
+| `dataDir` | Library location, default `.echo-data`. Use the same file and working directory for the app and runner. |
+| `googleRedirectUri` | Calendar callback, default `http://localhost:3000/api/integrations/google/callback`. Match it in Google Cloud Console. |
+| `codexBinary` | Optional path to the official Codex 0.160.0 executable; `null` enables bundled/npm/PATH discovery. |
+| `runner.url` | Default `http://127.0.0.1:8765`, shared by the server and Python runner. |
+| `runner.headless`, `runner.admissionTimeoutSeconds` | Guest browser mode and admission wait, default `true` and `300` seconds. |
+
+Only optional Google Calendar credentials belong in `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` in the app folder and restart the server. Don't commit credentials.
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then restart the server. There is no OpenAI API-key setting or API-billing fallback. ChatGPT uses account sign-in through Models. No origin override is supported for this local product.
 
-| Setting | Use |
-| --- | --- |
-| `ECHO_BIND` | Default `127.0.0.1:3000`. Keep the server on loopback for local use. |
-| `ECHO_DATA_DIR` | Absolute path for a library outside the checkout. Defaults to `.echo-data` in the app folder. |
-| `ECHO_CODEX_BIN` | Optional path to the official Codex 0.160.0 executable. Sign in through Echo's Models page. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Calendar OAuth credentials and callback. See [integration setup](integrations.md). |
-| `ECHO_BOT_RUNNER_URL`, `ECHO_BOT_TOKEN` | Local runner address and shared token. See the [runner guide](../runner/README.md). |
+The server and runner automatically generate/read a private per-library credential at `credentials/runner-token`. You do not need a token environment variable. Never replace it with a shared secret in source control. Supported library backups exclude credentials.
 
-For one launch on a different port:
-
-```bash
-ECHO_BIND=127.0.0.1:3001 bash scripts/start.sh
-```
-
-Open `http://localhost:3001`. The start script's introductory message still says port 3000; check the server's bind log for the actual address. A different origin has a separate browser speech-model cache. Calendar also needs a matching OAuth callback; for the default port it's `http://localhost:3000/api/integrations/google/callback`.
-
-The runner reads its shell environment, not Echo's `.env`. Export the shared token and absolute `ECHO_DATA_DIR` explicitly in the runner's environment. Use the same data directory for the server and runner so deletion can cover source recordings.
+For isolated development/tests, shell overrides `ECHO_BIND`, `ECHO_DATA_DIR`, and `ECHO_CODEX_BIN` remain available. `ECHO_CONFIG_FILE` selects an alternate shared JSON file. These overrides are not needed in a user's `.env`; the listener still enforces loopback. For a different Calendar port, also update `googleRedirectUri` and the registered Google redirect. A different origin has a separate speech-model cache.
 
 Configure Ollama in Echo's Settings. The default address is `http://127.0.0.1:11434`; only local connections are accepted. To download the default model from a terminal:
 

@@ -10,11 +10,13 @@ use review::MeetingReview;
 use serde_json::{json, Value};
 use settings::Settings;
 
+/// Launch the browser-rendered Dioxus workspace.
 fn main() {
     dioxus::launch(App);
 }
 
 #[component]
+/// Render one of the workspace's inline vector icons at the requested size.
 pub fn Icon(name: String, #[props(default = 18)] size: u32) -> Element {
     let path = match name.as_str() {
         "home" => "m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z",
@@ -44,6 +46,7 @@ pub fn Icon(name: String, #[props(default = 18)] size: u32) -> Element {
 }
 
 #[component]
+/// Own navigation, loaded workspace state, recorder events, and user notifications.
 fn App() -> Element {
     let mut page = use_signal(|| "overview".to_string());
     let mut meetings = use_signal(Vec::<Value>::new);
@@ -268,6 +271,7 @@ fn App() -> Element {
 }
 
 #[component]
+/// Present the next optional setup action with its current completion state.
 fn SetupCard(
     on_help: EventHandler<()>,
     on_models: EventHandler<()>,
@@ -287,6 +291,7 @@ fn SetupCard(
 }
 
 #[component]
+/// Present a saved meeting's title, local date, duration, and processing state.
 fn MeetingCard(meeting: Value, on_open: EventHandler<Value>) -> Element {
     let title = text(&meeting, "title");
     let mode = text(&meeting, "mode");
@@ -306,6 +311,7 @@ fn MeetingCard(meeting: Value, on_open: EventHandler<Value>) -> Element {
 }
 
 #[component]
+/// Collect recording consent and microphone choices before creating and starting a meeting.
 fn NewMeeting(
     settings: Signal<Value>,
     on_close: EventHandler<()>,
@@ -335,6 +341,7 @@ fn NewMeeting(
 }
 
 #[component]
+/// Expose recording, pause, mute, and stop controls for the active microphone session.
 fn RecorderBar(
     recorder: Signal<Value>,
     on_open: EventHandler<()>,
@@ -349,6 +356,7 @@ fn RecorderBar(
 }
 
 #[component]
+/// Poll a meeting guest's state and expose stop and finalized-audio import actions.
 fn BotStatus(mut meeting: Signal<Value>, notify: EventHandler<String>) -> Element {
     let mut status = use_signal(|| Value::Null);
     let mut busy = use_signal(|| false);

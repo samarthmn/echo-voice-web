@@ -40,6 +40,7 @@ pub struct Generation {
     pub usage: Value,
 }
 
+/// Register account, login, model catalog, and logout endpoints for the isolated helper.
 pub fn routes() -> Router {
     Router::new()
         .route("/chatgpt", get(status))
@@ -81,6 +82,7 @@ struct Worker {
     state: Mutex<PublicState>,
     working_dir: PathBuf,
 }
+/// Return the process-wide helper owner used to serialize account and generation operations.
 fn manager() -> &'static Manager {
     MANAGER.get_or_init(|| Manager {
         worker: Mutex::new(None),
@@ -88,18 +90,22 @@ fn manager() -> &'static Manager {
         busy: AtomicBool::new(false),
     })
 }
+/// Describe an interrupted helper connection without leaking protocol internals.
 fn unavailable() -> ApiError {
     ApiError::new(503,"The optional Codex helper stopped or could not be reached. Retry to restart it; saved notes remain unchanged.")
 }
+/// Reject account mutations while a generation holds the helper's operation lock.
 fn busy_error() -> ApiError {
     ApiError::new(409,"ChatGPT is already handling an operation. Wait for notes generation to finish before changing its connection.")
 }
+/// Retain bounded printable account metadata, dropping malformed values.
 fn text(value: &Value, maximum: usize) -> Option<String> {
     value
         .as_str()
         .filter(|s| s.len() <= maximum && !s.chars().any(|c| c.is_control()))
         .map(str::to_owned)
 }
+/// Expose only non-secret metadata from a ChatGPT subscription account.
 fn account_public(response: &Value) -> Option<Value> {
     let a = &response["account"];
     if a["type"] != "chatgpt" {
@@ -109,6 +115,7 @@ fn account_public(response: &Value) -> Option<Value> {
         json!({"email":text(&a["email"],320),"planType":text(&a["planType"],80).unwrap_or_else(||"unknown".into())}),
     )
 }
+/// Return bounded allowance windows without exposing the helper's raw account payload.
 fn sanitize_rates(value: &Value) -> Value {
     let mut result = json!({"ordinaryUsageAllowed":value["ordinaryUsageAllowed"].as_bool(),"primary":Value::Null,"secondary":Value::Null});
     for key in ["primary", "secondary"] {
@@ -119,6 +126,7 @@ fn sanitize_rates(value: &Value) -> Value {
     }
     result
 }
+/// Allow only recognized HTTPS OpenAI sign-in destinations without embedded credentials.
 fn safe_auth_url(raw: &str) -> Result<String, ApiError> {
     let u = Url::parse(raw)
         .map_err(|_| ApiError::new(502, "Codex returned an invalid sign-in link."))?;
@@ -133,6 +141,7 @@ fn safe_auth_url(raw: &str) -> Result<String, ApiError> {
     }
     Ok(u.to_string())
 }
+/// Expose known nonnegative token counts from the generation response.
 fn usage_public(value: &Value) -> Value {
     let mut out = json!({});
     for key in ["inputTokens", "outputTokens", "cachedInputTokens"] {
@@ -143,9 +152,13 @@ fn usage_public(value: &Value) -> Value {
     out
 }
 
+/// Locate an explicit, packaged, npm-installed, or PATH helper for this host platform.
 fn helper_path() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("ECHO_CODEX_BIN") {
-        let path = PathBuf::from(explicit);
+    if let Some(explicit) = std::env::var_os("ECHO_CODEX_BIN")
+        .map(PathBuf::from)
+        .or_else(|| crate::config::get().codex_binary.clone())
+    {
+        let path = explicit;
         return path
             .is_file()
             .then(|| std::fs::canonicalize(path).ok())
@@ -183,6 +196,7 @@ fn helper_path() -> Option<PathBuf> {
             .and_then(|p| std::fs::canonicalize(p).ok())
     })
 }
+/// Create a private helper folder while rejecting a symbolic-link destination.
 fn private_directory(path: &Path) -> Result<(), ApiError> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(ApiError::new(
@@ -198,6 +212,7 @@ fn private_directory(path: &Path) -> Result<(), ApiError> {
     }
     Ok(())
 }
+/// Build a helper process with an explicit environment that excludes host account credentials.
 fn child_command(binary: &Path, home: &Path, working: &Path) -> Command {
     let mut c = Command::new(binary);
     c.env_clear();
@@ -230,9 +245,11 @@ fn child_command(binary: &Path, home: &Path, working: &Path) -> Command {
         .kill_on_drop(true);
     c
 }
+/// Return the managed, pinned-helper configuration embedded in the server.
 fn configuration() -> String {
     include_str!("chatgpt-config.toml").to_owned()
 }
+/// Verify the helper version, write private config, and perform the strict-config protocol handshake.
 async fn spawn_worker(binary: PathBuf, home: PathBuf) -> Result<Arc<Worker>, ApiError> {
     private_directory(&home)?;
     let working = home.join("work");
@@ -292,6 +309,7 @@ async fn spawn_worker(binary: PathBuf, home: PathBuf) -> Result<Arc<Worker>, Api
     Ok(worker)
 }
 impl Manager {
+    /// Reuse a live worker or initialize a replacement in the library's private helper home.
     async fn worker(&self) -> Result<Arc<Worker>, ApiError> {
         let mut current = self.worker.lock().await;
         if let Some(worker) = current.as_ref() {
@@ -310,6 +328,7 @@ impl Manager {
     }
 }
 impl Worker {
+    /// Write one bounded JSON-RPC message while serializing access to helper stdin.
     async fn send(&self, value: Value) -> Result<(), ApiError> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(unavailable());
@@ -329,6 +348,7 @@ impl Worker {
             .await
             .map_err(|_| unavailable())
     }
+    /// Associate a request ID with its response and enforce a bounded wait.
     async fn rpc(&self, method: &str, params: Value) -> RpcResult {
         let id = self.sequence.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
@@ -354,17 +374,20 @@ impl Worker {
             }
         }
     }
+    /// Terminate the managed helper process and fail any outstanding protocol requests.
     async fn shutdown(&self) {
         self.alive.store(false, Ordering::SeqCst);
         let _ = self.child.lock().await.kill().await;
         self.fail_pending().await;
     }
+    /// Wake outstanding callers when the helper connection is no longer usable.
     async fn fail_pending(&self) {
         let mut pending = self.pending.lock().await;
         for (_, sender) in pending.drain() {
             let _ = sender.send(Err(unavailable()));
         }
     }
+    /// Refresh account and allowance state while rejecting API-key authentication.
     async fn account(&self) -> RpcResult {
         let response = self
             .rpc("account/read", json!({"refreshToken":false}))
@@ -380,6 +403,7 @@ impl Worker {
         };
         Ok(response)
     }
+    /// Require a connected ChatGPT subscription before a catalog or generation request.
     async fn require_account(&self) -> Result<(), ApiError> {
         let response = self.account().await?;
         if account_public(&response).is_none() {
@@ -388,6 +412,7 @@ impl Worker {
         Ok(())
     }
 }
+/// Read a protocol line without allowing unbounded helper output to exhaust memory.
 async fn read_line_bounded<R: AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> std::io::Result<Option<Vec<u8>>> {
@@ -423,6 +448,7 @@ async fn read_line_bounded<R: AsyncBufRead + Unpin>(
         }
     }
 }
+/// Dispatch helper responses and events, rejecting unsupported server-initiated tool requests.
 async fn read_loop<R: AsyncBufRead + Unpin>(worker: Arc<Worker>, mut output: R) {
     loop {
         let line = match read_line_bounded(&mut output).await {
@@ -482,6 +508,7 @@ async fn read_loop<R: AsyncBufRead + Unpin>(worker: Arc<Worker>, mut output: R) 
     let _ = worker.events.send(json!({"method":"echo/processExited"}));
     let _ = worker.child.lock().await.kill().await;
 }
+/// Translate helper errors into actionable account, quota, or connection messages.
 fn rpc_error(value: &Value) -> ApiError {
     let message = value["message"].as_str().unwrap_or_default().to_lowercase();
     if message.contains("rate limit")
@@ -499,6 +526,7 @@ fn rpc_error(value: &Value) -> ApiError {
     }
 }
 
+/// Return installation, account, allowance, and pending-login state with secrets removed.
 async fn status() -> Json<Value> {
     let m = manager();
     let installed = helper_path().is_some();
@@ -554,6 +582,7 @@ async fn status() -> Json<Value> {
         json!({"installed":true,"connected":s.account.is_some(),"busy":m.busy.load(Ordering::SeqCst),"account":s.account,"login":{"pending":s.login.pending,"authUrl":s.login.url,"error":s.login.error},"rateLimits":s.rate_limits,"error":s.error}),
     )
 }
+/// Begin an explicit ChatGPT login while preventing concurrent account changes.
 async fn login() -> Result<Json<Value>, ApiError> {
     let m = manager();
     let _operation = m.operation.try_lock().map_err(|_| busy_error())?;
@@ -607,6 +636,7 @@ async fn login() -> Result<Json<Value>, ApiError> {
         json!({"authUrl":pending.then_some(url),"loginId":id,"pending":pending}),
     ))
 }
+/// Cancel the pending login and clear its public state.
 async fn cancel_login() -> Result<Json<Value>, ApiError> {
     let m = manager();
     let _operation = m.operation.try_lock().map_err(|_| busy_error())?;
@@ -620,6 +650,7 @@ async fn cancel_login() -> Result<Json<Value>, ApiError> {
     worker.state.lock().await.login = LoginState::default();
     Ok(Json(json!({"cancelled":true})))
 }
+/// Disconnect the isolated account without changing saved meeting notes.
 async fn logout() -> Result<Json<Value>, ApiError> {
     let m = manager();
     let _operation = m.operation.try_lock().map_err(|_| busy_error())?;
@@ -628,6 +659,7 @@ async fn logout() -> Result<Json<Value>, ApiError> {
     *worker.state.lock().await = PublicState::default();
     Ok(Json(json!({"disconnected":true})))
 }
+/// Normalize supported model entries from the signed-in account catalog.
 fn catalog_models(result: &Value) -> Vec<Value> {
     result["data"]
         .as_array()
@@ -641,6 +673,7 @@ fn catalog_models(result: &Value) -> Vec<Value> {
         })
         .collect()
 }
+/// Page through the account's model catalog without returning hidden models.
 async fn catalog(worker: &Worker) -> Result<Vec<Value>, ApiError> {
     let result = worker
         .rpc("model/list", json!({"limit":100,"includeHidden":false}))
@@ -654,6 +687,7 @@ async fn catalog(worker: &Worker) -> Result<Vec<Value>, ApiError> {
     }
     Ok(models)
 }
+/// Return available models only after subscription authentication succeeds.
 async fn models() -> Result<Json<Value>, ApiError> {
     let worker = manager().worker().await?;
     worker.require_account().await?;
@@ -662,10 +696,12 @@ async fn models() -> Result<Json<Value>, ApiError> {
 
 struct BusyGuard<'a>(&'a AtomicBool);
 impl Drop for BusyGuard<'_> {
+    /// Release the generation busy flag when its guard leaves scope.
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
     }
 }
+/// Verify that the helper honored the requested model, read-only sandbox, and disabled tools.
 fn validate_isolated_thread(value: &Value, model: &str) -> Result<String, ApiError> {
     if value["thread"]["environments"]
         .as_array()
@@ -682,12 +718,14 @@ fn validate_isolated_thread(value: &Value, model: &str) -> Result<String, ApiErr
     text(&value["thread"]["id"], 128)
         .ok_or_else(|| ApiError::new(502, "The helper returned an invalid thread identifier."))
 }
+/// Identify tool or execution activity that is forbidden in a notes-only turn.
 fn forbidden_item(item: &Value) -> bool {
     !matches!(
         item["type"].as_str(),
         Some("agentMessage" | "userMessage" | "reasoning" | "contextCompaction")
     )
 }
+/// Run one isolated notes turn, validate its events, and archive the ephemeral thread.
 async fn run_generation(
     worker: &Worker,
     prompt: &str,

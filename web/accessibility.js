@@ -4,6 +4,7 @@ const focusable = 'a[href],button:not(:disabled),input:not(:disabled),select:not
 let activeLayer;
 let releaseLayer;
 
+/** Trap focus inside active modal layers and restore background interaction when they close. */
 function syncLayer() {
   const dialog = document.querySelector('div[role="dialog"][aria-modal="true"]');
   const drawer = matchMedia('(max-width:700px)').matches && document.querySelector('.sidebar.open');
@@ -63,6 +64,7 @@ function syncLayer() {
 let notificationFrame;
 const notificationBars = new Set();
 const notificationResize = new ResizeObserver(scheduleNotificationLayout);
+/** Measure bottom controls once per animation frame and reserve space for notifications. */
 function scheduleNotificationLayout() {
   if (notificationFrame) return;
   notificationFrame = requestAnimationFrame(() => {

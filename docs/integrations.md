@@ -14,8 +14,9 @@ A browser tab cannot independently join a meeting as another participant or keep
    ```dotenv
    GOOGLE_CLIENT_ID=your-google-client-id
    GOOGLE_CLIENT_SECRET=your-google-client-secret
-   GOOGLE_REDIRECT_URI=http://localhost:3000/api/integrations/google/callback
    ```
+
+The callback is initialized from `googleRedirectUri` in `echo.config.json`; if you change it, register the identical URI in Google Cloud Console.
 
 5. Restart the Rust server. Open the app using `http://localhost:3000` (use the same hostname as the redirect), then choose **Connect Google Calendar** from the Calendar screen.
 6. Authorize read-only Calendar access. The app shows primary-calendar events from the last hour through the next 30 days, up to 250 occurrences. Events without a meeting URL remain visible. Zoom and Teams URLs are identified for context but cannot be recorded by this runner.
@@ -40,31 +41,14 @@ pulseaudio --start
 
 The `--with-deps` installation may request administrator access for operating-system packages. Run the recorder itself as your normal user. PipeWire systems need the PulseAudio compatibility service and working `pactl info`.
 
-Generate a local secret:
+Run from the project root with the same `echo.config.json` as the Rust server:
 
 ```bash
-python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
-```
-
-Add it to `.env`:
-
-```dotenv
-ECHO_BOT_TOKEN=the-generated-secret
-ECHO_BOT_RUNNER_URL=http://127.0.0.1:8765
-# Optional: absolute directory shared by the app and runner.
-# ECHO_DATA_DIR=/home/your-user/.local/share/echo-voice
-```
-
-The Rust server reads `.env` on startup. The Python runner reads environment variables, not `.env`; provide the identical token to its terminal and run both from the project root unless using an absolute data path:
-
-```bash
-export ECHO_BOT_TOKEN='the-generated-secret'
-# export ECHO_DATA_DIR='/home/your-user/.local/share/echo-voice'
 runner/.venv/bin/python runner/meet_runner.py --doctor
 runner/.venv/bin/python runner/meet_runner.py
 ```
 
-Restart the Rust server after editing `.env`. Settings reports whether the runner is configured and reachable, plus its prerequisite status. The runner binds only `127.0.0.1:8765`; there is no public listener. Do not expose it through a public reverse proxy. Its token authenticates every request, and it rejects browser Origin headers. Echo Voice's server connects to loopback URLs only and does not follow redirects.
+The config initializes `dataDir`, `runner.url`, headless mode, and admission timeout. The runner and server automatically share a random secret in `<dataDir>/credentials/runner-token` with private Unix permissions. No bot token or runner URL is needed in `.env`. The runner binds the configured `127.0.0.1` port and rejects browser-origin callers; the Rust server sends authenticated requests directly without proxies or redirects.
 
 ## Recording behavior
 
@@ -75,6 +59,8 @@ Restart the Rust server after editing `.env`. Settings reports whether the runne
 5. Stop the guest from Echo Voice. It leaves the call, finalizes the WAV header, and offers completed audio for import. Import saves the track into the meeting library as `meeting-bot` in deterministic 64 MB chunks. Retrying a partially completed import verifies existing chunk hashes and resumes safely; importing twice cannot duplicate it. Then use the meeting's local transcription workflow.
 
 The runner retains its source WAV under `$ECHO_DATA_DIR/bot/<meeting-id>/meeting.wav`, plus a small state file and FFmpeg error log. An app-managed copy is stored with the meeting after import. Both copies are local. After the bot has stopped, deleting a meeting removes its library recording and the runner source directory under the shared data folder. Keep the app and runner on the same `ECHO_DATA_DIR` so deletion covers both managed copies. Exports, recordings in a separately configured runner data folder, and external backups remain separate copies.
+
+Recording starts have a durable unique ID. A lost response or failure to finalize start state triggers cancellation of that exact attempt. The runner persists cancellation before acknowledging it, so a delayed start cannot join later. If the runner cannot be reached, Echo reports that recording may still be active, preserves pending intent, blocks meeting deletion, and retries cancellation after restart or every five seconds. **Stop bot** also reconciles pending starts.
 
 One guest can run at a time. It stops on low disk space (less than 100 MB), capture failure, meeting departure, user stop, or the eight-hour maximum. The app can import WAVs up to 512 MB (approximately 4.6 hours at this format); use shorter sessions or recover larger source files manually. Completed audio is preserved if transcription fails. A runner restart marks an active saved session interrupted rather than claiming that it is still recording. Abrupt operating-system termination can leave an unfinished WAV requiring external repair; the original remains on disk.
 

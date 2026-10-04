@@ -5,6 +5,7 @@ use crate::{
 use dioxus::prelude::*;
 use serde_json::{json, Value};
 
+/// Read one user-selected JSON file and distinguish cancellation from invalid content.
 async fn choose_json_file() -> Result<Option<(String, Value)>, String> {
     let mut eval = document::eval(
         r#"
@@ -30,6 +31,7 @@ async fn choose_json_file() -> Result<Option<(String, Value)>, String> {
     Ok(Some((text(&value, "name"), value["value"].clone())))
 }
 
+/// Download a JSON document using a temporary browser object URL.
 async fn download_json(value: Value, name: &str) -> Result<(), String> {
     let mut eval = document::eval(
         r#"
@@ -51,6 +53,7 @@ async fn download_json(value: Value, name: &str) -> Result<(), String> {
 }
 
 #[component]
+/// Switch between general preferences, vocabulary, storage, and setup help.
 pub fn Settings(
     settings: Signal<Value>,
     draft: Signal<Value>,
@@ -91,6 +94,7 @@ pub fn Settings(
 }
 
 #[component]
+/// Render an accessible labeled binary preference control.
 fn Toggle(
     checked: bool,
     label: String,
@@ -101,6 +105,7 @@ fn Toggle(
 }
 
 #[component]
+/// Maintain an editable preference draft and persist it only when Save is selected.
 fn GeneralSettings(
     settings: Signal<Value>,
     mut draft: Signal<Value>,
@@ -167,12 +172,14 @@ fn GeneralSettings(
     }
 }
 
+/// Navigate to account setup from the provider preference.
 fn open_chatgpt_models() {
     let _ = document::eval(
         "window.dispatchEvent(new CustomEvent('echo-open-models',{detail:{provider:'chatgpt'}}))",
     );
 }
 
+/// Close the editor and restore focus to its originating vocabulary action.
 fn close_vocabulary_editor(mut editor: Signal<Option<Value>>) {
     editor.set(None);
     let _ = document::eval(
@@ -181,6 +188,7 @@ fn close_vocabulary_editor(mut editor: Signal<Option<Value>>) {
 }
 
 #[component]
+/// Manage terms, aliases, search, JSON import, and export.
 fn VocabularySettings(notify: EventHandler<String>) -> Element {
     let mut entries = use_signal(Vec::<Value>::new);
     let mut loading = use_signal(|| true);
@@ -253,6 +261,7 @@ fn VocabularySettings(notify: EventHandler<String>) -> Element {
 }
 
 #[component]
+/// Expose enable, edit, and delete actions for one vocabulary entry.
 fn VocabularyRow(
     entry: Value,
     mut entries: Signal<Vec<Value>>,
@@ -284,6 +293,7 @@ fn VocabularyRow(
     }}
 }
 
+/// Validate imported terms before merging them into the workspace vocabulary.
 async fn import_vocabulary(
     value: Value,
     mut entries: Signal<Vec<Value>>,
@@ -336,6 +346,7 @@ async fn import_vocabulary(
 }
 
 #[component]
+/// Display managed library usage and offer explicit backup, restore, and cache actions.
 fn StorageSettings(notify: EventHandler<String>) -> Element {
     let mut storage = use_signal(|| Value::Null);
     let mut vocabulary_count = use_signal(|| None::<usize>);
@@ -385,6 +396,7 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
     }
 }
 
+/// Download the server's portable library archive, including audio but excluding credentials.
 async fn export_library() -> Result<(), String> {
     let mut eval = document::eval(
         r#"try{const r=await fetch('/api/storage/export');if(!r.ok){const v=await r.json().catch(()=>({}));throw new Error(v.error||'Could not create the backup. Your library is unchanged.');}const blob=await r.blob();if(!blob.size)throw new Error('The backup was empty. Please try again.');const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='echo-voice-library-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);dioxus.send({ok:true});}catch(e){dioxus.send({error:e.message});}"#,
@@ -401,6 +413,7 @@ async fn export_library() -> Result<(), String> {
 }
 
 #[component]
+/// Present local setup instructions and shortcuts to relevant configuration screens.
 fn HelpSettings(on_section: EventHandler<String>) -> Element {
     let mut mic = use_signal(|| "idle".to_string());
     let mut mic_message = use_signal(String::new);

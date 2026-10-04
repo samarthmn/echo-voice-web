@@ -2,7 +2,9 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, cp, rm, writeFile, access } from 'node:fs/promises';
 import path from 'node:path';
-const root=process.cwd(),stage=path.join(root,'artifacts','.release-stage');
+if(process.platform!=='linux'||process.arch!=='x64')throw new Error('Prebuilt packaging requires a Linux x64 build host.');
+const root=process.cwd(),stage=path.join(root,'tmp','release-stage');
+await mkdir(path.join(root,'artifacts'),{recursive:true});
 await rm(stage,{recursive:true,force:true});await mkdir(stage,{recursive:true});
 const files=execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);
 for(const file of files){if(file.startsWith('artifacts/')&&!/\.(png|json)$/.test(file))continue;await mkdir(path.dirname(path.join(stage,'echo-voice-web',file)),{recursive:true});await cp(file,path.join(stage,'echo-voice-web',file));}

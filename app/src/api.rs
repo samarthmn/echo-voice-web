@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+/// Call the same-origin API, preserving HTTP failures even when the response body is not JSON.
 async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
     let url = format!("/api{path}");
     let builder = gloo_net::http::RequestBuilder::new(&url)
@@ -18,33 +19,43 @@ async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value,
         "Your local server is not responding. Check that Echo is running and try again.".to_string()
     })?;
     let status = response.status();
-    let value: Value = response
-        .json()
-        .await
-        .map_err(|_| "The server returned an unreadable response.".to_string())?;
-    if status >= 400 {
-        return Err(value["error"]
-            .as_str()
-            .unwrap_or("Something went wrong. Please try again.")
-            .to_string());
+    let value = response.json::<Value>().await;
+    if !(200..300).contains(&status) {
+        return Err(value
+            .as_ref()
+            .ok()
+            .and_then(|v| v["error"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                format!(
+                    "The server could not complete this request (HTTP {status}). Please try again."
+                )
+            }));
     }
+    let value = value.map_err(|_| "The server returned an unreadable response.".to_string())?;
     Ok(value)
 }
+/// Read a resource through the shared API error handling.
 pub async fn get(path: &str) -> Result<Value, String> {
     request("GET", path, None).await
 }
+/// Create or invoke a resource using a JSON request body.
 pub async fn post(path: &str, value: Value) -> Result<Value, String> {
     request("POST", path, Some(value)).await
 }
+/// Apply a partial JSON update through the local API.
 pub async fn patch(path: &str, value: Value) -> Result<Value, String> {
     request("PATCH", path, Some(value)).await
 }
+/// Remove a resource through the local API.
 pub async fn delete(path: &str) -> Result<Value, String> {
     request("DELETE", path, None).await
 }
+/// Read an optional string field without exposing JSON null in the UI.
 pub fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or_default().to_string()
 }
+/// Format nonnegative audio seconds as minutes and seconds.
 pub fn time(seconds: f64) -> String {
     let n = seconds.max(0.) as u64;
     format!("{}:{:02}", n / 60, n % 60)
@@ -64,6 +75,7 @@ pub fn local_date(value: &str) -> String {
     )
 }
 
+/// Render stored UTC timestamps with the browser's calendar time and UTC offset.
 pub fn local_date_time(value: &str) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
     if !date.get_time().is_finite() {
@@ -81,6 +93,7 @@ pub fn local_date_time(value: &str) -> String {
         offset.abs() % 60
     )
 }
+/// Format a finite nonnegative byte count for storage and recording displays.
 pub fn bytes(n: f64) -> String {
     let n = if n.is_finite() && n > 0. { n } else { 0. };
     if n < 1024. {

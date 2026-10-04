@@ -12,7 +12,7 @@ const port = socket.address().port;
 await new Promise(resolve => socket.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
-  env: { ...process.env, ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '', ECHO_BOT_TOKEN: '' },
+  env: { ...process.env, ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' },
   stdio: 'inherit',
 });
 let serverError, serverExited = false;

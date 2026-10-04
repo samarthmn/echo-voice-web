@@ -33,7 +33,7 @@ Source builds include this package as an optional dependency. Whether a native h
 
 Echo looks for the executable in this order:
 
-1. The explicit `ECHO_CODEX_BIN` path.
+1. `codexBinary` in `echo.config.json` (or the developer `ECHO_CODEX_BIN` shell override).
 2. The application’s `tools/codex/codex` helper.
 3. The native executable in an installed official Codex platform package.
 4. A `codex` executable on `PATH`.
@@ -45,11 +45,7 @@ npm install --global @openai/codex@0.160.0
 codex --version
 ```
 
-The expected version is `codex-cli 0.160.0`. A native executable is recommended. An executable package wrapper is also version checked. If Echo cannot locate your installation, pass its executable path when starting Echo:
-
-```sh
-ECHO_CODEX_BIN=/absolute/path/to/codex ./scripts/start.sh
-```
+The expected version is `codex-cli 0.160.0`. A native executable is recommended. An executable package wrapper is also version checked. If Echo cannot locate your installation, set `codexBinary` in `echo.config.json` to its absolute executable path, then restart Echo. This public setting does not belong in `.env`.
 
 Use Echo’s **Sign in** action after starting the server. Running a separate `codex login` with its ordinary home directory does not populate Echo’s private sign-in directory.
 

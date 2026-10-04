@@ -2,15 +2,19 @@ use crate::{api, Icon};
 use dioxus::prelude::*;
 use serde_json::{json, Value};
 
+/// Read optional string metadata without displaying JSON null.
 fn text(v: &Value, key: &str) -> String {
     api::text(v, key)
 }
+/// Clone a JSON collection for safe iteration during component rendering.
 fn list(v: &Value, key: &str) -> Vec<Value> {
     v[key].as_array().cloned().unwrap_or_default()
 }
+/// Read a numeric field with a zero fallback for incomplete legacy records.
 fn num(v: &Value, key: &str) -> f64 {
     v[key].as_f64().unwrap_or(0.)
 }
+/// Resolve the active saved version from a meeting's history.
 fn current(v: &Value, collection: &str, active: &str) -> Value {
     let versions = list(v, collection);
     versions
@@ -20,21 +24,26 @@ fn current(v: &Value, collection: &str, active: &str) -> Value {
         .or_else(|| versions.last().cloned())
         .unwrap_or(Value::Null)
 }
+/// Identify the read-only sample meeting before enabling persisted actions.
 fn is_demo(v: &Value) -> bool {
     v["demo"].as_bool().unwrap_or(false)
 }
+/// Identify recording or processing states that make destructive edits unsafe.
 fn is_active(v: &Value) -> bool {
     matches!(
         text(v, "status").as_str(),
         "recording" | "paused" | "processing"
     )
 }
+/// Display a saved timestamp in the browser's local timezone.
 fn readable_date(value: &str) -> String {
     api::local_date_time(value)
 }
+/// Dispatch a browser-only UI action without waiting for a return value.
 fn js(source: String) {
     let _ = document::eval(&source);
 }
+/// Move playback to a timestamp and optionally highlight its transcript passage.
 fn seek(time: f64, passage: Option<String>) {
     js(format!(
         "const a=document.getElementById('review-audio');if(a){{a.currentTime={};}}",
@@ -45,6 +54,7 @@ fn seek(time: f64, passage: Option<String>) {
         js(format!("let attempts=0;const reveal=()=>{{const p=document.getElementById({});if(p){{document.querySelectorAll('.review-passage-selected').forEach(x=>x.classList.remove('review-passage-selected'));p.classList.add('review-passage-selected');p.scrollIntoView({{behavior:'smooth',block:'center'}});p.focus({{preventScroll:true}});}}else if(attempts++<100){{document.getElementById('review-show-more')?.click();setTimeout(reveal,40);}}}};requestAnimationFrame(reveal)", json!(format!("passage-{id}"))));
     }
 }
+/// Persist transcript or notes edits while preserving active version and evidence references.
 async fn save(
     method: &str,
     path: String,
@@ -95,11 +105,13 @@ async fn save(
         }
     }
 }
+/// Start local transcription using the meeting's selected speech model.
 fn audio_transcribe(v: &Value) {
     js(format!("if(window.echoInference){{window.echoInference.transcribeMeeting({},{}).catch(e=>window.dispatchEvent(new CustomEvent('echo-transcription-error',{{detail:{{error:e.message}}}})));}}else{{window.dispatchEvent(new CustomEvent('echo-transcription-error',{{detail:{{error:'Speech processing is still loading. Please try again.'}}}}));}}",json!(text(v,"id")),json!(text(v,"speechModel"))));
 }
 
 #[component]
+/// Present notes, transcripts, bookmarks, details, and synchronized audio for a meeting.
 pub fn MeetingReview(
     meeting: Signal<Value>,
     on_back: EventHandler<()>,
@@ -179,6 +191,7 @@ pub fn MeetingReview(
     }
 }
 
+/// Refresh account readiness before presenting optional cloud generation controls.
 async fn refresh_chatgpt(mut account: Signal<Value>, mut loading: Signal<bool>) {
     if loading() {
         return;
@@ -190,6 +203,7 @@ async fn refresh_chatgpt(mut account: Signal<Value>, mut loading: Signal<bool>) 
     });
     loading.set(false);
 }
+/// Label the provider that produced a saved notes version.
 fn notes_source(notes: &Value) -> &'static str {
     if text(notes, "provider") == "chatgpt" {
         "ChatGPT · OpenAI"
@@ -197,6 +211,7 @@ fn notes_source(notes: &Value) -> &'static str {
         "Local · Ollama"
     }
 }
+/// Describe actual known token usage without filling in unknown totals.
 fn notes_usage(notes: &Value) -> String {
     let usage = &notes["usage"];
     let parts: Vec<String> = [
@@ -219,6 +234,7 @@ fn notes_usage(notes: &Value) -> String {
 }
 
 #[component]
+/// Review and edit evidence-linked notes, with explicit consent for cloud generation.
 fn NotesPane(
     meeting: Signal<Value>,
     on_change: EventHandler<Value>,
@@ -377,6 +393,7 @@ fn NotesPane(
 }
 
 #[component]
+/// Review transcript history, speaker labels, and timestamped passages.
 fn TranscriptPane(
     meeting: Signal<Value>,
     on_change: EventHandler<Value>,
@@ -453,6 +470,7 @@ fn TranscriptPane(
 }
 
 #[component]
+/// Preview passage audio when assigning speaker labels.
 fn SpeakerSamples(
     meeting: Signal<Value>,
     speaker: String,
@@ -498,6 +516,7 @@ fn SpeakerSamples(
 }
 
 #[component]
+/// Review and edit timestamped bookmarks linked to playback.
 fn MomentsPane(
     meeting: Signal<Value>,
     on_change: EventHandler<Value>,
@@ -521,6 +540,7 @@ fn MomentsPane(
 }
 
 #[component]
+/// Expose meeting metadata, processing choices, exports, and safe deletion.
 fn DetailsPane(
     meeting: Signal<Value>,
     on_change: EventHandler<Value>,
@@ -557,6 +577,7 @@ fn DetailsPane(
     }}
 }
 
+/// Create a bookmark at the current playback position and update meeting state.
 async fn bookmark(
     meeting: Signal<Value>,
     on_change: EventHandler<Value>,
@@ -573,6 +594,7 @@ async fn bookmark(
 }
 
 #[component]
+/// Coordinate track selection, playback position, speed, and bookmark controls.
 fn AudioPlayer(
     meeting: Signal<Value>,
     on_change: EventHandler<Value>,

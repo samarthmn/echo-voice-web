@@ -5,6 +5,7 @@ use crate::{
 use dioxus::prelude::*;
 use serde_json::{json, Value};
 #[component]
+/// Display connected calendar events and consent-gated actions for supported Meet links.
 pub fn Calendar(
     settings: Signal<Value>,
     on_meeting: EventHandler<Value>,

@@ -14,18 +14,23 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import sys
 import shutil
 import subprocess
 import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import wave
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import load_config, runner_token
+
 os.umask(0o077)
-DATA = Path(os.environ.get("ECHO_DATA_DIR", ".echo-data")).resolve() / "bot"
-TOKEN = os.environ.get("ECHO_BOT_TOKEN", "")
+CONFIG, DATA_ROOT, RUNNER_PORT = load_config()
+DATA = DATA_ROOT / "bot"
+TOKEN = ""  # Initialized only when the runner is started, not when tests import it.
 SESSIONS: dict[str, "Session"] = {}
 LOCK = threading.RLock()
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
@@ -34,10 +39,12 @@ ACTIVE = {"joining", "waiting", "recording", "stopping"}
 
 
 def utc_now() -> str:
+    """Return an aware UTC timestamp for durable session metadata."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def validate_url(raw: str) -> str:
+    """Canonicalize a standard Google Meet code and reject other destinations."""
     if not isinstance(raw, str):
         raise ValueError("Choose a standard Google Meet link.")
     p = urlparse(raw)
@@ -47,6 +54,7 @@ def validate_url(raw: str) -> str:
 
 
 def readiness() -> tuple[bool, str]:
+    """Check Linux, PulseAudio, FFmpeg, and Playwright prerequisites without joining a meeting."""
     missing = [x for x in ("ffmpeg", "pactl") if not shutil.which(x)]
     if importlib.util.find_spec("playwright") is None:
         missing.append("Python playwright")
@@ -64,8 +72,9 @@ def readiness() -> tuple[bool, str]:
 
 
 class Session:
-    def __init__(self, meeting_id: str, url: str):
-        self.id, self.url = meeting_id, url
+    def __init__(self, meeting_id: str, url: str, request_id: str):
+        """Persist a new start identity before its guest browser thread is launched."""
+        self.id, self.url, self.request_id = meeting_id, url, request_id
         self.folder = DATA / meeting_id
         self.folder.mkdir(parents=True, mode=0o700, exist_ok=True)
         self.audio = self.folder / "meeting.wav"
@@ -81,30 +90,36 @@ class Session:
         self.persist()
 
     def audio_available(self) -> bool:
+        """Expose audio only after capture has stopped and the WAV contains sample data."""
         return self.audio.exists() and self.audio.stat().st_size > 44 and self.status not in ACTIVE
 
     def public(self) -> dict:
+        """Return a lock-consistent session snapshot without URLs or bearer credentials."""
         with LOCK:
-            return {"meetingId": self.id, "status": self.status, "detail": self.detail,
+            return {"meetingId": self.id, "requestId": self.request_id, "status": self.status, "detail": self.detail,
                     "startedAt": self.started_at, "endedAt": self.ended_at,
                     "audioAvailable": self.audio_available(), "duration": self.duration}
 
     def persist(self):
+        """Atomically replace the saved session snapshot for restart recovery."""
         temporary = self.folder / "session.json.tmp"
         temporary.write_text(json.dumps(self.public()), encoding="utf8")
         temporary.replace(self.folder / "session.json")
 
     def set_state(self, status: str, detail: str):
+        """Update and persist a lifecycle transition under the session lock."""
         with LOCK:
             self.status, self.detail = status, detail
             self.persist()
 
     def stop(self):
+        """Signal the guest to leave and publish its stopping state."""
         self.stop_event.set()
         if self.status in ACTIVE:
             self.set_state("stopping", "Leaving the meeting and saving local audio.")
 
     def run(self):
+        """Join as a visible muted guest, record after admission, and finalize local resources on exit."""
         browser = None
         sink = "echo_" + secrets.token_hex(8)
         failure = None
@@ -117,7 +132,7 @@ class Session:
             self.sink_module = sink_result.stdout.strip()
             with sync_playwright() as p:
                 env = dict(os.environ, PULSE_SINK=sink)
-                browser = p.chromium.launch(headless=os.environ.get("ECHO_BOT_HEADLESS", "true") != "false", env=env, ignore_default_args=["--mute-audio"],
+                browser = p.chromium.launch(headless=CONFIG["runner"]["headless"], env=env, ignore_default_args=["--mute-audio"],
                     args=["--autoplay-policy=no-user-gesture-required", "--use-fake-ui-for-media-stream",
                           "--use-fake-device-for-media-stream", "--disable-dev-shm-usage"])
                 context = browser.new_context(locale="en-US", permissions=["microphone", "camera"], viewport={"width": 1280, "height": 900})
@@ -147,7 +162,7 @@ class Session:
                     return
                 join.first.click(timeout=15_000)
                 self.set_state("waiting", "Waiting for the host to admit Echo Voice - Recording. No meeting audio is being recorded yet.")
-                deadline = time.monotonic() + int(os.environ.get("ECHO_BOT_ADMISSION_TIMEOUT", "300"))
+                deadline = time.monotonic() + CONFIG["runner"]["admissionTimeoutSeconds"]
                 leave = page.get_by_role("button", name=re.compile("leave call", re.I))
                 while not self.stop_event.is_set():
                     if leave.count() and leave.first.is_visible():
@@ -215,6 +230,7 @@ class Session:
             self.set_state("failed" if failure else "completed", failure or ("Local recording saved. Import it into your meeting to transcribe." if self.duration else "The bot left before recording any meeting audio."))
 
     def finish_audio(self):
+        """Ask FFmpeg to finalize its WAV, escalating termination if graceful shutdown stalls."""
         if self.recording_process and self.recording_process.poll() is None:
             try:
                 self.recording_process.communicate(input=b"q\n", timeout=10)
@@ -228,6 +244,7 @@ class Session:
 
 
 def previous_session(meeting_id: str) -> dict | None:
+    """Read saved session state and qualify unfinished capture as interrupted after restart."""
     state = DATA / meeting_id / "session.json"
     if not state.exists():
         return None
@@ -260,9 +277,11 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "EchoVoiceLocalRunner/1"
 
     def log_message(self, *_args):
+        """Suppress HTTP logs that could reveal bearer credentials or meeting metadata."""
         pass  # Do not log bearer credentials, meeting URLs, or titles.
 
     def reply(self, status: int, payload: dict):
+        """Return a private JSON response with explicit length and security headers."""
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -273,6 +292,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def authorized(self) -> bool:
+        """Require the local shared secret and reject direct browser-origin requests."""
         expected = "Bearer " + TOKEN
         if not TOKEN or not hmac.compare_digest(self.headers.get("Authorization", "").encode(), expected.encode()):
             self.reply(401, {"error": "The local runner token is missing or incorrect."})
@@ -283,12 +303,14 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def session_id(self) -> str | None:
+        """Validate endpoint paths before using a meeting ID in managed storage."""
         parts = urlparse(self.path).path.strip("/").split("/")
         if len(parts) not in (2, 3) or parts[0] != "sessions" or not ID_PATTERN.fullmatch(parts[1]) or (len(parts) == 3 and parts[2] != "audio"):
             return None
         return parts[1]
 
     def do_GET(self):
+        """Report readiness or session state, or stream a finalized local recording."""
         if not self.authorized():
             return
         if self.path == "/health":
@@ -324,6 +346,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, state)
 
     def do_POST(self):
+        """Start one consent-checked guest with retry identity and reject cancelled attempts."""
         if not self.authorized():
             return
         if self.path != "/sessions":
@@ -337,6 +360,9 @@ class Handler(BaseHTTPRequestHandler):
             meeting_id = payload.get("meetingId")
             if not isinstance(meeting_id, str) or not ID_PATTERN.fullmatch(meeting_id):
                 raise ValueError("A valid meeting ID is required.")
+            request_id = payload.get("requestId")
+            if not isinstance(request_id, str) or not ID_PATTERN.fullmatch(request_id):
+                raise ValueError("A valid recording start ID is required.")
             url = validate_url(payload.get("url"))
             if payload.get("consent") is not True:
                 raise ValueError("Participant consent is required before the bot joins.")
@@ -348,24 +374,58 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(503, {"error": detail})
             return
         with LOCK:
+            if (DATA / ".cancelled" / request_id).exists():
+                self.reply(409, {"error": "This recording start was cancelled."})
+                return
+            existing = SESSIONS.get(meeting_id)
+            if existing and existing.request_id == request_id:
+                self.reply(202, existing.public())
+                return
+            previous = previous_session(meeting_id)
+            if previous and previous.get("requestId") == request_id:
+                self.reply(202, previous)
+                return
             if any(s.status in ACTIVE for s in SESSIONS.values()):
                 self.reply(409, {"error": "A recording guest is already active. Stop it before joining another meeting."})
                 return
             if (DATA / meeting_id / "meeting.wav").exists():
                 self.reply(409, {"error": "This meeting already has recorded audio. Import it, then create a new meeting for another recording."})
                 return
-            session = Session(meeting_id, url)
+            session = Session(meeting_id, url, request_id)
             SESSIONS[meeting_id] = session
             session.thread.start()
         self.reply(202, session.public())
 
     def do_DELETE(self):
+        """Stop a matching guest or persist a cancellation fence for an uncertain start."""
         if not self.authorized():
             return
         meeting_id = self.session_id()
+        request_id = parse_qs(urlparse(self.path).query).get("requestId", [None])[0]
+        if not meeting_id or (request_id is not None and not ID_PATTERN.fullmatch(request_id)):
+            self.reply(400, {"error": "A valid meeting and recording start ID are required."})
+            return
         with LOCK:
-            session = SESSIONS.get(meeting_id or "")
-            if not session:
+            session = SESSIONS.get(meeting_id)
+            if request_id:
+                # Persist a cancellation fence before acknowledging it. A delayed
+                # POST for this attempt cannot start after a lost response/restart.
+                folder = DATA / ".cancelled"
+                folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+                fence = folder / request_id
+                with fence.open("w") as output:
+                    output.write(meeting_id)
+                    output.flush()
+                    os.fsync(output.fileno())
+                descriptor = os.open(folder, os.O_RDONLY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                if not session or session.request_id != request_id:
+                    self.reply(202, {"meetingId": meeting_id, "requestId": request_id, "status": "completed", "detail": "The recording start was cancelled."})
+                    return
+            elif not session:
                 self.reply(404, {"error": "No active session exists for this meeting."})
                 return
             session.stop()
@@ -373,18 +433,20 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    """Initialize shared credentials, recover sessions, and serve the loopback runner until shutdown."""
+    global TOKEN
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=RUNNER_PORT)
     parser.add_argument("--doctor", action="store_true")
     args = parser.parse_args()
     if args.doctor:
         ready, detail = readiness()
         print(json.dumps({"ready": ready, "detail": detail, "tokenConfigured": len(TOKEN) >= 32, "dataDirectory": str(DATA)}))
         return 0 if ready else 1
-    if len(TOKEN) < 32:
-        parser.error("Set ECHO_BOT_TOKEN to the same random secret (at least 32 characters) used by Echo Voice.")
+    TOKEN = runner_token(DATA_ROOT)
     DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
     def terminate(_signum, _frame):
+        """Route process termination through the runner's normal cleanup path."""
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)

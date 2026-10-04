@@ -9,6 +9,7 @@ const autoHandled = new Set();
 let automaticQueue = Promise.resolve();
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
+/** Call the local API while preserving meaningful JSON or HTTP errors. */
 async function request(path, init = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -24,6 +25,7 @@ async function request(path, init = {}) {
 }
 const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
+/** Retry transient persistence failures with a bounded backoff. */
 async function retryRequest(path, init) {
   let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -34,6 +36,7 @@ async function retryRequest(path, init) {
   throw lastError;
 }
 
+/** Identify supported audio containers from file headers rather than trusting filename extensions. */
 async function audioType(file) {
   const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
   const ascii = (start, count) => String.fromCharCode(...bytes.slice(start, start + count));
@@ -46,6 +49,7 @@ async function audioType(file) {
   throw new Error('Choose an original WAV, MP3, WebM, Ogg, MP4/M4A, or FLAC recording. This file does not have a supported audio header.');
 }
 
+/** Inspect decoded audio duration and release the temporary audio resources. */
 async function audioDuration(file) {
   const audio = document.createElement('audio');
   const url = URL.createObjectURL(file);
@@ -69,10 +73,12 @@ async function audioDuration(file) {
 }
 
 const fingerprint = file => `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
+/** Publish import state for the UI without losing retryable session metadata. */
 function uploadProgress(session, status, error) {
   emit('echo-upload-progress', { meetingId: session.meeting.id, fileName: session.file.name, bytes: session.offset, total: session.file.size, progress: session.offset / session.file.size * 100, status, ...(error ? { error } : {}) });
 }
 
+/** Persist queued import chunks and finalize the meeting only when every upload succeeds. */
 async function finishImport(session) {
   if (session.running) return session.running;
   session.running = (async () => {
@@ -110,6 +116,7 @@ async function finishImport(session) {
   return session.running;
 }
 
+/** Validate a user-selected audio file and create a resumable local import session. */
 export async function upload(input) {
   const file = input?.files?.[0];
   if (!file) return;
@@ -134,6 +141,7 @@ export async function upload(input) {
   try { return await work; } finally { startingImports.delete(key); }
 }
 
+/** Start local transcription only when the configured model is downloaded and enabled. */
 export async function autoTranscribeMeeting(meeting) {
   if (!meeting?.id || !meeting.tracks?.length || !['saved', 'interrupted', 'ready'].includes(meeting.status)) return;
   const key = `${meeting.id}:${meeting.tracks.map(track => `${track.id}:${track.bytes}`).join(',')}`;

@@ -30,10 +30,9 @@ async function launch(t, initialControl = {}, helperBinary = fixture) {
   });
   localProvider.listen(0, '127.0.0.1'); await once(localProvider, 'listening');
   const env = { ...process.env, ECHO_DATA_DIR: directory, ECHO_BIND: `127.0.0.1:${port}`, ECHO_CODEX_BIN: helperBinary,
-    ECHO_BOT_TOKEN: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '',
+    GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '',
     OPENAI_API_KEY: 'fixture-must-not-inherit', CODEX_API_KEY: 'fixture-must-not-inherit', CHATGPT_ACCESS_TOKEN: 'fixture-must-not-inherit',
     OPENAI_BASE_URL: 'https://fixture.invalid', CODEX_HOME: join(directory, 'unused-host-codex'), HOME: join(directory, 'unused-host-home') };
-  delete env.ECHO_ALLOWED_ORIGIN;
   const child = spawn(executable, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = ''; let failure;
   child.stdout.on('data', value => { logs += value; }); child.stderr.on('data', value => { logs += value; });

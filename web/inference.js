@@ -8,6 +8,7 @@ let rejectActive = null;
 const activeAudioFetches = new Set();
 const cancelled = () => new DOMException('Local processing was cancelled. Your saved audio is unchanged.', 'AbortError');
 
+/** Queue speech operations so downloads, cache changes, and transcription do not overlap. */
 function serial(operation) {
   const token = generation;
   const result = queue.catch(() => {}).then(() => {
@@ -18,6 +19,7 @@ function serial(operation) {
   return result;
 }
 
+/** Dispatch one worker job and forward its progress until a result or failure arrives. */
 function callWorker(type, modelId, onProgress, audio) {
   if (typeof Worker === 'undefined') return Promise.reject(new Error('This browser does not support local speech processing. Try a current Chrome, Edge, Firefox, or Safari browser.'));
   worker ??= new Worker(new URL('/js/inference-worker.js', location.origin), { type: 'module' });
@@ -47,6 +49,7 @@ function callWorker(type, modelId, onProgress, audio) {
   });
 }
 
+/** Terminate the worker and reject the current job without discarding downloaded files. */
 export function cancelInference() {
   generation++;
   for (const controller of activeAudioFetches) controller.abort();
@@ -55,6 +58,7 @@ export function cancelInference() {
   rejectActive = null;
 }
 
+/** Return only allowlisted models whose complete manifest still exists in browser cache. */
 export async function getDownloadedModels() {
   if (typeof caches === 'undefined') return [];
   const manifests = await caches.open(MODEL_MANIFEST_CACHE);
@@ -72,6 +76,7 @@ export async function getDownloadedModels() {
   return downloaded;
 }
 
+/** Download an allowlisted speech model and verify it is usable from the local cache. */
 export function downloadModel(id, onProgress) {
   assertModel(id);
   return serial(async () => {
@@ -81,6 +86,7 @@ export function downloadModel(id, onProgress) {
   });
 }
 
+/** Remove a model's manifest and files while preserving files shared with other models. */
 export function removeModel(id) {
   assertModel(id);
   cancelInference();
@@ -95,6 +101,7 @@ export function removeModel(id) {
   });
 }
 
+/** Decode recording audio and resample it to the speech worker's 16 kHz input. */
 async function decodeAudio(blob) {
   if (!blob.size) throw new Error('There is no audio to transcribe. Record or import some audio first.');
   if (blob.size > 512 * 1024 * 1024) throw new Error('This audio exceeds the browser processing limit of 512 MB. Split it into smaller recordings.');
@@ -112,6 +119,7 @@ async function decodeAudio(blob) {
   } finally { await context.close(); }
 }
 
+/** Run local speech inference on decoded audio using the selected supported model. */
 export function transcribeAudio(blob, modelId, onProgress) {
   assertModel(modelId);
   const token = generation;
@@ -143,6 +151,7 @@ export function applyVocabulary(text, entries) {
   return text.replace(pattern, match => aliases.get(match.toLocaleLowerCase()) || match);
 }
 
+/** Call the local API and preserve actionable JSON or HTTP status errors. */
 async function requestJson(path, method = 'GET', body) {
   const response = await fetch(`/api${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   const data = await response.json().catch(() => null);
@@ -151,6 +160,7 @@ async function requestJson(path, method = 'GET', body) {
 }
 const report = (modelId, meetingId) => detail => window.dispatchEvent(new CustomEvent('echo-model-progress', { detail: { ...detail, modelId, ...(meetingId ? { meetingId } : {}) } }));
 
+/** Transcribe a saved audio track and append a new version with a vocabulary snapshot. */
 export async function transcribeMeeting(meetingId, modelId, trackId) {
   if (processingMeetings.has(meetingId)) throw new Error('This meeting is already being transcribed.');
   processingMeetings.add(meetingId);

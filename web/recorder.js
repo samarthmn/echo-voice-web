@@ -5,16 +5,19 @@ export function createRecorderController({ request = localRequest } = {}) {
   let starting = false;
   let disposed = false;
 
+  /** Merge recorder state and notify UI subscribers. */
   function update(changes) {
     if (disposed || !Object.keys(changes).some((key) => state[key] !== changes[key])) return;
     state = { ...state, ...changes };
     window.dispatchEvent(new CustomEvent('echo-recorder-state', { detail: { ...state } }));
   }
 
+  /** Read the monotonic recording duration while excluding paused intervals. */
   function elapsed(s) {
     return Math.max(0, (s.activeMs + (s.activeSince === null ? 0 : performance.now() - s.activeSince)) / 1000);
   }
 
+  /** Snapshot elapsed time before pausing or stopping capture. */
   function freezeClock(s) {
     if (s.activeSince !== null) {
       s.activeMs += performance.now() - s.activeSince;
@@ -22,6 +25,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Record a completed mute interval on the meeting timeline. */
   function closeMuteGap(s) {
     if (s.muteStart !== null) {
       const end = elapsed(s);
@@ -30,6 +34,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Stop media tracks and release timers and browser audio resources for a session. */
   function release(s) {
     clearInterval(s.clock);
     cancelAnimationFrame(s.frame);
@@ -41,6 +46,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     update({ level: 0 });
   }
 
+  /** Publish microphone levels while capture remains active. */
   function startMeter(s) {
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -71,6 +77,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Send one chunk with stable track and sequence identity so retries cannot duplicate audio. */
   async function upload(s, chunk) {
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -93,6 +100,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     throw lastError || new Error('Audio could not be saved to your local server.');
   }
 
+  /** Serialize queued audio uploads and retain failed chunks for an explicit retry. */
   function drain(s) {
     if (s.draining) return s.draining;
     if (s.uploadError) return Promise.reject(s.uploadError);
@@ -116,6 +124,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     return s.draining;
   }
 
+  /** Wait for the recorder's final data event before declaring capture complete. */
   async function awaitCaptureStopped(s) {
     if (s.stopEventReceived) return;
     let timer;
@@ -131,6 +140,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Save final recording metadata only after all queued audio has been uploaded. */
   function finalize(s) {
     if (s.saved) return Promise.resolve(s.saved);
     if (s.finalizing) return s.finalizing;
@@ -170,6 +180,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     return s.finalizing;
   }
 
+  /** Request microphone access and start a consent-checked meeting recording. */
   async function start({ meeting, deviceId, startMuted = false, onSaved } = {}) {
     if (disposed) throw new Error('The recorder has been disposed.');
     if (starting || (session && !session.saved)) throw new Error('Save the current recording before starting another one.');
@@ -265,6 +276,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Pause capture and freeze elapsed time without discarding saved or queued chunks. */
   function pause() {
     const s = session;
     if (!s || s.stopping || s.recorder.state !== 'recording') return;
@@ -279,6 +291,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Resume capture with a fresh monotonic clock segment. */
   function resume() {
     const s = session;
     if (!s || s.stopping || s.recorder.state !== 'paused') return;
@@ -293,6 +306,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Change microphone transmission and preserve the muted interval for review. */
   function toggleMute() {
     const s = session;
     if (!s || s.stopping || s.saved) return;
@@ -303,11 +317,13 @@ export function createRecorderController({ request = localRequest } = {}) {
     update({ muted: s.muted, ...(s.muted ? { level: 0 } : {}) });
   }
 
+  /** Request final capture data and finish after pending audio uploads settle. */
   function stop() {
     if (!session) return Promise.reject(new Error(starting ? 'Wait for the microphone permission request to finish.' : 'There is no recording to save.'));
     return finalize(session);
   }
 
+  /** Resume failed chunk persistence without starting another microphone capture. */
   function retry() {
     if (!session) return Promise.reject(new Error('There is no retained recording to retry.'));
     if (session.finalizing) return session.finalizing;
@@ -315,6 +331,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     return finalize(session);
   }
 
+  /** Warn while unsaved recorder work would be lost by leaving the page. */
   function beforeUnload(event) {
     if (starting || (session && !session.saved)) {
       event.preventDefault();
@@ -322,6 +339,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     }
   }
 
+  /** Release recorder resources when the controller is no longer used. */
   function dispose() {
     if (disposed) return;
     if (session && !session.saved) void finalize(session).catch(() => {});
@@ -334,6 +352,7 @@ export function createRecorderController({ request = localRequest } = {}) {
   return { get state() { return { ...state }; }, start, pause, resume, toggleMute, stop, retry, dispose };
 }
 
+/** Send recorder API requests and translate network or HTTP errors into actionable messages. */
 async function localRequest(path, init) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -354,8 +373,10 @@ async function localRequest(path, init) {
   }
 }
 
+/** Normalize thrown values into a readable recorder failure message. */
 function errorMessage(error) { return error?.message || String(error || 'An unexpected recording error occurred.'); }
 
+/** Translate browser microphone permission and device failures into setup guidance. */
 function microphoneError(error) {
   switch (error?.name) {
     case 'NotAllowedError': case 'SecurityError': return 'Microphone permission was denied. Allow microphone access in your browser’s site settings, then try again.';

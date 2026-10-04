@@ -13,37 +13,44 @@ pub struct ApiError {
     pub message: String,
 }
 impl ApiError {
+    /// Construct a public API error with a valid HTTP status.
     pub fn new(status: u16, message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             message: message.into(),
         }
     }
+    /// Describe invalid user input as HTTP 400.
     pub fn bad(message: impl Into<String>) -> Self {
         Self::new(400, message)
     }
+    /// Return the consistent deleted-meeting error without exposing storage details.
     pub fn not_found() -> Self {
         Self::new(404, "This meeting was deleted or could not be found.")
     }
 }
 impl std::fmt::Display for ApiError {
+    /// Render the public message when an API error is displayed or logged.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 impl std::error::Error for ApiError {}
 impl IntoResponse for ApiError {
+    /// Return API failures as a status and JSON error object.
     fn into_response(self) -> Response {
         (self.status, Json(json!({"error":self.message}))).into_response()
     }
 }
 impl From<std::io::Error> for ApiError {
+    /// Translate internal failures into user-facing errors while preserving diagnostics in the server log.
     fn from(e: std::io::Error) -> Self {
         eprintln!("[Echo Voice storage] {e}");
         match e.kind() { std::io::ErrorKind::PermissionDenied=>Self::new(500,"Cannot write to the local data folder. Check its permissions and restart Echo Voice."), _ if e.raw_os_error()==Some(28)=>Self::new(507,"Your local disk is full. Free some space and retry; saved recordings remain available."), _=>Self::new(500,"A local file could not be accessed. Check the server terminal and restore missing audio from a backup if needed.") }
     }
 }
 impl From<rusqlite::Error> for ApiError {
+    /// Translate internal failures into user-facing errors while preserving diagnostics in the server log.
     fn from(e: rusqlite::Error) -> Self {
         eprintln!("[Echo Voice database] {e}");
         if let rusqlite::Error::SqliteFailure(code, _) = &e {
@@ -64,13 +71,14 @@ impl From<rusqlite::Error> for ApiError {
     }
 }
 impl From<serde_json::Error> for ApiError {
+    /// Report malformed JSON without exposing internal serialization details.
     fn from(_: serde_json::Error) -> Self {
         Self::bad("The request or saved data contains invalid JSON.")
     }
 }
 
 /// Protects reads from DNS rebinding and changes from hostile browser origins.
-/// ECHO_ALLOWED_ORIGIN is an explicit reverse-proxy opt-in; forwarded headers are never trusted.
+/// The listener is loopback-only; these checks additionally protect browser requests.
 pub async fn local_access(request: Request, next: Next) -> Response {
     let host = request
         .headers()
@@ -85,24 +93,14 @@ pub async fn local_access(request: Request, next: Next) -> Response {
         .headers()
         .get("sec-fetch-site")
         .and_then(|v| v.to_str().ok());
-    let configured = std::env::var("ECHO_ALLOWED_ORIGIN").ok();
     let local_host = host == "localhost"
         || host.starts_with("localhost:")
         || host == "127.0.0.1"
         || host.starts_with("127.0.0.1:")
         || host == "[::1]"
         || host.starts_with("[::1]:");
-    let proxy_host = configured
-        .as_deref()
-        .and_then(|s| s.split_once("://").map(|(_, s)| s))
-        .map(|s| s == host)
-        .unwrap_or(false);
     let same_origin = origin
-        .map(|o| {
-            o == format!("http://{host}")
-                || o == format!("https://{host}")
-                || configured.as_deref() == Some(o)
-        })
+        .map(|o| o == format!("http://{host}") || o == format!("https://{host}"))
         .unwrap_or(true);
     // Both public OAuth endpoints can be top-level cross-site navigations.
     // The connect route may normalize 127.0.0.1 to localhost for its callback cookie;
@@ -124,10 +122,7 @@ pub async fn local_access(request: Request, next: Next) -> Response {
             .get("sec-fetch-dest")
             .and_then(|v| v.to_str().ok())
             == Some("document");
-    if (!local_host && !proxy_host)
-        || !same_origin
-        || (fetch_site == Some("cross-site") && !oauth_navigation)
-    {
+    if !local_host || !same_origin || (fetch_site == Some("cross-site") && !oauth_navigation) {
         return ApiError::new(403,"Access from another website is blocked. Open Echo Voice directly at its local address.").into_response();
     }
     let mut response = next.run(request).await;

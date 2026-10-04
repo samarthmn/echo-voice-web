@@ -24,10 +24,16 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Keep verification scratch in the checkout
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tmp"
+          printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+
       - name: Set up Rust and WebAssembly target
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
 
       - name: Cache Rust dependencies and build output
         uses: Swatinem/rust-cache@v2
@@ -56,6 +62,14 @@ jobs:
 
       - name: Test Rust server
         run: cargo test --locked -p echo-server
+
+      - name: Check Rust formatting and server lint
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked -p echo-server --all-targets -- -D warnings
+
+      - name: Validate managed config with the real pinned Codex helper
+        run: node scripts/smoke-codex.mjs
 
       - name: Test browser modules and REST lifecycle
         run: npm test

@@ -16,12 +16,14 @@ use std::{
     time::Duration,
 };
 
+/// Register local model operations and evidence-linked notes generation.
 pub fn routes() -> Router {
     Router::new()
         .route("/notes", get(status).post(generate))
         .route("/notes/models", post(pull).delete(remove))
 }
 
+/// Accept only credential-free HTTP loopback destinations for local inference.
 pub fn local_provider_url(value: &str) -> Result<String, ApiError> {
     let mut url = url::Url::parse(value)
         .map_err(|_| ApiError::bad("Enter a local Ollama URL, such as http://127.0.0.1:11434."))?;
@@ -42,6 +44,7 @@ pub fn local_provider_url(value: &str) -> Result<String, ApiError> {
     Ok(url.origin().ascii_serialization())
 }
 
+/// Reject malformed local model names before interpolating them into provider requests.
 fn validate_model(model: &str) -> Result<&str, ApiError> {
     if model.is_empty()
         || model.len() > 120
@@ -59,6 +62,7 @@ fn validate_model(model: &str) -> Result<&str, ApiError> {
     Ok(model)
 }
 
+/// Create a direct bounded inference client without automatic redirects or system proxies.
 fn client(timeout: u64) -> Result<reqwest::Client, ApiError> {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -69,6 +73,7 @@ fn client(timeout: u64) -> Result<reqwest::Client, ApiError> {
         .map_err(|_| ApiError::new(500, "The local inference client could not start."))
 }
 
+/// Translate local-provider connection failures into concise setup or timeout guidance.
 fn provider_error(error: reqwest::Error) -> ApiError {
     if error.is_timeout() {
         ApiError::new(504, "The local notes model took too long to respond. Try a smaller model. Previous notes are unchanged.")
@@ -77,6 +82,7 @@ fn provider_error(error: reqwest::Error) -> ApiError {
     }
 }
 
+/// Require a successful provider response before consuming its body.
 async fn checked(request: reqwest::RequestBuilder) -> Result<reqwest::Response, ApiError> {
     let response = request.send().await.map_err(provider_error)?;
     if !response.status().is_success() {
@@ -90,6 +96,7 @@ async fn checked(request: reqwest::RequestBuilder) -> Result<reqwest::Response, 
     Ok(response)
 }
 
+/// Decode provider JSON while enforcing the maximum response size.
 async fn bounded_json(response: reqwest::Response) -> Result<Value, ApiError> {
     let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();
@@ -111,6 +118,7 @@ async fn bounded_json(response: reqwest::Response) -> Result<Value, ApiError> {
     })
 }
 
+/// Resolve the validated local inference destination from workspace preferences.
 fn settings_url() -> Result<String, ApiError> {
     let settings = store::get_settings()?;
     local_provider_url(
@@ -120,6 +128,7 @@ fn settings_url() -> Result<String, ApiError> {
     )
 }
 
+/// Fetch and normalize available local model names.
 async fn model_list(base: &str) -> Result<Vec<String>, ApiError> {
     let value = bounded_json(checked(client(5)?.get(format!("{base}/api/tags"))).await?).await?;
     let models = value["models"].as_array().ok_or_else(|| {
@@ -141,6 +150,7 @@ async fn model_list(base: &str) -> Result<Vec<String>, ApiError> {
         .collect()
 }
 
+/// Report local inference availability without treating an offline optional provider as a server failure.
 async fn status() -> Json<Value> {
     let result = async { model_list(&settings_url()?).await }.await;
     match result {
@@ -156,6 +166,7 @@ enum NotesProvider {
     Chatgpt,
 }
 impl NotesProvider {
+    /// Resolve the requested notes provider from validated workspace preferences.
     fn from_settings(settings: &Value) -> Result<Self, ApiError> {
         match settings["notesProvider"].as_str().unwrap_or("ollama") {
             "ollama" => Ok(Self::Ollama),
@@ -165,6 +176,7 @@ impl NotesProvider {
             )),
         }
     }
+    /// Return the persisted provider identifier for notes provenance.
     fn name(self) -> &'static str {
         match self {
             Self::Ollama => "ollama",
@@ -181,6 +193,7 @@ struct GenerateRequest {
     #[serde(default)]
     cloud_consent: bool,
 }
+/// Reject cloud generation before account or transcript access unless consent is explicit.
 fn require_cloud_consent(provider: NotesProvider, consent: bool) -> Result<(), ApiError> {
     if provider == NotesProvider::Chatgpt && !consent {
         return Err(ApiError::new(403,"Confirm that this transcript may be sent to OpenAI through your connected ChatGPT account before generating notes. No transcript was sent."));
@@ -196,6 +209,7 @@ struct ModelRequest {
 static RUNNING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 struct RunningGuard(String);
 impl RunningGuard {
+    /// Reserve one meeting's notes job so competing generations cannot overwrite each other.
     fn acquire(id: String) -> Result<Self, ApiError> {
         let mut jobs = RUNNING
             .get_or_init(|| Mutex::new(HashSet::new()))
@@ -216,6 +230,7 @@ impl RunningGuard {
     }
 }
 impl Drop for RunningGuard {
+    /// Release a meeting's generation reservation when its job completes or fails.
     fn drop(&mut self) {
         if let Some(jobs) = RUNNING.get() {
             if let Ok(mut jobs) = jobs.lock() {
@@ -250,6 +265,7 @@ struct GeneratedNotes {
     actions: Vec<Evidence>,
 }
 
+/// Decode structured notes and reject evidence IDs absent from the source transcript.
 fn parse_evidence(content: &str, passages: &[Passage]) -> Result<Value, ApiError> {
     let notes: GeneratedNotes = serde_json::from_str(content).map_err(|_| ApiError::new(502, "The notes provider did not return valid structured notes with evidence. Try again; previous notes are unchanged."))?;
     let allowed: HashSet<_> = passages.iter().map(|p| p.id.as_str()).collect();
@@ -314,6 +330,7 @@ fn chunk_passages(passages: &[Passage], budget: usize) -> Vec<Vec<Passage>> {
     chunks
 }
 
+/// Define the strict evidence-linked notes shape required from cloud inference.
 fn output_schema() -> Value {
     // OpenAI strict structured output requires every property in `required`;
     // nullable owner/date still let both providers represent absent evidence.
@@ -328,6 +345,7 @@ const MAX_CLOUD_CHUNKS: usize = 32;
 const MAX_LOCAL_TEXT_BYTES: usize = 1_600_000;
 const MAX_LOCAL_CHUNKS: usize = 256;
 
+/// Validate transcript bounds and construct prompts for the chosen provider.
 fn generation_chunks(
     passages: &[Passage],
     provider: NotesProvider,
@@ -376,12 +394,14 @@ struct UsageTotals {
     chunks: usize,
 }
 impl UsageTotals {
+    /// Initialize usage aggregation with unknown totals until actual counts arrive.
     fn new() -> Self {
         Self {
             values: [Some(0); 3],
             chunks: 0,
         }
     }
+    /// Accumulate known token counts while preserving uncertainty in missing usage fields.
     fn add(&mut self, usage: &Value) -> Result<(), ApiError> {
         for (index, key) in USAGE_KEYS.iter().enumerate() {
             self.values[index]=match (self.values[index],usage[*key].as_u64()) {
@@ -392,6 +412,7 @@ impl UsageTotals {
         self.chunks += 1;
         Ok(())
     }
+    /// Return only usage totals supported by every completed generation chunk.
     fn value(&self) -> Value {
         let mut result = json!({});
         if self.chunks > 0 {
@@ -404,6 +425,7 @@ impl UsageTotals {
         result
     }
 }
+/// Validate bounded printable catalog IDs before sending them to the helper.
 fn validate_chatgpt_model(model: &str) -> Result<&str, ApiError> {
     if model.is_empty()
         || model.len() > 200
@@ -420,6 +442,7 @@ fn validate_chatgpt_model(model: &str) -> Result<&str, ApiError> {
     }
     Ok(model)
 }
+/// Prevent saving notes against a transcript version changed during generation.
 fn source_unchanged(meeting_id: &str, transcript_id: &str) -> Result<(), ApiError> {
     let current = store::get_meeting(meeting_id)?.ok_or_else(ApiError::not_found)?;
     if current["activeTranscriptId"].as_str() != Some(transcript_id) {
@@ -427,6 +450,7 @@ fn source_unchanged(meeting_id: &str, transcript_id: &str) -> Result<(), ApiErro
     }
     Ok(())
 }
+/// Combine chunk results while preserving distinct evidence and action owners.
 fn merge_evidence(result: &mut Value, notes: Value) {
     for key in ["summary", "decisions", "actions"] {
         let target = result[key].as_array_mut().expect("generated note arrays");
@@ -458,6 +482,7 @@ fn merge_evidence(result: &mut Value, notes: Value) {
     }
 }
 
+/// Generate consent-gated notes, validate provenance, and save only a complete successful result.
 async fn generate(Json(input): Json<GenerateRequest>) -> Result<Json<Value>, ApiError> {
     // An explicitly selected cloud provider must fail before even accessing local
     // workspace state, let alone starting the managed app-server or a network call.
@@ -601,6 +626,7 @@ async fn generate(Json(input): Json<GenerateRequest>) -> Result<Json<Value>, Api
     )?))
 }
 
+/// Stream bounded local model-download progress back to the browser.
 async fn pull(Json(input): Json<ModelRequest>) -> Result<Response, ApiError> {
     validate_model(&input.model)?;
     let upstream = checked(
@@ -623,6 +649,7 @@ async fn pull(Json(input): Json<ModelRequest>) -> Result<Response, ApiError> {
     Ok(response)
 }
 
+/// Delete a validated local model through the configured inference service.
 async fn remove(Json(input): Json<ModelRequest>) -> Result<Json<Value>, ApiError> {
     validate_model(&input.model)?;
     checked(
@@ -637,6 +664,7 @@ async fn remove(Json(input): Json<ModelRequest>) -> Result<Json<Value>, ApiError
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Construct a transcript passage fixture for evidence and prompt-boundary tests.
     fn passage(id: &str, text: &str) -> Passage {
         Passage {
             id: id.into(),

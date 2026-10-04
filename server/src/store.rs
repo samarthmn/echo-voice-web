@@ -17,22 +17,22 @@ static DATABASE: OnceLock<Mutex<Option<Connection>>> = OnceLock::new();
 static WORKSPACE_LOCK: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();
 const MAX_AUDIO: usize = 128 * 1024 * 1024;
 const MAX_BACKUP: usize = 180 * 1024 * 1024;
+/// Return a UTC timestamp with millisecond precision for persisted records.
 fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
+/// Generate an independent identifier for a new workspace entity.
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
+/// Resolve the library location from a developer override or shared runtime config.
 pub fn data_dir() -> PathBuf {
     std::env::var_os("ECHO_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join(".echo-data")
-        })
+        .unwrap_or_else(|| crate::config::get().data_dir.clone())
 }
 #[cfg(unix)]
+/// Restrict managed data to the current account on Unix; other platforms use inherited ACLs.
 fn secure(path: &Path, directory: bool) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(
@@ -42,13 +42,16 @@ fn secure(path: &Path, directory: bool) -> Result<()> {
     Ok(())
 }
 #[cfg(not(unix))]
+/// Restrict managed data to the current account on Unix; other platforms use inherited ACLs.
 fn secure(_: &Path, _: bool) -> Result<()> {
     Ok(())
 }
+/// Create a managed folder and apply private directory permissions.
 fn mkdir(path: &Path) -> Result<()> {
     fs::create_dir_all(path)?;
     secure(path, true)
 }
+/// Write a new private file without replacing an existing recording chunk.
 fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     use std::io::Write;
     let mut options = fs::OpenOptions::new();
@@ -63,6 +66,7 @@ fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     file.sync_all()?;
     Ok(())
 }
+/// Serialize database access, acquire the workspace lock, and initialize schema and recovery lazily.
 fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
     let mut guard = DATABASE
         .get_or_init(|| Mutex::new(None))
@@ -112,9 +116,11 @@ fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
     }
     f(guard.as_mut().unwrap())
 }
+/// Open the library and complete startup recovery before accepting requests.
 pub fn init() -> Result<()> {
     with_db(|_| Ok(()))
 }
+/// Resume durable deletion jobs and mark unfinished recording or processing work as interrupted.
 fn recover(db: &mut Connection) -> Result<()> {
     let pending = {
         let mut stmt = db.prepare("SELECT id FROM deletion_jobs")?;
@@ -171,6 +177,7 @@ fn recover(db: &mut Connection) -> Result<()> {
     tx.commit()?;
     Ok(())
 }
+/// Reject identifiers that could escape managed paths or exceed supported lengths.
 fn valid_id(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 100
@@ -182,6 +189,7 @@ fn valid_id(value: &str) -> Result<()> {
     }
     Ok(())
 }
+/// Require a JSON object whose keys belong to the endpoint's explicit allowlist.
 fn object<'a>(v: &'a Value, allowed: &[&str]) -> Result<&'a serde_json::Map<String, Value>> {
     let obj = v
         .as_object()
@@ -191,6 +199,7 @@ fn object<'a>(v: &'a Value, allowed: &[&str]) -> Result<&'a serde_json::Map<Stri
     }
     Ok(obj)
 }
+/// Validate optional or required text fields without silently coercing JSON types.
 fn string<'a>(v: &'a Value, key: &str, max: usize, required: bool) -> Result<Option<&'a str>> {
     match v.get(key) {
         None if !required => Ok(None),
@@ -203,6 +212,7 @@ fn string<'a>(v: &'a Value, key: &str, max: usize, required: bool) -> Result<Opt
         ))),
     }
 }
+/// Require finite nonnegative numeric values when a field is present.
 fn number(v: &Value, key: &str, required: bool) -> Result<Option<f64>> {
     match v.get(key) {
         None if !required => Ok(None),
@@ -218,6 +228,7 @@ fn number(v: &Value, key: &str, required: bool) -> Result<Option<f64>> {
         ))),
     }
 }
+/// Validate a boolean field, enforcing presence when requested.
 fn boolean(v: &Value, key: &str, required: bool) -> Result<Option<bool>> {
     match v.get(key) {
         None if !required => Ok(None),
@@ -225,6 +236,7 @@ fn boolean(v: &Value, key: &str, required: bool) -> Result<Option<bool>> {
         _ => Err(ApiError::bad(format!("'{key}' must be true or false."))),
     }
 }
+/// Validate a bounded array before iterating user-supplied records.
 fn arr<'a>(v: &'a Value, key: &str, max: usize) -> Result<&'a Vec<Value>> {
     let a = v
         .get(key)
@@ -237,18 +249,21 @@ fn arr<'a>(v: &'a Value, key: &str, max: usize) -> Result<&'a Vec<Value>> {
     }
     Ok(a)
 }
+/// Check an optional entity reference with the same rules as stored identifiers.
 fn identifier(v: &Value, key: &str, required: bool) -> Result<()> {
     if let Some(id) = string(v, key, 100, required)? {
         valid_id(id)?;
     }
     Ok(())
 }
+/// Require a parseable RFC 3339 timestamp for portable records.
 fn timestamp(v: &Value, key: &str) -> Result<()> {
     let s = string(v, key, 100, true)?.unwrap();
     chrono::DateTime::parse_from_rfc3339(s)
         .map_err(|_| ApiError::bad(format!("'{key}' must be an ISO date.")))?;
     Ok(())
 }
+/// Reject duplicate entity IDs within a version or collection.
 fn unique(items: &[Value]) -> Result<()> {
     let mut ids = HashSet::new();
     for item in items {
@@ -259,6 +274,7 @@ fn unique(items: &[Value]) -> Result<()> {
     }
     Ok(())
 }
+/// Validate a term, its aliases, enabled flag, and optional persisted identity.
 fn validate_vocabulary(v: &Value, with_id: bool) -> Result<()> {
     object(
         v,
@@ -286,6 +302,7 @@ fn validate_vocabulary(v: &Value, with_id: bool) -> Result<()> {
     }
     Ok(())
 }
+/// Check transcript text, speaker, timestamps, and passage identity.
 fn validate_passage(v: &Value) -> Result<()> {
     object(v, &["id", "start", "end", "text", "speaker", "uncertain"])?;
     identifier(v, "id", true)?;
@@ -305,6 +322,7 @@ fn validate_passage(v: &Value) -> Result<()> {
     boolean(v, "uncertain", false)?;
     Ok(())
 }
+/// Validate a transcript version and its bounded, unique passage collection.
 fn validate_transcript(v: &Value, with_id: bool) -> Result<()> {
     object(
         v,
@@ -337,6 +355,7 @@ fn validate_transcript(v: &Value, with_id: bool) -> Result<()> {
     }
     Ok(())
 }
+/// Accept only providers whose provenance the workspace understands.
 fn validate_notes_provider(provider: &str) -> Result<()> {
     if !matches!(provider, "ollama" | "chatgpt") {
         return Err(ApiError::bad(
@@ -345,6 +364,7 @@ fn validate_notes_provider(provider: &str) -> Result<()> {
     }
     Ok(())
 }
+/// Check optional token counts without accepting invented or malformed usage metadata.
 fn validate_note_usage(usage: &Value) -> Result<()> {
     let values = object(usage, &["inputTokens", "outputTokens", "cachedInputTokens"])?;
     for value in values.values() {
@@ -370,6 +390,7 @@ fn validate_note_usage(usage: &Value) -> Result<()> {
     }
     Ok(())
 }
+/// Validate evidence-linked summary, decision, and action items before saving.
 fn validate_notes(v: &Value, with_id: bool) -> Result<()> {
     object(
         v,
@@ -431,6 +452,7 @@ fn validate_notes(v: &Value, with_id: bool) -> Result<()> {
     }
     Ok(())
 }
+/// Validate mute intervals so they remain ordered within the recording timeline.
 fn validate_gaps(v: &Value) -> Result<()> {
     for gap in arr(v, "gaps", 10000)? {
         object(gap, &["start", "end", "reason"])?;
@@ -441,6 +463,7 @@ fn validate_gaps(v: &Value) -> Result<()> {
     }
     Ok(())
 }
+/// Validate a bookmark label, timestamp, and optional transcript passage reference.
 fn validate_moment(v: &Value, with_id: bool) -> Result<()> {
     object(
         v,
@@ -464,6 +487,7 @@ fn validate_moment(v: &Value, with_id: bool) -> Result<()> {
     }
     Ok(())
 }
+/// Reject meeting states outside the supported recording and processing lifecycle.
 fn status(v: &Value) -> Result<()> {
     if !matches!(
         v.as_str(),
@@ -473,6 +497,7 @@ fn status(v: &Value) -> Result<()> {
     }
     Ok(())
 }
+/// Ensure active versions, evidence links, and bookmarks reference entities in this meeting.
 fn validate_references(m: &Value) -> Result<()> {
     let transcripts = arr(m, "transcripts", 1000)?;
     let notes = arr(m, "notes", 1000)?;
@@ -527,6 +552,7 @@ fn validate_references(m: &Value) -> Result<()> {
     }
     Ok(())
 }
+/// Accept safe HTTP meeting links without embedded credentials or control characters.
 fn validate_meeting_url(raw: &str) -> Result<()> {
     let parsed =
         reqwest::Url::parse(raw).map_err(|_| ApiError::bad("Use a valid HTTPS meeting link."))?;
@@ -542,6 +568,7 @@ fn validate_meeting_url(raw: &str) -> Result<()> {
     }
     Ok(())
 }
+/// Validate the complete portable meeting document, including its history and references.
 fn validate_meeting(m: &Value) -> Result<()> {
     object(
         m,
@@ -630,6 +657,7 @@ fn validate_meeting(m: &Value) -> Result<()> {
     validate_gaps(m)?;
     validate_references(m)
 }
+/// Read and decode one meeting without treating a missing record as a storage failure.
 fn read_meeting(db: &Connection, key: &str) -> Result<Option<Value>> {
     valid_id(key)?;
     let source: Option<String> = db
@@ -639,9 +667,11 @@ fn read_meeting(db: &Connection, key: &str) -> Result<Option<Value>> {
         .map(|s| serde_json::from_str(&s).map_err(ApiError::from))
         .transpose()
 }
+/// Return one meeting or the user-facing deleted-meeting error.
 fn require_meeting(db: &Connection, key: &str) -> Result<Value> {
     read_meeting(db, key)?.ok_or_else(ApiError::not_found)
 }
+/// Update a meeting's modification timestamp and write its JSON within the caller's transaction.
 fn save(db: &Connection, m: &mut Value) -> Result<()> {
     m["updatedAt"] = json!(now());
     db.execute(
@@ -650,6 +680,7 @@ fn save(db: &Connection, m: &mut Value) -> Result<()> {
     )?;
     Ok(())
 }
+/// Decode meeting records in recency order using the supplied database connection.
 fn list_db(db: &Connection) -> Result<Vec<Value>> {
     let mut stmt = db.prepare("SELECT data FROM meetings")?;
     let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
@@ -669,15 +700,19 @@ fn list_db(db: &Connection) -> Result<Vec<Value>> {
     });
     Ok(meetings)
 }
+/// Return the saved library through serialized database access.
 pub fn list_meetings() -> Result<Vec<Value>> {
     with_db(|db| list_db(db))
 }
+/// Validate the meeting ID and return its current persisted document if present.
 pub fn get_meeting(key: &str) -> Result<Option<Value>> {
     with_db(|db| read_meeting(db, key))
 }
+/// Define initial workspace preferences for local speech and notes processing.
 fn defaults() -> Value {
     json!({"name":"","speechModel":"onnx-community/whisper-tiny.en","notesModel":"qwen2.5:3b","notesProvider":"ollama","chatgptModel":"","ollamaUrl":"http://127.0.0.1:11434","language":"en","autoTranscribe":true,"retainAudio":true,"onboardingComplete":false})
 }
+/// Merge saved preferences with current defaults and migrate legacy provider settings.
 fn normalized_settings(saved: Value) -> Result<Value> {
     validate_settings(&saved, false)?;
     let mut settings = defaults();
@@ -687,6 +722,7 @@ fn normalized_settings(saved: Value) -> Result<Value> {
     validate_settings(&settings, true)?;
     Ok(settings)
 }
+/// Read normalized preferences using an existing database transaction.
 fn settings_db(db: &Connection) -> Result<Value> {
     let source: Option<String> = db
         .query_row(
@@ -700,9 +736,11 @@ fn settings_db(db: &Connection) -> Result<Value> {
         None => json!({}),
     })
 }
+/// Return current workspace preferences with migrations applied.
 pub fn get_settings() -> Result<Value> {
     with_db(|db| settings_db(db))
 }
+/// Validate creation input and persist a meeting with empty version and audio histories.
 pub fn create_meeting(input: Value) -> Result<Value> {
     object(
         &input,
@@ -767,6 +805,7 @@ pub fn create_meeting(input: Value) -> Result<Value> {
         Ok(m)
     })
 }
+/// Apply an allowlisted patch atomically while preserving consent and reference invariants.
 pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
     object(
         &patch,
@@ -834,11 +873,19 @@ pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
         Ok(m)
     })
 }
+/// Reject active recording work, then durably delete the meeting and its managed audio copies.
 pub fn delete_meeting(key: &str) -> Result<()> {
     valid_id(key)?;
     with_db(|db| {
         let tx = db.transaction()?;
         let meeting = require_meeting(&tx, key)?;
+        if data_dir()
+            .join("bot-starts")
+            .join(format!("{key}.json"))
+            .exists()
+        {
+            return Err(ApiError::new(409, "A recording start is still being reconciled. Stop the meeting assistant before deleting this meeting."));
+        }
         let session_file = data_dir().join("bot").join(key).join("session.json");
         if session_file.exists() {
             let session: Value = serde_json::from_slice(&fs::read(session_file)?)?;
@@ -886,14 +933,17 @@ pub fn delete_meeting(key: &str) -> Result<()> {
         Ok(())
     })
 }
+/// Read saved vocabulary in display order using an existing database connection.
 fn vocabulary_db(db: &Connection) -> Result<Vec<Value>> {
     let mut stmt = db.prepare("SELECT data FROM vocabulary ORDER BY rowid")?;
     let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
     rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
 }
+/// Return the shared vocabulary used during local transcription.
 pub fn list_vocabulary() -> Result<Vec<Value>> {
     with_db(|db| vocabulary_db(db))
 }
+/// Append a validated transcript version with the vocabulary snapshot that produced it.
 pub fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
     object(&input, &["model", "passages", "vocabulary", "label"])?;
     with_db(|db| {
@@ -924,6 +974,7 @@ pub fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
         Ok(m)
     })
 }
+/// Append manually supplied notes after validating their evidence against a transcript version.
 pub fn add_notes(key: &str, input: Value) -> Result<Value> {
     add_notes_checked(key, input, None)
 }
@@ -932,6 +983,7 @@ pub fn add_notes(key: &str, input: Value) -> Result<Value> {
 pub fn add_generated_notes(key: &str, input: Value, expected_transcript: &str) -> Result<Value> {
     add_notes_checked(key, input, Some(expected_transcript))
 }
+/// Validate note provenance and evidence, then update the active notes version atomically.
 fn add_notes_checked(
     key: &str,
     mut input: Value,
@@ -983,6 +1035,7 @@ fn add_notes_checked(
         Ok(m)
     })
 }
+/// Create a timestamped bookmark with an optional validated passage reference.
 pub fn add_moment(key: &str, mut input: Value) -> Result<Value> {
     validate_moment(&input, false)?;
     with_db(|db| {
@@ -999,6 +1052,7 @@ pub fn add_moment(key: &str, mut input: Value) -> Result<Value> {
         Ok(m)
     })
 }
+/// Apply an allowlisted bookmark patch without losing its stable identity.
 pub fn update_moment(key: &str, moment_id: &str, patch: Value) -> Result<Value> {
     valid_id(moment_id)?;
     object(&patch, &["time", "label", "passageId", "kind"])?;
@@ -1021,6 +1075,7 @@ pub fn update_moment(key: &str, moment_id: &str, patch: Value) -> Result<Value> 
         Ok(m)
     })
 }
+/// Remove one bookmark while preserving recording and transcript history.
 pub fn delete_moment(key: &str, moment_id: &str) -> Result<Value> {
     valid_id(moment_id)?;
     with_db(|db| {
@@ -1037,6 +1092,7 @@ pub fn delete_moment(key: &str, moment_id: &str) -> Result<Value> {
         Ok(m)
     })
 }
+/// Validate preference fields and enforce local provider URLs and supported provider choices.
 fn validate_settings(v: &Value, full: bool) -> Result<()> {
     object(
         v,
@@ -1099,6 +1155,7 @@ fn validate_settings(v: &Value, full: bool) -> Result<()> {
     }
     Ok(())
 }
+/// Merge an allowlisted preference patch and persist the validated result.
 pub fn update_settings(patch: Value) -> Result<Value> {
     validate_settings(&patch, false)?;
     with_db(|db| {
@@ -1111,6 +1168,7 @@ pub fn update_settings(patch: Value) -> Result<Value> {
         Ok(settings)
     })
 }
+/// Create a validated term and aliases with a stable identity.
 pub fn add_vocabulary(mut input: Value) -> Result<Value> {
     object(&input, &["term", "aliases", "enabled"])?;
     if input.get("aliases").is_none() {
@@ -1135,6 +1193,7 @@ pub fn add_vocabulary(mut input: Value) -> Result<Value> {
         Ok(input)
     })
 }
+/// Apply a validated vocabulary patch to an existing term.
 pub fn update_vocabulary(key: &str, patch: Value) -> Result<Value> {
     valid_id(key)?;
     object(&patch, &["term", "aliases", "enabled"])?;
@@ -1159,6 +1218,7 @@ pub fn update_vocabulary(key: &str, patch: Value) -> Result<Value> {
         Ok(entry)
     })
 }
+/// Remove a term without altering the snapshots attached to saved transcripts.
 pub fn delete_vocabulary(key: &str) -> Result<()> {
     valid_id(key)?;
     with_db(|db| {
@@ -1171,6 +1231,7 @@ pub fn delete_vocabulary(key: &str) -> Result<()> {
         Ok(())
     })
 }
+/// Canonicalize supported audio MIME types and reject unknown containers.
 fn audio_type(value: &str) -> Result<String> {
     let base = value.split(';').next().unwrap_or("").trim().to_lowercase();
     if ![
@@ -1195,6 +1256,7 @@ fn audio_type(value: &str) -> Result<String> {
     }
     Ok(base)
 }
+/// Check container signatures before accepting bytes as the declared audio type.
 fn audio_header(data: &[u8], mime: &str) -> Result<()> {
     let valid = if mime.contains("webm") {
         data.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
@@ -1216,9 +1278,11 @@ fn audio_header(data: &[u8], mime: &str) -> Result<()> {
     }
     Ok(())
 }
+/// Construct a same-origin playback path for a meeting's managed track.
 fn audio_url(meeting: &str, track: &str) -> String {
     format!("/api/meetings/{meeting}/audio/{track}")
 }
+/// Append a durable audio chunk; identical sequence/hash retries do not duplicate bytes.
 pub fn add_audio(
     key: &str,
     data: &[u8],
@@ -1349,6 +1413,7 @@ pub struct AudioPart {
     pub path: PathBuf,
     pub bytes: u64,
 }
+/// Resolve ordered track chunks and verify their managed files for streaming playback.
 pub fn get_audio_parts(key: &str, track_id: &str) -> Result<(Value, Vec<AudioPart>)> {
     valid_id(track_id)?;
     with_db(|db| {
@@ -1388,6 +1453,7 @@ pub fn get_audio_parts(key: &str, track_id: &str) -> Result<(Value, Vec<AudioPar
         Ok((track, parts))
     })
 }
+/// Measure managed disk usage recursively without following symbolic links.
 fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
     let mut bytes = 0;
     for item in fs::read_dir(dir)? {
@@ -1401,6 +1467,7 @@ fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
     }
     Ok(bytes)
 }
+/// Summarize meeting counts and library disk usage for storage settings.
 pub fn storage_info() -> Result<Value> {
     init()?;
     let root = data_dir();
@@ -1411,6 +1478,7 @@ pub fn storage_info() -> Result<Value> {
     )
 }
 
+/// Build a portable backup of meeting data and audio while excluding account credentials.
 pub fn export_library() -> Result<Value> {
     with_db(|db| {
         let meetings = list_db(db)?;
@@ -1467,6 +1535,7 @@ struct PreparedChunk {
     filename: String,
     data: Vec<u8>,
 }
+/// Validate a complete backup before transactionally importing its records and audio.
 pub fn import_library(input: Value) -> Result<Value> {
     object(
         &input,
@@ -1684,6 +1753,7 @@ pub fn import_library(input: Value) -> Result<Value> {
     let _ = fs::remove_dir_all(staging);
     outcome
 }
+/// Format transcript timestamps for subtitle or readable text exports.
 fn stamp(seconds: f64, srt: bool) -> String {
     let whole = seconds.floor() as u64;
     let base = format!(
@@ -1701,9 +1771,11 @@ fn stamp(seconds: f64, srt: bool) -> String {
         base
     }
 }
+/// Read a string from validated meeting JSON for export formatting.
 fn strv<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
+/// Render a saved meeting as a supported document or subtitle download.
 pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, String)> {
     let m = get_meeting(key)?.ok_or_else(ApiError::not_found)?;
     let name = m["title"]
@@ -2072,7 +2144,7 @@ mod tests {
         assert!(import_library(backup.clone()).is_err());
         update_meeting(key, json!({"status":"recording"})).unwrap();
         assert!(delete_meeting(key).is_err());
-        with_db(|db| recover(db)).unwrap();
+        with_db(recover).unwrap();
         let recovered = get_meeting(key).unwrap().unwrap();
         assert_eq!(recovered["status"], "interrupted");
         assert_eq!(recovered["transcripts"].as_array().unwrap().len(), 2);

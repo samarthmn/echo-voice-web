@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use serde_json::{json, Value};
 
 #[component]
+/// Manage optional account sign-in, model selection, and allowance visibility without API keys.
 pub fn ChatGptConnection(
     settings: Signal<Value>,
     on_change: EventHandler<Value>,
@@ -148,6 +149,7 @@ pub fn ChatGptConnection(
 }
 
 #[component]
+/// Display known allowance usage and reset information without fabricating missing counts.
 fn UsageWindow(label: String, window: Value) -> Element {
     let used = window["usedPercent"].as_f64();
     let minutes = window["windowDurationMins"].as_i64();

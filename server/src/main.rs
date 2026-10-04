@@ -1,5 +1,6 @@
 mod api;
 mod chatgpt;
+mod config;
 mod integrations;
 mod notes;
 mod security;
@@ -14,6 +15,7 @@ use tower_http::{
 };
 
 #[tokio::main]
+/// Initialize the local library and integrations, serve the workspace, and shut down the helper gracefully.
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
@@ -22,7 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| "echo_server=info,tower_http=info".into()),
         )
         .init();
+    let bind = config::loopback_bind(
+        &std::env::var("ECHO_BIND").unwrap_or_else(|_| config::get().bind.clone()),
+    )?;
     store::init()?;
+    config::runner_token(&store::data_dir())?;
+    integrations::recover_bot_starts().await;
     let router = Router::new()
         .nest(
             "/api",
@@ -58,8 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             header::REFERRER_POLICY,
             HeaderValue::from_static("no-referrer"),
         ));
-    let bind = std::env::var("ECHO_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
-    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!("Echo Voice is ready at http://{}", bind);
     axum::serve(listener, router)
         .with_graceful_shutdown(async {
