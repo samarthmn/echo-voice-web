@@ -1,0 +1,25 @@
+{
+  "name": "echo-voice-web-assets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:assets": "node scripts/build-assets.mjs",
+    "test": "node --test tests/inference.test.mjs tests/recorder.test.mjs tests/rest.test.mjs tests/chatgpt-protocol.test.mjs tests/bot-recovery.test.mjs",
+    "test:e2e": "node scripts/test-browser.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1"
+  },
+  "overrides": {
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.55.0",
+    "esbuild": "^0.25.0"
+  },
+  "optionalDependencies": {
+    "@openai/codex": "0.160.0"
+  }
+}

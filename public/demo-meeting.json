@@ -1,0 +1,141 @@
+{
+  "id": "example",
+  "title": "A calmer way to meet",
+  "mode": "in-person",
+  "status": "ready",
+  "createdAt": "2026-10-02T10:00:00Z",
+  "updatedAt": "2026-10-02T10:24:00Z",
+  "duration": 1450,
+  "consent": true,
+  "tracks": [],
+  "moments": [
+    {
+      "id": "moment-demo",
+      "time": 42,
+      "label": "Our north star",
+      "passageId": "p2",
+      "kind": "highlight"
+    }
+  ],
+  "gaps": [],
+  "speechModel": "Example transcript",
+  "notesModel": "Example notes",
+  "liveTranscription": false,
+  "demo": true,
+  "activeTranscriptId": "transcript-example",
+  "activeNotesId": "notes-example",
+  "transcripts": [
+    {
+      "id": "transcript-example",
+      "createdAt": "2026-10-02T10:25:00Z",
+      "model": "Illustrative example · not generated from audio",
+      "vocabulary": [],
+      "passages": [
+        {
+          "id": "p1",
+          "start": 0,
+          "end": 35,
+          "speaker": "Alex",
+          "text": "I’d like us to step back and think about what a good meeting actually feels like. We should be listening to each other, not racing to write everything down."
+        },
+        {
+          "id": "p2",
+          "start": 42,
+          "end": 76,
+          "speaker": "Maya",
+          "text": "Exactly. The goal is to be a little more present. Let the tools remember the details, so we can focus on the conversation. And our conversations should stay on our own devices."
+        },
+        {
+          "id": "p3",
+          "start": 81,
+          "end": 116,
+          "speaker": "Alex",
+          "text": "Let’s keep the first version simple. Record a conversation, get a transcript, then turn it into a summary with decisions and next steps. Every note should point back to what was actually said."
+        },
+        {
+          "id": "p4",
+          "start": 123,
+          "end": 151,
+          "speaker": "Jordan",
+          "text": "I can put together a draft of the onboarding flow by Friday. We should make it clear where recordings are stored and let people try recording before they download a model."
+        },
+        {
+          "id": "p5",
+          "start": 160,
+          "end": 193,
+          "speaker": "Maya",
+          "text": "I’ll review the first-use experience and the microphone permission flow. If someone says no to microphone access, we need to explain how to turn it on again."
+        },
+        {
+          "id": "p6",
+          "start": 205,
+          "end": 232,
+          "speaker": "Alex",
+          "text": "That sounds good. We’ve agreed to keep processing local, make each note traceable, and prioritize a calm first-use experience. Let’s review the draft together next week."
+        }
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "id": "notes-example",
+      "createdAt": "2026-10-02T10:26:00Z",
+      "model": "Illustrative example",
+      "transcriptVersionId": "transcript-example",
+      "summary": [
+        {
+          "id": "s1",
+          "text": "The team explored a calmer meeting experience: stay present in the conversation while Echo captures the details, entirely on your own device.",
+          "passageIds": [
+            "p1",
+            "p2"
+          ]
+        },
+        {
+          "id": "s2",
+          "text": "The first release focuses on a simple journey from recording to a verifiable transcript, summary, and next steps.",
+          "passageIds": [
+            "p3"
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "id": "d1",
+          "text": "Keep meeting processing local and make every generated note traceable to the original conversation.",
+          "passageIds": [
+            "p2",
+            "p3",
+            "p6"
+          ]
+        },
+        {
+          "id": "d2",
+          "text": "Allow recording before model setup is complete.",
+          "passageIds": [
+            "p4"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "a1",
+          "text": "Draft the onboarding flow.",
+          "owner": "Jordan",
+          "dueDate": "Friday (as discussed)",
+          "passageIds": [
+            "p4"
+          ]
+        },
+        {
+          "id": "a2",
+          "text": "Review the first-use experience and microphone permissions.",
+          "owner": "Maya",
+          "passageIds": [
+            "p5"
+          ]
+        }
+      ]
+    }
+  ]
+}

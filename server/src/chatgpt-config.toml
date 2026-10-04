@@ -1,0 +1,88 @@
+# Pinned Codex 0.160.0 configuration. No host configuration or login is inherited.
+forced_login_method = "chatgpt"
+cli_auth_credentials_store = "file"
+approval_policy = "never"
+sandbox_mode = "read-only"
+web_search = "disabled"
+project_doc_max_bytes = 0
+model_provider = "openai"
+mcp_servers = {}
+plugins = {}
+allow_login_shell = false
+check_for_update_on_startup = false
+suppress_unstable_features_warning = true
+[feedback]
+enabled = false
+[agents]
+enabled = false
+[tools.update_plan]
+enabled = false
+[tools.experimental_request_user_input]
+enabled = false
+[skills]
+include_instructions = false
+[skills.bundled]
+enabled = false
+[cloud.skills]
+enabled = false
+[orchestrator.mcp]
+enabled = false
+[shell_environment_policy]
+inherit = "none"
+[analytics]
+enabled = false
+[features]
+skip_host_skill_discovery = true
+shell_tool = false
+unified_exec = false
+apps = false
+connectors = false
+plugins = false
+remote_plugin = false
+browser_use = false
+browser_use_external = false
+browser_use_full_cdp_access = false
+computer_use = false
+image_generation = false
+imagegenext = false
+collab = false
+multi_agent = false
+multi_agent_v2 = false
+code_mode = false
+code_mode_only = false
+js_repl = false
+memories = false
+memory_tool = false
+skill_search = false
+tool_search = false
+tool_suggest = false
+deferred_executor = false
+request_permissions = false
+request_permissions_tool = false
+view_image = false
+hooks = false
+plugin_hooks = false
+codex_hooks = false
+shell_snapshot = false
+web_search = false
+web_search_request = false
+web_search_cached = false
+standalone_web_search = false
+current_time_reminder = false
+sleep_tool = false
+send_message_to_user_async = false
+default_mode_request_user_input = false
+token_budget = false
+guardian_approval = false
+goals = false
+agent_message_board = false
+in_app_browser = false
+in_app_local_automation = false
+external_migration = false
+external_agent_memory_import = false
+workspace_dependencies = false
+executor_capability_discovery = false
+recommended_plugins = false
+[features.code_mode_host]
+enabled = false
+disable_in_process_fallback = true
