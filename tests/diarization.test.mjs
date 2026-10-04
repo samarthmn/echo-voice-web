@@ -49,3 +49,14 @@ test('similar but different real-world voice directions do not merge at the matc
   assert.notEqual(first.get(0), second.get(0));
   assert.equal(first.get(0), repeated.get(0));
 });
+
+test('the final covering window ends processing without a redundant overlapping tail', async () => {
+  for (const seconds of [8, 9, 10, 17, 18]) {
+    let calls = 0;
+    const processor = Object.assign(async () => ({}), { post_process_speaker_diarization: () => [[{ id: 1, start: 0, end: 10, confidence: .9 }]] });
+    const turns = await diarize(new Float32Array(seconds * 16000), async () => { calls++; return { logits: {} }; }, processor, async () => ({ embeddings: { data: new Float32Array([1, 0]) } }), async () => ({}), [], () => {});
+    assert.equal(calls, seconds <= 10 ? 1 : 2);
+    assert.equal(turns.at(-1).end, seconds);
+    for (let i = 1; i < turns.length; i++) assert.equal(turns[i].start, turns[i - 1].end);
+  }
+});

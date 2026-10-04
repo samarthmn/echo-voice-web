@@ -92,6 +92,7 @@ export async function diarize(audio, segmentation, segmentProcessor, embedding, 
       turns.push({ start: start + offset / RATE, end: end + offset / RATE, speaker: identified[0] || 'Unknown speaker', uncertain: channels.length > 1 || !identified.length || segment.confidence < 0.6 });
     }
     progress('Recognizing speakers', Math.min(100, (offset + length) / audio.length * 100));
+    if (offset + windowSamples >= audio.length) break;
   }
   return turns;
 }

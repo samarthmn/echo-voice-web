@@ -1,14 +1,14 @@
 :root {
   --surface: #ffffff; --surface-alt: #f2f1f5; --on-accent: #ffffff;
   --info: #3667a5; --info-soft: #eaf1fa;
-  --accent-text: #6652c5; --success: #267653; --success-soft: #eaf5ee;
+  --focus: #6652c5; --accent-text: #6652c5; --success: #267653; --success-soft: #eaf5ee;
   --warning: #88601e; --warning-soft: #fff4dd; --danger: #af3543; --danger-soft: #fcebed;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --ink: #edeaf4; --muted: #b9b3c6; --canvas: #15131b;
   --surface: #201d29; --surface-alt: #292534; --line: #403a4c;
-  --accent: #755cd4; --accent-dark: #654bc4; --accent-text: #c0aaff;
+  --accent: #755cd4; --accent-dark: #654bc4; --accent-text: #c0aaff; --focus: #c0aaff;
   --purple-soft: #342b49; --green: #8ccbaa;
   --success: #8bd6ae; --success-soft: #203d30;
   --warning: #e9c483; --warning-soft: #44371f;

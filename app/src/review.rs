@@ -548,14 +548,12 @@ fn DetailsPane(
 ) -> Element {
     let value = meeting();
     let mut busy = use_signal(|| false);
-    let mut speech = use_signal(|| {
-        let model = text(&value, "speechModel");
-        if model == "onnx-community/whisper-large-v3" {
-            model
-        } else {
-            "onnx-community/whisper-large-v3-turbo".into()
-        }
-    });
+    let saved_speech_model = if text(&value, "speechModel") == "onnx-community/whisper-large-v3" {
+        "onnx-community/whisper-large-v3"
+    } else {
+        "onnx-community/whisper-large-v3-turbo"
+    };
+    let mut speech = use_signal(|| saved_speech_model.to_string());
     let mut notes = use_signal(|| text(&value, "notesModel"));
     let locked = is_demo(&value) || is_active(&value) || busy();
     let tracks = list(&value, "tracks");
@@ -571,7 +569,7 @@ fn DetailsPane(
             section { class: "review-detail-card", h3 {Icon { name: "volume", size: 17 } "Original audio"} if tracks.is_empty() {p { class: "review-muted", "No original audio is available for this meeting." }} else {div { class: "review-track-list", for track in tracks { {let label=text(&track,"label");let size=api::bytes(num(&track,"bytes"));let mime=text(&track,"mimeType");let url=text(&track,"url");rsx!{div { span { class: "review-file-icon", Icon { name: "volume", size: 18 } } span {strong {"{label}"} small {"{size} · {mime}"}} if !is_demo(&value) {a { class: "icon-button", href: "{url}", download: true, aria_label: "Download {label}", Icon { name: "download", size: 16 } }} }}} } }} p { class: "review-detail-help", "Tracks preserve the captured sources. Speaker labels do not represent separate voice recordings." } }
             section { class: "review-detail-card review-processing-card", h3 {Icon { name: "sparkles", size: 17 } "Processing choices"} form { onsubmit: move |event|{event.prevent_default();let path=format!("/meetings/{}",text(&meeting(),"id"));let body=json!({"speechModel":speech(),"notesModel":notes().trim()});busy.set(true);spawn(async move {save("PATCH",path,body,meeting,on_change,notify,"Processing choices saved for future runs.").await;busy.set(false);});},
                 label {"Speech recognition" select { class: "input", value: "{speech}", disabled: locked, onchange: move |event|speech.set(event.value()), option {value:"onnx-community/whisper-large-v3-turbo",selected:speech()=="onnx-community/whisper-large-v3-turbo","Whisper Large V3 Turbo"} option {value:"onnx-community/whisper-large-v3",selected:speech()=="onnx-community/whisper-large-v3","Whisper Large V3"} }}
-                label {"Local notes model" input { class: "input", value: "{notes}", maxlength: "100", disabled: locked, placeholder: "qwen2.5:3b", oninput: move |event|notes.set(event.value()) }} button { class: "button button-secondary", disabled: locked||notes().trim().is_empty()||(speech()==text(&value,"speechModel")&&notes()==text(&value,"notesModel")), "Save choices" }
+                label {"Local notes model" input { class: "input", value: "{notes}", maxlength: "100", disabled: locked, placeholder: "qwen2.5:3b", oninput: move |event|notes.set(event.value()) }} button { class: "button button-secondary", disabled: locked||notes().trim().is_empty()||(speech()==saved_speech_model&&notes()==text(&value,"notesModel")), "Save choices" }
             } p { class: "review-detail-help", "Applies to the next run. Existing versions retain the model that produced them. Downloads are managed in Models." } }
             for (collection,active_id,title,icon) in [("transcripts","activeTranscriptId","Transcript history","refresh"),("notes","activeNotesId","Notes history","file")] {
                 section { class: "review-detail-card", h3 {Icon { name: icon, size: 17 } "{title}" span { class: "review-note-count", "{list(&value,collection).len()}" }}

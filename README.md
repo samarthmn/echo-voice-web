@@ -55,7 +55,7 @@ If your file manager doesn't have **Open in Terminal**, open the Terminal app, t
 
 Open **[http://localhost:3000](http://localhost:3000)** in Chrome or Chromium. Put the address in the browser's address bar. `localhost` means your own computer.
 
-You should see **Overview** You can open the labeled sample meeting to explore the interface. Its text is an example; it doesn't have recorded audio.
+You should see **Overview**. You can open the labeled sample meeting to explore the interface. Its text is an example; it doesn't have recorded audio.
 
 ### Close Echo and return later
 

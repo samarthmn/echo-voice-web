@@ -37,7 +37,7 @@ try {
   form.append('file', new Blob([wav(70)], { type: 'audio/wav' }), 'review-fixture.wav');
   form.append('trackId', 'review-fixture-track'); form.append('sequence', '0'); form.append('mimeType', 'audio/wav'); form.append('label', 'Original test recording');
   await request(`/meetings/${meeting.id}/audio`, 'POST', form);
-  await request(`/meetings/${meeting.id}`, 'PATCH', { duration: 70, status: 'saved' });
+  await request(`/meetings/${meeting.id}`, 'PATCH', { duration: 70, status: 'saved', speechModel: 'onnx-community/whisper-base' });
   const passages = Array.from({ length: 65 }, (_, index) => ({ id: `review-p${index + 1}`, start: index, end: index + 1, speaker: index % 2 ? 'Speaker 2' : 'Speaker 1', text: index === 0 ? 'Project Aurora has old wording to correct.' : index === 64 ? 'The final evidence appears after the initial transcript section.' : `Review passage ${index + 1}: the team discussed the release plan.` }));
   meeting = await request(`/meetings/${meeting.id}/transcripts`, 'POST', { model: 'test-fixture', passages, vocabulary: [], label: 'Original fixture transcript' });
   const originalTranscript = meeting.activeTranscriptId;
@@ -71,6 +71,27 @@ try {
   await expect(page.locator('#passage-review-p65')).toBeVisible();
   await expect(page.locator('#passage-review-p65')).toHaveClass(/review-passage-selected/);
   await expect.poll(() => page.locator('#review-audio').evaluate(audio => Math.round(audio.currentTime))).toBe(64);
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => window.echoTheme.set(theme), theme);
+    assert.ok(await page.locator('#passage-review-p65').evaluate(passage => {
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--surface)'; passage.append(probe);
+      const distinct = getComputedStyle(passage).backgroundColor !== getComputedStyle(probe).backgroundColor;
+      probe.remove(); return distinct;
+    }), theme + ' selected passage has a distinct background');
+    const button = page.getByRole('button', { name: 'Bookmark current time', exact: true });
+    await page.keyboard.press('Tab');
+    await button.focus();
+    assert.ok(await button.evaluate(element => {
+      const style = getComputedStyle(element);
+      const probe = document.createElement('div');
+      probe.style.color = 'var(--focus)'; element.append(probe);
+      const visible = style.outlineStyle === 'solid' && parseFloat(style.outlineWidth) >= 2
+        && style.outlineColor === getComputedStyle(probe).color;
+      probe.remove(); return visible;
+    }), theme + ' keyboard focus is visible');
+    await page.screenshot({ path: artifacts + '/transcript-' + theme + '.png', fullPage: true });
+  }
 
   // Corrections create versions and preserve the original evidence IDs.
   await page.getByRole('textbox', { name: 'Search transcript' }).fill('old wording');
@@ -150,6 +171,11 @@ try {
     return rect.left >= 0 && rect.right <= innerWidth && rect.height >= 44;
   })), 'Every mobile review tab must be fully visible with a comfortable touch target');
   await page.locator('.review-tab').filter({ hasText: 'Details' }).click();
+  await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeDisabled();
+  await page.getByLabel('Speech recognition', { exact: true }).selectOption('onnx-community/whisper-large-v3');
+  await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeEnabled();
+  await page.getByLabel('Speech recognition', { exact: true }).selectOption('onnx-community/whisper-large-v3-turbo');
+  await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeDisabled();
   const transcriptHistory = page.locator('.review-detail-card').filter({ has: page.getByRole('heading', { name: /Transcript history/ }) });
   await transcriptHistory.getByRole('button', { name: 'Restore', exact: true }).last().click();
   await expect.poll(async () => (await request(`/meetings/${meeting.id}`)).activeTranscriptId).toBe(originalTranscript);
@@ -164,7 +190,7 @@ try {
   assert.equal((await request(`/meetings/${meeting.id}`)).id, meeting.id);
   await page.getByRole('button', { name: 'Delete meeting', exact: true }).click();
   await deleteDialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Every conversation, remembered.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All meetings', exact: true })).toBeVisible();
   assert.equal((await fetch(`${base}/api/meetings/${meeting.id}`)).status, 404);
   assert.deepEqual(pageErrors, [], `Browser runtime errors: ${pageErrors.join('\n')}`);
   assert.deepEqual(consoleErrors, [], `Browser console errors: ${consoleErrors.join('\n')}`);

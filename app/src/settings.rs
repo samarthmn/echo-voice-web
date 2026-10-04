@@ -53,7 +53,7 @@ async fn download_json(value: Value, name: &str) -> Result<(), String> {
 }
 
 #[component]
-/// Switch between general preferences, vocabulary, storage, and setup help.
+/// Switch between general preferences, vocabulary, and storage.
 pub fn Settings(
     settings: Signal<Value>,
     draft: Signal<Value>,
@@ -63,7 +63,7 @@ pub fn Settings(
     initial_section: String,
 ) -> Element {
     let mut section = use_signal(|| {
-        if ["general", "vocabulary", "storage", "help"].contains(&initial_section.as_str()) {
+        if ["general", "vocabulary", "storage"].contains(&initial_section.as_str()) {
             initial_section.clone()
         } else {
             "general".into()
@@ -84,11 +84,9 @@ pub fn Settings(
                 match section().as_str() {
                     "vocabulary" => rsx! { VocabularySettings { notify } },
                     "storage" => rsx! { StorageSettings { notify } },
-                    "help" => rsx! { HelpSettings { on_section:move |value:String| section.set(value) } },
                     _ => rsx! { GeneralSettings { settings,draft,snapshot,on_change,notify } }
                 }
             }
-            footer { class:"settings-footer", Icon { name:"shield",size:14 } "Thoughtfully private. Entirely yours." span { "Echo Voice · Web 0.1" } }
         }
     }
 }
@@ -407,32 +405,5 @@ async fn export_library() -> Result<(), String> {
         Err(error.into())
     } else {
         Ok(())
-    }
-}
-
-#[component]
-/// Present local setup instructions and shortcuts to relevant configuration screens.
-fn HelpSettings(on_section: EventHandler<String>) -> Element {
-    let mut mic = use_signal(|| "idle".to_string());
-    let mut mic_message = use_signal(String::new);
-    rsx! {
-        div {class:"settings-setup-hero",span {class:"settings-setup-icon",Icon {name:"sparkles",size:26}}div {class:"settings-eyebrow","A FEW SIMPLE STEPS"}h2 {"Good conversations start here."}p {"Recording, transcription, and notes are separate. Start with what you need; add the rest whenever you’re ready."}}
-        section {class:"settings-card settings-steps",
-            div {class:"settings-setup-step",span {class:"settings-step-number","01"}div {h3 {"Give your microphone a moment"}p {"For in-person conversations, test your room microphone. Permission is requested only when you choose to test or record."}button {r#type:"button",class:"button button-secondary",disabled:mic()=="checking",onclick:move |_|{mic.set("checking".into());mic_message.set(String::new());spawn(async move {let mut eval=document::eval(r#"try{if(!isSecureContext||!navigator.mediaDevices?.getUserMedia)throw new Error('Microphone access needs localhost or a secure HTTPS connection.');if(!window.MediaRecorder)throw new Error('This browser cannot record audio. Try the latest desktop Chrome or Edge.');const stream=await navigator.mediaDevices.getUserMedia({audio:true});stream.getTracks().forEach(track=>track.stop());dioxus.send({ok:true});}catch(e){const messages={NotAllowedError:'Microphone access was denied. Allow the microphone in your browser site settings, then test again.',NotFoundError:'No microphone was found. Connect one and test again.',NotReadableError:'The microphone is busy or unavailable. Check your system input settings.'};dioxus.send({error:messages[e.name]||e.message});}"#);match eval.recv::<Value>().await{Ok(value)if value["ok"]==true=>{mic.set("ready".into());mic_message.set("Microphone access works. The test has ended; no audio was saved.".into());},Ok(value)=>{mic.set("error".into());mic_message.set(text(&value,"error"));},Err(_)=>{mic.set("error".into());mic_message.set("The microphone test could not finish. Please try again.".into());}}});},Icon {name:if mic()=="checking"{"loader"}else if mic()=="ready"{"check"}else{"mic"},size:16}if mic()=="checking"{"Waiting for permission…"}else if mic()=="ready"{"Test microphone again"}else{"Test microphone access"}}if !mic_message().is_empty(){p {class:if mic()=="error"{"settings-mic-result is-error"}else{"settings-mic-result"},role:"status","{mic_message}"}}}span {class:"settings-step-tag","Recording"}}
-            div {class:"settings-setup-step",span {class:"settings-step-number","02"}div {h3 {"Choose a local speech model"}p {"Open Models to download a speech model. Downloads use the internet; once cached, recognition runs on your device. You can record while transcription setup waits."}button {r#type:"button",class:"settings-text-button",onclick:move |_|on_section.call("general".into()),"Review processing preferences" Icon {name:"arrow-right",size:15}}}span {class:"settings-step-tag","Transcription"}}
-            div {class:"settings-setup-step",span {class:"settings-step-number","03"}div {h3 {"Choose how to draft your notes"}p {"For local notes, install and run Ollama on this computer, download a compatible text model, and set its name in General. Ollama remains the default; recording and transcription need neither notes provider."}a {class:"settings-text-button",href:"https://ollama.com/download",target:"_blank",rel:"noreferrer","Get Ollama" Icon {name:"arrow-right",size:15}}
-                div {class:"settings-help-chatgpt",h4 {"Prefer your ChatGPT account?"}p {"Open Models → ChatGPT and choose Sign in to use the official Codex sign-in flow. An eligible plan’s Codex allowance covers these requests; API credits are not used. After setup, choose ChatGPT as your notes provider."}p {"ChatGPT notes send the active transcript to OpenAI only after you request them. Audio and speech recognition stay local. Every generated draft needs your review."}button {r#type:"button",class:"settings-text-button",onclick:move |_|open_chatgpt_models(),"Set up ChatGPT" Icon {name:"arrow-right",size:15}}}
-            }span {class:"settings-step-tag","Optional"}}
-            div {class:"settings-setup-step",span {class:"settings-step-number","04"}div {h3 {"Bring your calendar along"}p {"Open Calendar to configure Google Calendar and the optional local Google Meet runner. The runner needs local setup and host admission. Calendar access alone does not record meetings."}}span {class:"settings-step-tag","Optional"}}
-        }
-        div {class:"settings-section-top settings-faq-title",div {h2 {"A little clarity goes a long way."}p {"The details that help you feel at home."}}}
-        section {class:"settings-card settings-faq",
-            details {open:true,summary {Icon {name:"shield",size:17}span {"What stays private?"}Icon {name:"chevron-down",size:16}}p {"Your library is stored on your computer. Speech recognition runs inside your browser, and Ollama notes run locally. Optional ChatGPT notes send the meeting’s active transcript and instructions to OpenAI after you request them; audio is not uploaded for notes or cloud transcription. Model downloads contact the model host. Connecting Google Calendar exchanges calendar metadata with Google, and the meeting runner connects to Google Meet."}}
-            details {summary {Icon {name:"sparkles",size:17}span {"How does my ChatGPT plan work with Echo?"}Icon {name:"chevron-down",size:16}}p {"Echo uses the official Codex helper and managed ChatGPT sign-in. You need a plan and account that are eligible for Codex. Requests use that plan’s Codex allowance, which can have usage limits; this is not a general ChatGPT token pool or an API-credit balance. Echo never asks for an API key for this option. Sign-in and model availability are managed in Models → ChatGPT. Choosing the provider does not send meeting content or start a notes request."}}
-            details {summary {Icon {name:"mic",size:17}span {"Which browsers and devices can record?"}Icon {name:"chevron-down",size:16}}p {"Use an up-to-date desktop Chrome or Edge on localhost for the recommended experience. Firefox and Safari may support room recording when microphone access and a compatible MediaRecorder audio format are available; recording and model performance can vary. A responsive mobile layout does not guarantee mobile recording support. Keep Echo Voice open during recording and transcription."}}
-            details {summary {Icon {name:"book",size:17}span {"Can I rely on every word and speaker label?"}Icon {name:"chevron-down",size:16}}p {"Transcripts and generated notes are drafts. Review names, numbers, and decisions against the original audio. Timestamps are approximate passage timings. Speakers are grouped by voice. Review the labels and rename speakers in the transcript."}}
-            details {summary {Icon {name:"hard-drive",size:17}span {"How do I back up or move my meetings?"}Icon {name:"chevron-down",size:16}}p {"Export a web library archive in Storage and keep the downloaded copy in a safe location. Restore it into an empty Echo Voice Web library and vocabulary list. Browser model downloads are separate and can be downloaded again. ChatGPT sign-in credentials are excluded from library exports, so connect your account separately on another computer. Legacy desktop-library migration is not supported. Deleting a meeting here does not delete copies you previously exported."}}
-            details {summary {Icon {name:"help",size:17}span {"What if recording or processing is interrupted?"}Icon {name:"chevron-down",size:16}}p {"Saved audio chunks remain available if speech or notes processing fails. Reopen the meeting and retry processing after fixing the reported issue. A browser crash or lost microphone may leave a gap after the last saved chunk. Recording never resumes automatically; review the recording and consent before starting again."}}
-        }
     }
 }

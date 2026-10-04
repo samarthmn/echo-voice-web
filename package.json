@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "build:assets": "node scripts/build-assets.mjs",
-    "test": "node --test tests/inference.test.mjs tests/diarization.test.mjs tests/recorder.test.mjs tests/rest.test.mjs tests/chatgpt-protocol.test.mjs tests/bot-recovery.test.mjs",
-    "test:e2e": "node scripts/test-browser.mjs"
+    "test": "node --test tests/inference.test.mjs tests/diarization.test.mjs tests/theme.test.mjs tests/recorder.test.mjs tests/rest.test.mjs tests/chatgpt-protocol.test.mjs tests/bot-recovery.test.mjs",
+    "test:e2e": "node scripts/test-browser.mjs",
+    "test:speakers": "node scripts/smoke-speakers.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1"
