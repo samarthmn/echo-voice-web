@@ -1,0 +1,50 @@
+[
+  {
+    "name": "overview-desktop",
+    "violations": []
+  },
+  {
+    "name": "library-desktop",
+    "violations": []
+  },
+  {
+    "name": "models-desktop",
+    "violations": []
+  },
+  {
+    "name": "calendar-desktop",
+    "violations": []
+  },
+  {
+    "name": "calendar-dialog-desktop",
+    "violations": []
+  },
+  {
+    "name": "new-meeting-desktop",
+    "violations": []
+  },
+  {
+    "name": "navigation-mobile",
+    "violations": []
+  },
+  {
+    "name": "overview-mobile",
+    "violations": []
+  },
+  {
+    "name": "models-mobile",
+    "violations": []
+  },
+  {
+    "name": "calendar-mobile",
+    "violations": []
+  },
+  {
+    "name": "calendar-dialog-mobile",
+    "violations": []
+  },
+  {
+    "name": "new-meeting-mobile",
+    "violations": []
+  }
+]

@@ -1,0 +1,70 @@
+name: Verify Echo Voice
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and test local workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      ECHO_TEST_BINARY: target/release/echo-server
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Rust and WebAssembly target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # The build script runs npm ci --ignore-scripts and installs the matching
+      # wasm-bindgen CLI from Cargo.lock before building browser and server assets.
+      - name: Build browser assets and release server
+        run: bash scripts/build.sh
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Select the installed Chromium executable
+        run: |
+          node --input-type=module <<'JS'
+          import { chromium } from '@playwright/test';
+          import { appendFileSync } from 'node:fs';
+          appendFileSync(process.env.GITHUB_ENV, `CHROMIUM_PATH=${chromium.executablePath()}\n`);
+          JS
+
+      - name: Test Rust server
+        run: cargo test --locked -p echo-server
+
+      - name: Test browser modules and REST lifecycle
+        run: npm test
+
+      - name: Test local meeting runner
+        run: python3 -m unittest discover -s tests -p '*_test.py' -v
+
+      - name: Test browser workflows and accessibility
+        run: |
+          # A cached debug executable must not hide tests ignoring ECHO_TEST_BINARY.
+          rm -f target/debug/echo-server
+          npm run test:e2e
