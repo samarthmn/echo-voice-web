@@ -28,6 +28,7 @@ env.customCache = {
     usedFiles.add(keyOf(request));
   },
 };
+/** Release the speech session before loading companion models or another job. */
 async function unloadSpeech() {
   if (transcriber) await transcriber.dispose();
   transcriber = null; loadedModel = '';

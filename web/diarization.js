@@ -6,6 +6,7 @@ export function normalize(vector) {
   if (!Number.isFinite(norm) || norm === 0) throw new Error('Speaker recognition returned an invalid voice embedding.');
   return Array.from(vector, value => value / norm);
 }
+/** Compare normalized voice directions with a dimension-checked cosine score. */
 export function similarity(a, b) {
   if (a.length !== b.length) throw new Error('Speaker embedding dimensions do not match.');
   return a.reduce((sum, value, i) => sum + value * b[i], 0);

@@ -13,7 +13,9 @@ export const MODELS = [
 export function resolveSpeechModel(id) {
   return ['onnx-community/whisper-tiny.en', 'onnx-community/whisper-base', undefined, null, ''].includes(id) ? DEFAULT_SPEECH_MODEL : id;
 }
+/** Build the same-origin cache key for one complete model download. */
 export function modelManifestUrl(id) { return `${globalThis.location.origin}/__echo_models/${encodeURIComponent(id)}`; }
+/** Reject model identifiers outside the supported speech catalog. */
 export function assertModel(id) {
   if (!MODELS.some(model => model.id === id)) throw new Error('Choose one of the supported speech models.');
 }
