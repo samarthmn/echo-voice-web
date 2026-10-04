@@ -45,7 +45,8 @@ try {
   meeting = await request(`/meetings/${meeting.id}/notes`, 'POST', { model: 'test-fixture', transcriptVersionId: originalTranscript, summary: [{ id: 'summary-review', text: 'The release plan is ready for review.', passageIds: ['review-p65'] }], decisions: [{ id: 'decision-review', text: 'Review the release plan together.', passageIds: ['review-p2'] }], actions: [{ id: 'action-review', text: 'Prepare the rollout checklist.', owner: 'Speaker 1', dueDate: '2026-10-09', passageIds: ['review-p3'] }] });
 
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-  page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  page = await context.newPage();
   page.on('pageerror', error => pageErrors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.goto(base, { waitUntil: 'networkidle' });
