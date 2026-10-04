@@ -37,8 +37,18 @@ try {
   const segmentProcessor = await AutoProcessor.from_pretrained(SPEAKER_MODELS.segmentation);
   embedding = await AutoModelForXVector.from_pretrained(SPEAKER_MODELS.embedding, { dtype: 'q8', device: 'cpu' });
   const embedProcessor = await AutoProcessor.from_pretrained(SPEAKER_MODELS.embedding);
+  const voiceA = (await embedding(await embedProcessor(a))).embeddings.data;
+  const voiceB = (await embedding(await embedProcessor(b))).embeddings.data;
+  const unit = vector => { const norm = Math.hypot(...vector); return Array.from(vector, value => value / norm); };
+  const va = unit(voiceA), vb = unit(voiceB);
+  console.log('Clean fixture voice cosine:', va.reduce((sum, value, i) => sum + value * vb[i], 0));
   const speakers = [];
-  const turns = await diarize(audio, segmentation, segmentProcessor, embedding, embedProcessor, speakers, status => console.log(status));
+  const measuredEmbedding = async inputs => {
+    const result = await embedding(inputs), vector = unit(result.embeddings.data);
+    console.log('Window voice cosine:', JSON.stringify({ jfk: vector.reduce((sum, value, i) => sum + value * va[i], 0), mlk: vector.reduce((sum, value, i) => sum + value * vb[i], 0) }));
+    return result;
+  };
+  const turns = await diarize(audio, segmentation, segmentProcessor, measuredEmbedding, embedProcessor, speakers, status => console.log(status));
   function dominant(start, end) {
     const totals = new Map();
     for (const turn of turns) {
@@ -48,6 +58,8 @@ try {
     }
     return [...totals].sort((a, b) => b[1] - a[1])[0]?.[0];
   }
+  console.log('Detected turns:', JSON.stringify(turns));
+  console.log('Voice clusters:', speakers.length);
   const first = dominant(1, 7), second = dominant(9, 15), repeated = dominant(17, 23);
   assert.ok(first && second && repeated, 'Real speech must receive speaker labels');
   assert.notEqual(first, second, 'Different recorded voices must separate');
