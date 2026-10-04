@@ -40,3 +40,12 @@ test('overlapping segmentation windows keep one continuous timeline and detect f
   assert.deepEqual(turns.map(t => [t.start, t.end]), [[0, 9], [9, 17], [17, 19]]);
   assert.equal(new Set(turns.map(t => t.speaker)).size, 1);
 });
+
+test('similar but different real-world voice directions do not merge at the matching threshold', () => {
+  const speakers = [];
+  const first = matchSpeakers([{ channel: 0, vector: [1, 0], seconds: 8 }], speakers);
+  const second = matchSpeakers([{ channel: 0, vector: [.84, Math.sqrt(1 - .84 ** 2)], seconds: 8 }], speakers);
+  const repeated = matchSpeakers([{ channel: 0, vector: [1, .08], seconds: 8 }], speakers);
+  assert.notEqual(first.get(0), second.get(0));
+  assert.equal(first.get(0), repeated.get(0));
+});

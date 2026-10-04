@@ -11,7 +11,7 @@ export function similarity(a, b) {
   return a.reduce((sum, value, i) => sum + value * b[i], 0);
 }
 /** Match real voice embeddings; local channels in the same window stay distinct. */
-export function matchSpeakers(vectors, speakers, threshold = 0.75) {
+export function matchSpeakers(vectors, speakers, threshold = 0.93) {
   const used = new Set();
   const labels = new Map();
   // Longer clean samples get the first chance to match an existing voice.
