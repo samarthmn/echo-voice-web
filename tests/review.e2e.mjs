@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 
 const base = process.env.ECHO_TEST_URL || 'http://127.0.0.1:3013';
 const artifacts = process.env.ECHO_TEST_ARTIFACTS || '/tmp/echo-review-e2e';
@@ -185,6 +186,11 @@ try {
   const deleteDialog = page.getByRole('dialog', { name: 'Delete this meeting?' });
   await expect(deleteDialog).toBeVisible();
   await expect(deleteDialog.getByRole('button', { name: 'Keep meeting', exact: true })).toBeFocused();
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => window.echoTheme.set(theme), theme);
+    const audit = await new AxeBuilder({ page }).include('#review-delete-dialog').withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    assert.deepEqual(audit.violations.map(v => ({ id: v.id, nodes: v.nodes.map(n => n.target) })), [], theme + ' delete dialog accessibility');
+  }
   await page.keyboard.press('Escape');
   await expect(deleteDialog).not.toBeVisible();
   assert.equal((await request(`/meetings/${meeting.id}`)).id, meeting.id);

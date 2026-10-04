@@ -2,7 +2,7 @@
   --surface: #ffffff; --surface-alt: #f2f1f5; --on-accent: #ffffff;
   --info: #3667a5; --info-soft: #eaf1fa;
   --focus: #6652c5; --accent-text: #6652c5; --success: #267653; --success-soft: #eaf5ee;
-  --warning: #88601e; --warning-soft: #fff4dd; --danger: #af3543; --danger-soft: #fcebed;
+  --warning: #88601e; --warning-soft: #fff4dd; --danger-fill: #af3543; --danger: #af3543; --danger-soft: #fcebed;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
