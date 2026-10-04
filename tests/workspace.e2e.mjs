@@ -82,6 +82,11 @@ try{
  });
  await page.getByRole('region',{name:'Active recording controls'}).waitFor();
  await page.locator('#new-meeting-dialog').waitFor({state:'detached'});
+ for (const width of [320, 390]) {
+  await page.setViewportSize({ width, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Active recording controls must fit a mobile viewport');
+ }
+ await page.setViewportSize({ width: 1440, height: 1050 });
  await page.keyboard.press('Control+j');
  await page.waitForTimeout(150);
  assert.equal(await page.getByRole('dialog').count(),0,'New-meeting shortcut stays disabled during active recording');
