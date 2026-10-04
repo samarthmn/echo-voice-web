@@ -70,6 +70,7 @@ async function shutdown() {
 try {
   await ready();
   for (const script of [
+    'scripts/smoke-speakers.mjs',
     'tests/recorder-browser.mjs',
     'tests/import-browser.mjs',
     'tests/workspace.e2e.mjs',

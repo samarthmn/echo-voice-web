@@ -26,7 +26,7 @@ async function navigate(name) {
 }
 try {
   await page.goto(base);
-  await page.getByRole('heading', { name: 'Overview' }).waitFor();
+  await page.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeVisible();
   await page.keyboard.press('Enter');
@@ -57,7 +57,7 @@ try {
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base);
-  await page.getByRole('heading', { name: 'Overview' }).waitFor();
+  await page.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
   await page.keyboard.press('Tab');

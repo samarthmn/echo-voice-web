@@ -21,7 +21,7 @@ try {
   const page = await browser.newPage();
   await page.goto(origin);
   await page.waitForFunction(() => window.echo && window.echoInference);
-  await page.getByRole('heading', {name:'Overview'}).waitFor();
+  await page.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
   const sequences = [];
   let failOnce = true;
   await page.route('**/api/meetings/*/audio', async route => {

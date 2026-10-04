@@ -88,7 +88,7 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveCount(0);
       await page.getByPlaceholder('What should we call you?').fill('Draft survives setup');
       await page.getByRole('button', { name: 'Set up ChatGPT', exact: true }).click();
-      await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await expect(providerSelect).toHaveValue('chatgpt');
       await expect(page.getByPlaceholder('What should we call you?')).toHaveValue('Draft survives setup');
