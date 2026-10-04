@@ -193,7 +193,7 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await page.getByRole('button', { name: 'Remove Echo Labs', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Echo Labs', exact: true })).toHaveCount(0);
       await page.getByRole('button', { name: 'Remove Dioxus', exact: true }).click();
-      await expect(page.getByRole('heading', { name: 'Make every word feel familiar' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'No vocabulary yet' })).toBeVisible();
       await page.getByRole('button', { name: 'Storage', exact: true }).click();
       await expect(page.getByRole('button', { name: 'Choose library file' })).toBeEnabled();
       const wrongChooser = page.waitForEvent('filechooser');
