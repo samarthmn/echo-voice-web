@@ -1,4 +1,4 @@
-import { assertModel, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
+import { resolveSpeechModel, assertModel, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
 export { MODELS } from './models.js';
 
 let worker = null;
@@ -20,7 +20,7 @@ function serial(operation) {
 }
 
 /** Dispatch one worker job and forward its progress until a result or failure arrives. */
-function callWorker(type, modelId, onProgress, audio) {
+function callWorker(type, modelId, onProgress, audio, options) {
   if (typeof Worker === 'undefined') return Promise.reject(new Error('This browser does not support local speech processing. Try a current Chrome, Edge, Firefox, or Safari browser.'));
   worker ??= new Worker(new URL('/js/inference-worker.js', location.origin), { type: 'module' });
   const currentWorker = worker;
@@ -40,12 +40,12 @@ function callWorker(type, modelId, onProgress, audio) {
     };
     const error = (event) => {
       currentWorker.terminate(); worker = null;
-      fail(new Error(event.message || 'Local speech processing stopped unexpectedly. Try again with the smaller model.'));
+      fail(new Error(event.message || 'Local speech processing stopped unexpectedly. Try Large V3 Turbo or close other tabs and retry.'));
     };
     rejectActive = fail;
     currentWorker.addEventListener('message', message);
     currentWorker.addEventListener('error', error);
-    currentWorker.postMessage({ id, type, modelId, audio }, audio ? [audio.buffer] : []);
+    currentWorker.postMessage({ id, type, modelId, audio, options }, audio ? [audio.buffer] : []);
   });
 }
 
@@ -122,7 +122,7 @@ async function decodeAudio(blob) {
 }
 
 /** Run local speech inference on decoded audio using the selected supported model. */
-export function transcribeAudio(blob, modelId, onProgress) {
+export function transcribeAudio(blob, modelId, onProgress, options = {}) {
   assertModel(modelId);
   const token = generation;
   return serial(async () => {
@@ -130,7 +130,7 @@ export function transcribeAudio(blob, modelId, onProgress) {
     onProgress?.({ status: 'Decoding saved audio', progress: 0 });
     const audio = await decodeAudio(blob);
     if (token !== generation) throw cancelled();
-    return await callWorker('transcribe', modelId, onProgress, audio);
+    return await callWorker('transcribe', modelId, onProgress, audio, options);
   });
 }
 
@@ -164,6 +164,7 @@ const report = (modelId, meetingId) => detail => window.dispatchEvent(new Custom
 
 /** Transcribe a saved audio track and append a new version with a vocabulary snapshot. */
 export async function transcribeMeeting(meetingId, modelId, trackId) {
+  modelId = resolveSpeechModel(modelId);
   if (processingMeetings.has(meetingId)) throw new Error('This meeting is already being transcribed.');
   processingMeetings.add(meetingId);
   const token = generation;
@@ -184,7 +185,8 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
     const vocabulary = (vocabularyResponse.entries || []).filter(entry => entry.enabled);
     checkCancelled();
     await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: 'processing', error: '' });
-    const passages = []; let offset = 0;
+    const passages = []; let offset = 0; let speakers = [];
+    const settings = await requestJson('/settings');
     for (const track of tracks) {
       checkCancelled();
       const audioUrl = new URL(track.url, location.origin);
@@ -193,7 +195,8 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
       if (!response.ok) throw new Error('The saved audio could not be loaded. Check the local data folder.');
       const blob = await response.blob();
       checkCancelled();
-      const result = await transcribeAudio(blob, modelId, report(modelId, meetingId));
+      const result = await transcribeAudio(blob, modelId, report(modelId, meetingId), { speakers, language: settings.language });
+      speakers = result.speakers || speakers;
       passages.push(...result.passages.map(passage => ({ ...passage, text: applyVocabulary(passage.text, vocabulary), start: passage.start + offset, end: passage.end + offset })));
       offset += result.duration ?? Math.max(0, ...result.passages.map(passage => passage.end));
     }

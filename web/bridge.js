@@ -1,3 +1,5 @@
+import './theme.js';
+import { resolveSpeechModel } from './models.js';
 import './inference.js';
 import './recorder.js';
 import './accessibility.js';
@@ -151,7 +153,7 @@ export async function autoTranscribeMeeting(meeting) {
   try {
     const settings = await request('/settings');
     if (!settings.autoTranscribe) return;
-    const model = meeting.speechModel || settings.speechModel;
+    const model = resolveSpeechModel(meeting.speechModel || settings.speechModel);
     if (!(await window.echoInference.getDownloadedModels()).includes(model)) {
       skipped('model-not-downloaded', 'Recording saved. Download its speech model in Models, then choose Transcribe.');
       return;

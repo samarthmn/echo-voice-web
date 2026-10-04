@@ -48,7 +48,7 @@ try {
   page.on('pageerror', error => pageErrors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.goto(base, { waitUntil: 'networkidle' });
-  await expect(page.getByRole('heading', { name: 'Good conversations start here.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
   await page.getByRole('button', { name: new RegExp(meetingTitle) }).first().click();
   await expect(page.getByRole('heading', { name: meetingTitle, exact: true })).toBeVisible();
   await expect(page.locator('.review-tab[aria-current="page"]')).toHaveText('Notes');

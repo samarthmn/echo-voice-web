@@ -26,7 +26,7 @@ async function navigate(name) {
 }
 try {
   await page.goto(base);
-  await page.getByRole('heading', { name: 'Good conversations start here.' }).waitFor();
+  await page.getByRole('heading', { name: 'Overview' }).waitFor();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeVisible();
   await page.keyboard.press('Enter');
@@ -57,7 +57,7 @@ try {
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base);
-  await page.getByRole('heading', { name: 'Good conversations start here.' }).waitFor();
+  await page.getByRole('heading', { name: 'Overview' }).waitFor();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
   await page.keyboard.press('Tab');
@@ -65,7 +65,7 @@ try {
   await expect(page.locator('.sidebar')).toBeHidden();
   const menu = page.getByRole('button', { name: 'Open navigation' });
   await menu.click(); await expect(page.locator('.sidebar .brand')).toBeFocused();
-  await page.keyboard.press('Shift+Tab'); await expect(page.locator('.sidebar').getByRole('button', { name: 'Setup & help' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab'); await expect(page.locator('.sidebar').getByRole('button', { name: 'Settings' })).toBeFocused();
   await page.keyboard.press('Tab'); await expect(page.locator('.sidebar .brand')).toBeFocused();
   await audit('navigation-mobile');
   await page.keyboard.press('Escape'); await expect(menu).toBeFocused(); await expect(menu).toHaveAttribute('aria-expanded', 'false');
@@ -76,6 +76,23 @@ try {
   await page.getByRole('button', { name: 'Connect Google Calendar', exact: true }).click();
   await audit('calendar-dialog-mobile'); await page.keyboard.press('Escape');
   await newMeeting.click(); await audit('new-meeting-mobile'); await page.keyboard.press('Escape');
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => window.echoTheme.set(theme), theme);
+    await page.reload();
+    await page.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
+    assert.equal(await page.locator('html').getAttribute('data-theme'), theme, 'Appearance survives reload');
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const [name, slug] of [['Overview', 'overview'], ['All meetings', 'library'], ['Models', 'models'], ['Calendar', 'calendar'], ['Settings', 'settings']]) {
+        await navigate(name); await audit(slug + '-' + theme + '-' + width);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'Switch to light mode' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   console.log('PASS: mobile navigation keyboard containment and responsive page/dialog layouts.');
   assert.deepEqual(errors, [], 'No browser runtime errors');
   await writeFile(`${screenshots}/results.json`, JSON.stringify(results, null, 2));

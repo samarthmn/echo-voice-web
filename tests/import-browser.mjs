@@ -21,7 +21,7 @@ try {
   const page = await browser.newPage();
   await page.goto(origin);
   await page.waitForFunction(() => window.echo && window.echoInference);
-  await page.getByRole('heading', {name:'Good conversations start here.'}).waitFor();
+  await page.getByRole('heading', {name:'Overview'}).waitFor();
   const sequences = [];
   let failOnce = true;
   await page.route('**/api/meetings/*/audio', async route => {
@@ -66,13 +66,13 @@ try {
     let calls = 0; const skipped = [];
     window.addEventListener('echo-auto-transcription-skipped', event => skipped.push(event.detail));
     window.echoInference.transcribeMeeting = async () => { calls++; };
-    window.echoInference.getDownloadedModels = async () => ['onnx-community/whisper-tiny.en'];
-    const meeting = id => ({ id, status: 'saved', speechModel: 'onnx-community/whisper-tiny.en', tracks: [{ id: 'track', bytes: 128 }], transcripts: [] });
+    window.echoInference.getDownloadedModels = async () => ['onnx-community/whisper-large-v3-turbo'];
+    const meeting = id => ({ id, status: 'saved', speechModel: 'onnx-community/whisper-large-v3-turbo', tracks: [{ id: 'track', bytes: 128 }], transcripts: [] });
     await window.echo.autoTranscribeMeeting(meeting('disabled')); const disabledCalls = calls;
     await request(true);
     window.echoInference.getDownloadedModels = async () => [];
     await window.echo.autoTranscribeMeeting(meeting('missing-model')); const noModelCalls = calls;
-    window.echoInference.getDownloadedModels = async () => ['onnx-community/whisper-tiny.en'];
+    window.echoInference.getDownloadedModels = async () => ['onnx-community/whisper-large-v3-turbo'];
     await Promise.all([window.echo.autoTranscribeMeeting(meeting('ready')), window.echo.autoTranscribeMeeting(meeting('ready'))]);
     return { disabledCalls, noModelCalls, totalCalls: calls, skipped };
   });

@@ -55,7 +55,7 @@ If your file manager doesn't have **Open in Terminal**, open the Terminal app, t
 
 Open **[http://localhost:3000](http://localhost:3000)** in Chrome or Chromium. Put the address in the browser's address bar. `localhost` means your own computer.
 
-You should see **“Good conversations start here.”** You can open the labeled sample meeting to explore the interface. Its text is an example; it doesn't have recorded audio.
+You should see **Overview** You can open the labeled sample meeting to explore the interface. Its text is an example; it doesn't have recorded audio.
 
 ### Close Echo and return later
 
@@ -81,7 +81,7 @@ Already have an audio file? Choose **Upload a recording** on the Overview page i
 Echo needs a **speech model** to recognize words. This is a set of files you download once. It runs on your computer and is saved in your browser's storage.
 
 1. Open **Models → Speech models**.
-2. For English, choose **Whisper Tiny** and **Download model**. It's about 75 MB. For other languages, choose **Whisper Base**, which is about 145 MB.
+2. Choose **Whisper Large V3 Turbo** (the default, about 900 MB including speaker models) or **Whisper Large V3** (about 1.7 GB). Both support multiple languages. Choose **Download model**. Large models need substantial free memory and browser storage.
 3. Keep the tab open until you see **Downloaded · ready to use**.
 4. Open **Settings → General**, select that speech model and your recording language, and save your changes.
 5. Return to the saved meeting and choose **Create transcript**.
@@ -89,6 +89,8 @@ Echo needs a **speech model** to recognize words. This is a set of files you dow
 A transcript is the written version of your recording. Check it for mistakes. You can edit the text and speaker labels, then use timestamps to listen to the original audio.
 
 Transcription happens after recording. If automatic transcription is enabled and your selected model is already downloaded, Echo can start it when you save a recording.
+
+Use the sun/moon button in the top bar to switch between light and dark mode. Echo remembers this preference in your browser; until you choose, it follows your system appearance.
 
 ## Create meeting notes
 
@@ -220,4 +222,4 @@ The [developer guide](docs/development.md) covers OS prerequisites, configuratio
 
 Linux with desktop Chromium is the tested environment. Other operating systems, browsers, and real microphone setups need their own checks. Real model downloads and output, ChatGPT account usage, and live Google meeting connections haven't all been verified in this development environment. Try a short complete recording, transcript, and notes flow on your computer before relying on Echo.
 
-Echo is for one local user. Transcripts aren't live, and speaker labels aren't assigned automatically. Audio cleanup, seamless microphone switching, permanent passage/audio redaction, and migration from the desktop app aren't available. Large recordings can take substantial memory and processing time. See the [feature coverage](docs/feature-coverage.md) and [verification record](docs/verification.md) for details.
+Echo is for one local user. Transcripts aren't live, and speakers are grouped automatically after transcription. Select a speaker label to rename it throughout that transcript. Overlapping or unclear speech is marked for review. Audio cleanup, live transcription, seamless microphone switching, permanent passage/audio redaction, and migration from the desktop app aren't available. Large recordings can take substantial memory and processing time. See the [feature coverage](docs/feature-coverage.md) and [verification record](docs/verification.md) for details.

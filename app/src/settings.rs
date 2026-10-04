@@ -72,11 +72,11 @@ pub fn Settings(
     rsx! {
         div { class:"settings-page",
             header { class:"settings-page-heading",
-                div { div { class:"settings-eyebrow", "MAKE YOURSELF AT HOME" } h1 { "Settings" } p { "Your workspace, just the way you like it." } }
+                div { h1 { "Settings" } }
                 span { class:"settings-local-badge", span {} "Local workspace" }
             }
             nav { class:"settings-tabs", "aria-label":"Settings sections",
-                for (id,label,icon) in [("general","General","settings"),("vocabulary","Vocabulary","book"),("storage","Storage","hard-drive"),("help","Help & setup","help")] {
+                for (id,label,icon) in [("general","General","settings"),("vocabulary","Vocabulary","book"),("storage","Storage","hard-drive")] {
                     button { r#type:"button", class:if section()==id {"is-active"} else {""}, "aria-current":if section()==id {"page"} else {"false"}, onclick:move |_| section.set(id.into()), Icon { name:icon,size:17 } span { "{label}" } }
                 }
             }
@@ -85,7 +85,7 @@ pub fn Settings(
                     "vocabulary" => rsx! { VocabularySettings { notify } },
                     "storage" => rsx! { StorageSettings { notify } },
                     "help" => rsx! { HelpSettings { on_section:move |value:String| section.set(value) } },
-                    _ => rsx! { GeneralSettings { settings,draft,snapshot,on_change,notify,on_help:move |_| section.set("help".into()) } }
+                    _ => rsx! { GeneralSettings { settings,draft,snapshot,on_change,notify } }
                 }
             }
             footer { class:"settings-footer", Icon { name:"shield",size:14 } "Thoughtfully private. Entirely yours." span { "Echo Voice · Web 0.1" } }
@@ -112,7 +112,6 @@ fn GeneralSettings(
     mut snapshot: Signal<Value>,
     on_change: EventHandler<Value>,
     notify: EventHandler<String>,
-    on_help: EventHandler<()>,
 ) -> Element {
     let mut saving = use_signal(|| false);
     let mut error = use_signal(String::new);
@@ -140,21 +139,20 @@ fn GeneralSettings(
     };
     let chatgpt_model = text(&draft(), "chatgptModel");
     rsx! {
-        div { class:"settings-privacy-banner", span { class:"settings-banner-icon", Icon {name:"lock",size:23} } div { h2 {"Your conversations. Your choice."} p {"Your library is stored on this computer. Audio and transcription stay local. A meeting’s transcript is sent to OpenAI only when you request optional ChatGPT notes."} } button {r#type:"button",class:"settings-text-button",onclick:move |_| on_help.call(()),"How it works" Icon {name:"arrow-right",size:16}} }
-        form { class:"settings-form", onsubmit:move |event| { event.prevent_default(); if saving(){return;} if text(&draft(),"speechModel").ends_with(".en") && text(&draft(),"language")!="en" {error.set("Whisper Tiny is English-only. Choose Whisper Base for another language or automatic language detection.".into());return;} saving.set(true); error.set(String::new()); spawn(async move { match patch("/settings",draft()).await { Ok(updated)=>{draft.set(updated.clone());on_change.call(updated);notify.call("Your preferences are saved.".into());},Err(message)=>error.set(message) } saving.set(false); }); },
-            section { class:"settings-card", div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"settings",size:19}} div {h2 {"Your workspace"}p {"The small things that make it yours."}}}
+        form { class:"settings-form", onsubmit:move |event| { event.prevent_default(); if saving(){return;} saving.set(true); error.set(String::new()); spawn(async move { match patch("/settings",draft()).await { Ok(updated)=>{draft.set(updated.clone());on_change.call(updated);notify.call("Your preferences are saved.".into());},Err(message)=>error.set(message) } saving.set(false); }); },
+            section { class:"settings-card", div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"settings",size:19}} div {h2 {"Profile"}}}
                 div { class:"settings-field-grid",
                     label {class:"settings-field",span {"Your name"}input {class:"input",value:text(&draft(),"name"),placeholder:"What should we call you?",maxlength:120,oninput:move |e|draft.write()["name"]=json!(e.value())}small {"Used to personalize your local workspace."}}
                     label {class:"settings-field",span {"Recording language"}select {class:"input",value:text(&draft(),"language"),onchange:move |e|draft.write()["language"]=json!(e.value()),option {value:"en",selected:text(&draft(),"language")=="en","English"}option {value:"auto",selected:text(&draft(),"language")=="auto","Auto-detect · multilingual model"}option {value:"es",selected:text(&draft(),"language")=="es","Spanish"}option {value:"fr",selected:text(&draft(),"language")=="fr","French"}option {value:"de",selected:text(&draft(),"language")=="de","German"}option {value:"hi",selected:text(&draft(),"language")=="hi","Hindi"}option {value:"ja",selected:text(&draft(),"language")=="ja","Japanese"}option {value:"pt",selected:text(&draft(),"language")=="pt","Portuguese"}option {value:"zh",selected:text(&draft(),"language")=="zh","Chinese"}}small {"Choose a multilingual speech model for other languages."}}
                 }
             }
-            section {class:"settings-card",div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"cpu",size:19}}div {h2 {"Processing preferences"}p {"Speech stays local. Choose where your meeting notes are drafted."}}span {class:"settings-soft-badge","Local speech"}}
+            section {class:"settings-card",div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"cpu",size:19}}div {h2 {"Processing preferences"}}span {class:"settings-soft-badge","Local speech"}}
                 div {class:"settings-field-grid",
-                    label {class:"settings-field",span {"Default speech model"}select {class:"input",value:text(&draft(),"speechModel"),onchange:move |e|draft.write()["speechModel"]=json!(e.value()),option {value:"onnx-community/whisper-tiny.en",selected:text(&draft(),"speechModel")=="onnx-community/whisper-tiny.en","Whisper Tiny · English"}option {value:"onnx-community/whisper-base",selected:text(&draft(),"speechModel")=="onnx-community/whisper-base","Whisper Base · Multilingual"}}small {"Models download to this browser and process audio locally."}}
+                    label {class:"settings-field",span {"Default speech model"}select {class:"input",value:text(&draft(),"speechModel"),onchange:move |e|draft.write()["speechModel"]=json!(e.value()),option {value:"onnx-community/whisper-large-v3-turbo",selected:text(&draft(),"speechModel")=="onnx-community/whisper-large-v3-turbo","Whisper Large V3 Turbo"}option {value:"onnx-community/whisper-large-v3",selected:text(&draft(),"speechModel")=="onnx-community/whisper-large-v3","Whisper Large V3"}}small {"Models download to this browser and process audio locally."}}
                     label {class:"settings-field",span {"Default notes provider"}select {class:"input",value:notes_provider,"aria-describedby":"settings-provider-help",onchange:move |e|{let provider=e.value();draft.write()["notesProvider"]=json!(provider);if draft()["chatgptModel"].is_null(){draft.write()["chatgptModel"]=json!("");}},option {value:"ollama",selected:notes_provider=="ollama","Ollama · Local"}option {value:"chatgpt",selected:notes_provider=="chatgpt","ChatGPT · Optional cloud"}}small {id:"settings-provider-help","Applies when you request notes. Recording and transcription remain local."}}
                 }
                 if notes_provider == "chatgpt" {
-                    div {class:"settings-provider-card",div {class:"settings-provider-heading",span {class:"settings-provider-icon",Icon {name:"sparkles",size:19}}div {h3 {"ChatGPT notes, by choice"}span {"Optional cloud processing"}}}
+                    div {class:"settings-provider-card",div {class:"settings-provider-heading",span {class:"settings-provider-icon",Icon {name:"sparkles",size:19}}div {h3 {"ChatGPT"}span {"Optional cloud processing"}}}
                         p {"When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content."}
                         p {class:"settings-provider-allowance","Sign in through the official Codex flow with an eligible ChatGPT plan. Requests use your plan’s Codex allowance, not API credits. No API key is needed."}
                         div {class:"settings-provider-bottom",div {span {"ChatGPT model"}strong {if chatgpt_model.is_empty(){"Account default"}else{"{chatgpt_model}"}}small {"Choose from your account’s available models in Models → ChatGPT."}}button {r#type:"button",class:"button button-secondary",onclick:move |_|open_chatgpt_models(),"Set up ChatGPT" Icon {name:"arrow-right",size:15}}}
@@ -163,7 +161,7 @@ fn GeneralSettings(
                     div {class:"settings-local-notes-field",label {class:"settings-field",span {"Default local notes model"}input {class:"input",value:text(&draft(),"notesModel"),maxlength:120,placeholder:"qwen2.5:3b",oninput:move |e|draft.write()["notesModel"]=json!(e.value())}small {"The name of a model installed in your local Ollama library. Notes are generated on this computer."}}}
                 }
                 div {class:"settings-toggle-row",div {h3 {"Transcribe after recording"}p {"Start local transcription when a recording is saved. Audio is kept if processing fails."}}Toggle {checked:draft()["autoTranscribe"].as_bool().unwrap_or(true),label:"Transcribe after recording",onchange:move |_|{let enabled=draft()["autoTranscribe"].as_bool().unwrap_or(true);draft.write()["autoTranscribe"]=json!(!enabled);}}}
-                div {class:"settings-info",Icon {name:"info",size:16}p {"Transcription runs after recording. Speaker labels can be reviewed manually; automatic speaker grouping and live transcription are not available in this version."}}
+                div {class:"settings-info",Icon {name:"info",size:16}p {"Transcription runs after recording. Speakers are grouped automatically. Select a speaker label in the transcript to rename it."}}
                 if notes_provider == "ollama" {details {class:"settings-advanced",summary {"Local notes connection" Icon {name:"chevron-down",size:16}}div {label {class:"settings-field",span {"Ollama address"}input {class:"input",r#type:"url",value:text(&draft(),"ollamaUrl"),placeholder:"http://127.0.0.1:11434",required:true,oninput:move |e|draft.write()["ollamaUrl"]=json!(e.value())}small {"Only a service running on this computer is supported. Ollama is optional; recording and transcription work without it."}}}}}
             }
             if !error().is_empty() {div {class:"settings-error",role:"alert","{error}"}}
@@ -382,7 +380,7 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
     rsx! {
         div {class:"settings-section-top",div {h2 {"A home for your conversations"}p {"Your library lives on your computer. Keep an independent copy whenever you like."}}}
         if !error().is_empty(){div {class:"settings-error",role:"alert","{error}"}}
-        section {class:"settings-card",div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"hard-drive",size:20}}div {h2 {"Local storage"}p {"Audio and meeting records, under your control."}}span {class:"settings-soft-badge",Icon {name:"lock",size:12}"Private"}}
+        section {class:"settings-card",div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"hard-drive",size:20}}div {h2 {"Local storage"}}span {class:"settings-soft-badge",Icon {name:"lock",size:12}"Private"}}
             if loading(){p {class:"settings-load-state",role:"status",Icon {name:"loader",size:19}"Checking local storage…"}}
             else if !storage().is_null(){div {class:"settings-storage-stats",div {span {"Library size"}strong {"{bytes(size)}"}}div {span {"Saved meetings"}strong {"{count}"}}div {span {"Available on disk"}strong {"{bytes(available)}"}}}div {class:"settings-storage-meter",role:"img","aria-label":format!("{} used by Echo Voice; {} available",bytes(size),bytes(available)),span {style:"width:{used}%"}}div {class:"settings-storage-legend",span {i {}"Echo Voice library"}span {"Space available for future conversations"}}if available<500.*1024.*1024.{div {class:"settings-storage-warning",role:"status","Your disk has less than 500 MB free. Export your library and free up disk space before a long recording."}}div {class:"settings-storage-path",Icon {name:"folder",size:19}div {span {"Library location on this computer"}code {"{storage_path}"}}}}
             else{button {r#type:"button",class:"button button-secondary",onclick:move |_|{let n=refresh()+1;refresh.set(n);},"Retry storage check"}}
@@ -432,7 +430,7 @@ fn HelpSettings(on_section: EventHandler<String>) -> Element {
             details {open:true,summary {Icon {name:"shield",size:17}span {"What stays private?"}Icon {name:"chevron-down",size:16}}p {"Your library is stored on your computer. Speech recognition runs inside your browser, and Ollama notes run locally. Optional ChatGPT notes send the meeting’s active transcript and instructions to OpenAI after you request them; audio is not uploaded for notes or cloud transcription. Model downloads contact the model host. Connecting Google Calendar exchanges calendar metadata with Google, and the meeting runner connects to Google Meet."}}
             details {summary {Icon {name:"sparkles",size:17}span {"How does my ChatGPT plan work with Echo?"}Icon {name:"chevron-down",size:16}}p {"Echo uses the official Codex helper and managed ChatGPT sign-in. You need a plan and account that are eligible for Codex. Requests use that plan’s Codex allowance, which can have usage limits; this is not a general ChatGPT token pool or an API-credit balance. Echo never asks for an API key for this option. Sign-in and model availability are managed in Models → ChatGPT. Choosing the provider does not send meeting content or start a notes request."}}
             details {summary {Icon {name:"mic",size:17}span {"Which browsers and devices can record?"}Icon {name:"chevron-down",size:16}}p {"Use an up-to-date desktop Chrome or Edge on localhost for the recommended experience. Firefox and Safari may support room recording when microphone access and a compatible MediaRecorder audio format are available; recording and model performance can vary. A responsive mobile layout does not guarantee mobile recording support. Keep Echo Voice open during recording and transcription."}}
-            details {summary {Icon {name:"book",size:17}span {"Can I rely on every word and speaker label?"}Icon {name:"chevron-down",size:16}}p {"Transcripts and generated notes are drafts. Review names, numbers, and decisions against the original audio. Timestamps are approximate passage timings. Automatic speaker grouping and live transcription are unavailable in this release. You can correct the transcript and assign speaker labels manually."}}
+            details {summary {Icon {name:"book",size:17}span {"Can I rely on every word and speaker label?"}Icon {name:"chevron-down",size:16}}p {"Transcripts and generated notes are drafts. Review names, numbers, and decisions against the original audio. Timestamps are approximate passage timings. Speakers are grouped by voice. Review the labels and rename speakers in the transcript."}}
             details {summary {Icon {name:"hard-drive",size:17}span {"How do I back up or move my meetings?"}Icon {name:"chevron-down",size:16}}p {"Export a web library archive in Storage and keep the downloaded copy in a safe location. Restore it into an empty Echo Voice Web library and vocabulary list. Browser model downloads are separate and can be downloaded again. ChatGPT sign-in credentials are excluded from library exports, so connect your account separately on another computer. Legacy desktop-library migration is not supported. Deleting a meeting here does not delete copies you previously exported."}}
             details {summary {Icon {name:"help",size:17}span {"What if recording or processing is interrupted?"}Icon {name:"chevron-down",size:16}}p {"Saved audio chunks remain available if speech or notes processing fails. Reopen the meeting and retry processing after fixing the reported issue. A browser crash or lost microphone may leave a gap after the last saved chunk. Recording never resumes automatically; review the recording and consent before starting again."}}
         }

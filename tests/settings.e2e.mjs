@@ -41,17 +41,17 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
     await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
     assert.equal(await page.evaluate(() => window.__microphoneRequests), 0);
 
-    await t.test('preferences save and conflicting model/language choices remain unsaved', async () => {
+    await t.test('preferences save multilingual model/language choices', async () => {
       await page.getByPlaceholder('What should we call you?').fill('Settings verification');
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
       await expect(page.getByText('Your preferences are up to date')).toBeVisible();
       assert.equal((await (await context.request.get(`${baseURL}/api/settings`)).json()).name, 'Settings verification');
       await page.locator('select').filter({ has: page.locator('option[value="auto"]') }).selectOption('fr');
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-      await expect(page.getByRole('alert')).toContainText('English-only');
-      assert.equal((await (await context.request.get(`${baseURL}/api/settings`)).json()).language, 'en');
-      const speechSelect = page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-base"]') });
-      await speechSelect.selectOption('onnx-community/whisper-base');
+      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      assert.equal((await (await context.request.get(`${baseURL}/api/settings`)).json()).language, 'fr');
+      const speechSelect = page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-large-v3"]') });
+      await speechSelect.selectOption('onnx-community/whisper-large-v3');
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
       await expect(page.getByText('Your preferences are up to date')).toBeVisible();
       await page.route('**/api/settings', async route => {
@@ -62,11 +62,11 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByPlaceholder('What should we call you?').fill('Keep this unsaved edit');
       await expect(page.locator('select').filter({ has: page.locator('option[value="auto"]') })).toHaveValue('fr');
-      await expect(page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-base"]') })).toHaveValue('onnx-community/whisper-base');
+      await expect(page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-large-v3"]') })).toHaveValue('onnx-community/whisper-large-v3');
       await expect(page.getByPlaceholder('What should we call you?')).toHaveValue('Keep this unsaved edit');
       await page.unroute('**/api/settings');
       await page.locator('select').filter({ has: page.locator('option[value="auto"]') }).selectOption(initialSettings.language);
-      await page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-base"]') }).selectOption(initialSettings.speechModel);
+      await page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-large-v3"]') }).selectOption(initialSettings.speechModel);
       await page.getByPlaceholder('What should we call you?').fill(initialSettings.name);
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
       await expect(page.getByText('Your preferences are up to date')).toBeVisible();
@@ -83,17 +83,17 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await expect(providerSelect).toHaveValue('ollama');
       const originalOllamaModel = await page.getByPlaceholder('qwen2.5:3b').inputValue();
       await providerSelect.selectOption('chatgpt');
-      await expect(page.getByRole('heading', { name: 'ChatGPT notes, by choice' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'ChatGPT' })).toBeVisible();
       await expect(page.getByText('When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content.')).toBeVisible();
       await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveCount(0);
       await page.getByPlaceholder('What should we call you?').fill('Draft survives setup');
       await page.getByRole('button', { name: 'Set up ChatGPT', exact: true }).click();
-      await expect(page.getByRole('heading', { name: 'Your models. Your choice.' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await expect(providerSelect).toHaveValue('chatgpt');
       await expect(page.getByPlaceholder('What should we call you?')).toHaveValue('Draft survives setup');
       assert.equal((await (await context.request.get(`${baseURL}/api/settings`)).json()).notesProvider, 'ollama', 'Setup navigation preserves a draft without saving it implicitly');
-      await page.getByRole('button', { name: 'Help & setup', exact: true }).click();
+      await page.getByRole('button', { name: 'Vocabulary', exact: true }).click();
       await page.getByRole('button', { name: 'General', exact: true }).click();
       await expect(providerSelect).toHaveValue('chatgpt');
       await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
@@ -211,18 +211,18 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
     });
 
     await t.test('microphone permission is explicit and test tracks are released', async () => {
-      await page.getByRole('button', { name: 'Help & setup', exact: true }).click();
+      await page.getByRole('button', { name: 'New meeting', exact: true }).click();
       assert.equal(await page.evaluate(() => window.__microphoneRequests), 0);
-      await page.getByRole('button', { name: 'Test microphone access', exact: true }).click();
-      await expect(page.getByText('Microphone access works. The test has ended; no audio was saved.')).toBeVisible();
+      await page.getByRole('button', { name: 'Test access', exact: true }).click();
+      await expect(page.getByText('Microphone access is ready', { exact: true })).toBeVisible();
       assert.equal(await page.evaluate(() => window.__microphoneRequests), 1);
       assert.equal(await page.evaluate(() => window.__testTracks.length > 0 && window.__testTracks.every(track => track.readyState === 'ended')), true);
-      await page.screenshot({ path: `${screenshotDir}/help-desktop.png`, fullPage: true });
+      await page.getByRole('button', { name: 'Close new meeting', exact: true }).click();
     });
 
-    await t.test('all four settings tabs fit a narrow screen', async () => {
+    await t.test('all three settings tabs fit a narrow screen', async () => {
       await page.setViewportSize({ width: 390, height: 844 });
-      for (const tab of ['General', 'Vocabulary', 'Storage', 'Help & setup']) {
+      for (const tab of ['General', 'Vocabulary', 'Storage']) {
         await page.getByRole('button', { name: tab, exact: true }).click();
         await expect(page.locator('.settings-page')).toBeVisible();
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `${tab} must not overflow the viewport`);

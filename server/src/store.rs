@@ -710,7 +710,7 @@ pub fn get_meeting(key: &str) -> Result<Option<Value>> {
 }
 /// Define initial workspace preferences for local speech and notes processing.
 fn defaults() -> Value {
-    json!({"name":"","speechModel":"onnx-community/whisper-tiny.en","notesModel":"qwen2.5:3b","notesProvider":"ollama","chatgptModel":"","ollamaUrl":"http://127.0.0.1:11434","language":"en","autoTranscribe":true,"retainAudio":true,"onboardingComplete":false})
+    json!({"name":"","speechModel":"onnx-community/whisper-large-v3-turbo","notesModel":"qwen2.5:3b","notesProvider":"ollama","chatgptModel":"","ollamaUrl":"http://127.0.0.1:11434","language":"en","autoTranscribe":true,"retainAudio":true,"onboardingComplete":false})
 }
 /// Merge saved preferences with current defaults and migrate legacy provider settings.
 fn normalized_settings(saved: Value) -> Result<Value> {
@@ -718,6 +718,12 @@ fn normalized_settings(saved: Value) -> Result<Value> {
     let mut settings = defaults();
     for (key, value) in saved.as_object().unwrap() {
         settings[key] = value.clone();
+    }
+    if matches!(
+        settings["speechModel"].as_str(),
+        Some("onnx-community/whisper-tiny.en" | "onnx-community/whisper-base")
+    ) {
+        settings["speechModel"] = json!("onnx-community/whisper-large-v3-turbo");
     }
     validate_settings(&settings, true)?;
     Ok(settings)
