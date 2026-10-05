@@ -25,11 +25,13 @@ The OAuth flow checks a ten-minute, HttpOnly, SameSite=Lax state cookie and uses
 
 A Google OAuth project in testing may issue refresh tokens that expire after seven days. Reconnect when prompted. A declined grant, invalid redirect, disabled Calendar API, quota response, and offline connection surface as errors; they never produce pretend calendar results.
 
-## Optional local Google Meet runner (Linux)
+## Optional local Google Meet runner (Docker or native Linux)
 
-The runner currently supports **Linux with PulseAudio and guest-accessible Google Meet meetings**. macOS/Windows bot capture, Zoom, Teams, organization-only meetings, and unattended scheduled joining are not qualified or implemented. The runner joins only after you choose an event and confirm participant consent. It is a visible guest named **Echo Voice - Recording**; the host must admit it when Meet requires admission.
+The runner supports **Docker Linux containers on macOS, Windows and Linux**, plus native Linux with PulseAudio, for guest-accessible Google Meet meetings. The container keeps Chromium playback and capture in its own private audio environment. Zoom, Teams, organization-only meetings and unattended scheduled joining are not implemented. The runner joins only after you choose an event and confirm participant consent. It is a visible guest named **Echo Voice - Recording**; the host must admit it when Meet requires admission.
 
-Use a normal, non-root Linux desktop account. Install Python 3.10+, FFmpeg, PulseAudio tools, and Playwright's Chromium dependencies. On Debian/Ubuntu, an administrator can install prerequisites with:
+For Docker installation, shared-volume configuration, loopback publishing and the real audio smoke test, follow [runner/README.md](../runner/README.md#docker-setup-macos-windows-and-linux). Docker Desktop runs the Linux container on macOS/Windows; native ScreenCaptureKit or Windows audio drivers are unnecessary. Live meeting admission and playback still need qualification on each setup.
+
+For native Linux, use a normal, non-root desktop account. Install Python 3.10+, FFmpeg, PulseAudio tools, and Playwright's Chromium dependencies. On Debian/Ubuntu, an administrator can install prerequisites with:
 
 ```bash
 sudo apt-get install python3 python3-venv ffmpeg pulseaudio pulseaudio-utils
@@ -48,12 +50,12 @@ runner/.venv/bin/python runner/meet_runner.py --doctor
 runner/.venv/bin/python runner/meet_runner.py
 ```
 
-The config initializes `dataDir`, `runner.url`, headless mode, and admission timeout. The runner and server automatically share a random secret in `<dataDir>/credentials/runner-token` with private Unix permissions. No bot token or runner URL is needed in `.env`. The runner binds the configured `127.0.0.1` port and rejects browser-origin callers; the Rust server sends authenticated requests directly without proxies or redirects.
+The config initializes `dataDir`, `runner.url`, headless mode, and admission timeout. The runner and server automatically share a random secret in `<dataDir>/credentials/runner-token` with private Unix permissions. No bot token or runner URL is needed in `.env`. The native runner binds the configured `127.0.0.1` port; Docker publishes that same host loopback port while listening inside its isolated container and rejects browser-origin callers; the Rust server sends authenticated requests directly without proxies or redirects.
 
 ## Recording behavior
 
 1. Connect Calendar, select a Google Meet event, acknowledge participant consent, and start the local recording guest.
-2. The guest starts with a fake silent microphone and camera, disables both in Meet's pre-join controls, and refuses to request entry if it cannot verify they are off. It does not capture the local computer's microphone or camera. No Google login cookies are stored or automated.
+2. The guest denies camera and microphone permission before navigating to Meet. It never opens real or fake capture devices, and refuses to request entry unless both browser permission states are denied. Blocked devices may have different pre-join labels; it never clicks a control to enable them. No Google login cookies are stored or automated.
 3. While the host admits it, the status is **Waiting**, and no meeting audio is recorded. Admission times out after five minutes. Organization restrictions, rejection, invalid links, missing Chromium, or changed Meet controls produce a failed status.
 4. Once admitted, Chromium's playback routes to a private PulseAudio sink, separate from the user's general desktop output. FFmpeg saves that sink's monitor as mono, 16 kHz PCM WAV. Playwright's default mute-audio flag is explicitly disabled. The status becomes **Recording** only after the capture process is running.
 5. Stop the guest from Echo Voice. It leaves the call, finalizes the WAV header, and offers completed audio for import. Import saves the track into the meeting library as `meeting-bot` in deterministic 64 MB chunks. Retrying a partially completed import verifies existing chunk hashes and resumes safely; importing twice cannot duplicate it. Then use the meeting's local transcription workflow.
@@ -95,3 +97,9 @@ python3 tests/integrations_runner_test.py
 ```
 
 A real Google OAuth authorization, Google Meet admission, and audible capture must be validated with the user's Google project, network, operating system and meeting host. They cannot be simulated into a claim of production compatibility. Google's meeting UI can change; failures to locate or verify pre-join controls stop the bot safely and require runner maintenance. For local microphone recording or imported audio, no Calendar connection or bot is required.
+
+## Live meeting qualification
+
+The Docker runner has passed receive-only browser playback and WAV capture checks on macOS with an ARM64 Docker container: camera and microphone permission remain denied while an isolated generated tone reaches the recording. This verifies the local capture pipeline.
+
+A real Google Meet test returned “You can't join this video call” before guest-name entry or an admission request, including with the test meeting temporarily allowing Open access. Google did not expose a more specific reason. Successful live Meet recording is therefore not qualified on that setup; Docker portability does not guarantee that Google accepts the dedicated anonymous browser. The runner never transfers browser login sessions, signs in automatically, or enables camera/microphone capture. Use local recording or upload an existing recording when Meet declines the guest.

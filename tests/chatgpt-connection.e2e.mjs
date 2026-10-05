@@ -128,7 +128,7 @@ try {
   });
   const panel = page.getByRole('region', { name: 'ChatGPT connection', exact: true });
   const signIn = panel.getByRole('button', { name: 'Sign in with ChatGPT', exact: true });
-  const refresh = panel.getByRole('button', { name: 'Refresh ChatGPT connection', exact: true });
+  const refresh = panel.getByRole('button', { name: 'Refresh connection', exact: true });
   const cancel = panel.getByRole('button', { name: 'Cancel sign-in', exact: true });
   const loginLink = panel.getByRole('link', { name: 'Open ChatGPT sign-in', exact: true });
   const model = panel.getByRole('combobox', { name: 'Notes model', exact: true });
@@ -167,8 +167,8 @@ try {
 
   await openModels();
   await expect(signIn).toBeEnabled();
-  await expect(panel).toContainText('transcript text and speaker labels go to OpenAI');
-  await expect(panel).toContainText('Recording and speech transcription stay on this device.');
+  await expect(panel).toContainText('asks permission to send transcript text and speaker labels to OpenAI');
+  await expect(panel).toContainText('Audio and transcription stay on this device.');
   await expect(panel).toContainText('No API key is required.');
   assert.equal(count('POST /api/chatgpt/login'), 0, 'Opening Models must not start sign-in.');
   assert.deepEqual(settingsWrites, [], 'Opening Models must not change saved preferences.');

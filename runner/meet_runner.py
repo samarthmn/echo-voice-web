@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local, consent-gated Google Meet guest recorder. Linux + PulseAudio only.
+"""Local, consent-gated Google Meet guest recorder. Linux + PulseAudio (native or Docker).
 
 No meeting audio is sent to a recording service. Google Meet itself remains an
 external communications service. Run only on loopback; requests require a token.
@@ -26,6 +26,8 @@ import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import load_config, runner_token
+from capture import browser_options, capture_command, deny_capture, verify_receive_only, wait_for_pcm
+from meet_ui import capture_join_failure, prepare_guest, diagnostics as join_diagnostics
 
 os.umask(0o077)
 CONFIG, DATA_ROOT, RUNNER_PORT = load_config()
@@ -68,6 +70,16 @@ def readiness() -> tuple[bool, str]:
             return False, "PulseAudio is not running. Start pulseaudio --start as your normal user."
     except (OSError, subprocess.TimeoutExpired):
         return False, "PulseAudio could not be reached."
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as playwright:
+            executable = Path(playwright.chromium.executable_path)
+            if not executable.is_file() or not os.access(executable, os.X_OK):
+                return False, "Install the runner's Chromium browser with python -m playwright install chromium."
+    except Exception:
+        return False, "Playwright's Chromium installation could not be checked. Reinstall the runner browser."
+    if os.environ.get("ECHO_RUNNER_CONTAINER") == "1" and not (Path(os.environ["XDG_RUNTIME_DIR"]) / "audio-qualified").is_file():
+        return False, "The container has not verified audible Chromium playback yet. Check its startup audio test and logs."
     return True, "Local Google Meet runner is ready; hosts must admit its visible recording guest."
 
 
@@ -131,77 +143,64 @@ class Session:
                 raise RuntimeError("A private audio sink could not be created. Check PulseAudio.")
             self.sink_module = sink_result.stdout.strip()
             with sync_playwright() as p:
-                env = dict(os.environ, PULSE_SINK=sink)
-                browser = p.chromium.launch(headless=CONFIG["runner"]["headless"], env=env, ignore_default_args=["--mute-audio"],
-                    args=["--autoplay-policy=no-user-gesture-required", "--use-fake-ui-for-media-stream",
-                          "--use-fake-device-for-media-stream", "--disable-dev-shm-usage"])
-                context = browser.new_context(locale="en-US", permissions=["microphone", "camera"], viewport={"width": 1280, "height": 900})
+                browser = p.chromium.launch(**browser_options(sink, CONFIG["runner"]["headless"]))
+                context = browser.new_context(locale="en-US", viewport={"width": 1280, "height": 900})
                 page = context.new_page()
-                page.goto(self.url + "?hl=en", wait_until="domcontentloaded", timeout=60_000)
-                # Guest entry is intentionally used. Do not automate a Google login or save account cookies.
-                name = page.get_by_role("textbox", name=re.compile("your name", re.I))
-                try:
-                    name.wait_for(timeout=30_000)
-                    name.fill("Echo Voice - Recording")
-                except Exception:
-                    if page.get_by_text(re.compile("sign in to join|only people.*organization", re.I)).count():
-                        raise RuntimeError("This meeting requires a signed-in guest. The local guest bot cannot join; ask the host to permit external guests.")
-                for label in (re.compile("turn off microphone", re.I), re.compile("turn off camera", re.I)):
-                    toggle = page.get_by_role("button", name=label)
-                    if toggle.count() and toggle.first.is_visible():
-                        toggle.first.click(timeout=5000)
-                # Require the pre-join controls to indicate disabled capture before requesting entry.
-                muted = page.get_by_role("button", name=re.compile("turn on microphone", re.I))
-                camera_off = page.get_by_role("button", name=re.compile("turn on camera", re.I))
-                if not muted.count() or not camera_off.count():
-                    raise RuntimeError("Google Meet's pre-join controls changed. The runner stopped because it could not verify microphone and camera are disabled.")
-                join = page.get_by_role("button", name=re.compile(r"^(Ask to join|Join now|Join meeting)$", re.I))
-                if not join.count():
-                    raise RuntimeError("Google Meet did not offer guest entry. Check the meeting link and host's guest policy.")
-                if self.stop_event.is_set():
-                    return
-                join.first.click(timeout=15_000)
-                self.set_state("waiting", "Waiting for the host to admit Echo Voice - Recording. No meeting audio is being recorded yet.")
-                admission_timeout = CONFIG["runner"]["admissionTimeoutSeconds"]
-                deadline = time.monotonic() + admission_timeout
-                leave = page.get_by_role("button", name=re.compile("leave call", re.I))
-                while not self.stop_event.is_set():
-                    if leave.count() and leave.first.is_visible():
-                        break
-                    if page.get_by_text(re.compile("request.*denied|can.t join this.*call|meeting.*ended|no one responded", re.I)).count():
-                        raise RuntimeError("The host declined entry, the meeting ended, or guest access is blocked.")
-                    if time.monotonic() > deadline:
-                        raise RuntimeError(f"No host admitted the recording guest within {admission_timeout} seconds. Ask the host to admit it, then start a new recording.")
-                    page.wait_for_timeout(1000)
-                if not self.stop_event.is_set():
-                    log = open(self.folder / "capture.log", "wb")
+                with capture_join_failure(page, self.folder):
+                    _permissions_guard = deny_capture(context, page, "https://meet.google.com")
                     try:
-                        self.recording_process = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                            "-f", "pulse", "-i", sink + ".monitor", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(self.audio)],
-                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log)
-                        page.wait_for_timeout(750)
-                        if self.recording_process.poll() is not None:
-                            raise RuntimeError("The audio capture process failed. Check the local capture.log and PulseAudio setup.")
-                        self.started_at = utc_now()
-                        self.set_state("recording", "Recording this Google Meet locally. Microphone and camera remain off.")
-                        start = time.monotonic()
-                        while not self.stop_event.is_set():
-                            if self.recording_process.poll() is not None:
-                                raise RuntimeError("Audio capture stopped unexpectedly. Any completed audio has been preserved.")
-                            if not leave.count() or not leave.first.is_visible():
-                                break
-                            if time.monotonic() - start > 8 * 3600:
-                                raise RuntimeError("The eight-hour recording limit was reached. Saved audio remains available.")
-                            if shutil.disk_usage(self.folder).free < 100 * 1024 * 1024:
-                                raise RuntimeError("Local disk space is low. Recording stopped safely; completed audio remains available.")
-                            page.wait_for_timeout(1000)
+                        page.goto(self.url + "?hl=en", wait_until="domcontentloaded", timeout=60_000)
+                    except Exception:
+                        join_diagnostics(page, self.folder, "navigation-failed")
+                        raise
+                    # Guest entry is intentionally used. Do not automate a Google login or save account cookies.
+                    join = prepare_guest(page, self.stop_event, self.folder)
+                    if join is None or self.stop_event.is_set():
+                        return
+                    verify_receive_only(page)
+                    join.click(timeout=15_000)
+                    join_diagnostics(page, self.folder, "entry-requested")
+                    self.set_state("waiting", "Waiting for the host to admit Echo Voice - Recording. No meeting audio is being recorded yet.")
+                    admission_timeout = CONFIG["runner"]["admissionTimeoutSeconds"]
+                    deadline = time.monotonic() + admission_timeout
+                    leave = page.get_by_role("button", name=re.compile("leave call", re.I))
+                    while not self.stop_event.is_set():
                         if leave.count() and leave.first.is_visible():
-                            leave.first.click(timeout=5000)
-                    finally:
-                        self.finish_audio()
-                        log.close()
-                browser.close()
-                browser = None
+                            break
+                        if page.get_by_text(re.compile("request.*denied|can.t join this.*call|meeting.*ended|no one responded", re.I)).count():
+                            join_diagnostics(page, self.folder, "entry-declined")
+                            raise RuntimeError("The host declined entry, the meeting ended, or guest access is blocked.")
+                        if time.monotonic() > deadline:
+                            join_diagnostics(page, self.folder, "admission-timed-out")
+                            raise RuntimeError(f"No host admitted the recording guest within {admission_timeout} seconds. Ask the host to admit it, then start a new recording.")
+                        page.wait_for_timeout(1000)
+                    if not self.stop_event.is_set():
+                        join_diagnostics(page, self.folder, "admitted")
+                        log = open(self.folder / "capture.log", "wb")
+                        try:
+                            self.recording_process = subprocess.Popen(capture_command(sink, self.audio),
+                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log)
+                            wait_for_pcm(self.recording_process, self.audio)
+                            self.started_at = utc_now()
+                            self.set_state("recording", "Recording this Google Meet locally. Microphone and camera remain off.")
+                            start = time.monotonic()
+                            while not self.stop_event.is_set():
+                                if self.recording_process.poll() is not None:
+                                    raise RuntimeError("Audio capture stopped unexpectedly. Any completed audio has been preserved.")
+                                if not leave.count() or not leave.first.is_visible():
+                                    break
+                                if time.monotonic() - start > 8 * 3600:
+                                    raise RuntimeError("The eight-hour recording limit was reached. Saved audio remains available.")
+                                if shutil.disk_usage(self.folder).free < 100 * 1024 * 1024:
+                                    raise RuntimeError("Local disk space is low. Recording stopped safely; completed audio remains available.")
+                                page.wait_for_timeout(1000)
+                            if leave.count() and leave.first.is_visible():
+                                leave.first.click(timeout=5000)
+                        finally:
+                            self.finish_audio()
+                            log.close()
+                    browser.close()
+                    browser = None
         except Exception as error:
             # Playwright errors may contain remote page internals. Keep API messages concise.
             failure = str(error).split("\n")[0][:350]
@@ -439,7 +438,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=RUNNER_PORT)
     parser.add_argument("--doctor", action="store_true")
+    parser.add_argument("--container-bind", action="store_true", help="Listen inside the isolated runner container; publish only on host loopback.")
     args = parser.parse_args()
+    if args.container_bind and (sys.platform != "linux" or os.environ.get("ECHO_RUNNER_CONTAINER") != "1"):
+        parser.error("--container-bind requires the Linux runner container. Native runners always bind loopback.")
     if args.doctor:
         ready, detail = readiness()
         folder = DATA_ROOT / "credentials"
@@ -458,10 +460,11 @@ def main():
         """Route process termination through the runner's normal cleanup path."""
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    bind = "0.0.0.0" if args.container_bind else "127.0.0.1"
+    server = ThreadingHTTPServer((bind, args.port), Handler)
     server.daemon_threads = True
     recover_sessions()
-    print(f"Echo Voice local runner listening at http://127.0.0.1:{args.port}", flush=True)
+    print(f"Echo Voice local runner listening at http://{bind}:{args.port}", flush=True)
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

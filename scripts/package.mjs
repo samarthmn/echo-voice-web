@@ -7,6 +7,10 @@ const root=process.cwd(),stage=path.join(root,'tmp','release-stage');
 await mkdir(path.join(root,'artifacts'),{recursive:true});
 await rm(stage,{recursive:true,force:true});await mkdir(stage,{recursive:true});
 const files=execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);
+// Keep the portable optional runner executable from both source and app bundles.
+for(const required of ['compose.runner.yaml','runner/Dockerfile','runner/.dockerignore','runner/container-entrypoint.sh','runner/audio_smoke.py','runner/capture.py','runner/meet_ui.py','runner/README.md']){
+  if(!files.includes(required))throw new Error(`Release is missing tracked Docker runner file: ${required}`);
+}
 for(const file of files){if(file.startsWith('artifacts/')&&!/\.(png|json)$/.test(file))continue;await mkdir(path.dirname(path.join(stage,'echo-voice-web',file)),{recursive:true});await cp(file,path.join(stage,'echo-voice-web',file));}
 execFileSync('tar',['-czf',path.join(root,'artifacts','echo-voice-source.tar.gz'),'-C',stage,'echo-voice-web']);
 for(const directory of ['public/assets','public/js','public/wasm'])await cp(directory,path.join(stage,'echo-voice-web',directory),{recursive:true});

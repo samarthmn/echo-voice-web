@@ -6,9 +6,24 @@ export const SPEAKER_MODELS = {
   embedding: 'Xenova/wavlm-base-plus-sv',
 };
 export const MODELS = [
-  { id: DEFAULT_SPEECH_MODEL, name: 'Whisper Large V3 Turbo', label: 'Whisper Large V3 Turbo', size: '~900 MB', sizeMB: 900, description: 'Faster multilingual transcription. Includes automatic speaker grouping.', language: 'Multilingual', recommended: true },
-  { id: 'onnx-community/whisper-large-v3', name: 'Whisper Large V3', label: 'Whisper Large V3', size: '~1.7 GB', sizeMB: 1700, description: 'Full Large V3 model. Requires more memory and processing time.', language: 'Multilingual', recommended: false },
+  { id: DEFAULT_SPEECH_MODEL, checkpoint: 'onnx-community/whisper-large-v3-turbo_timestamped', revision: 'b3f77bf9a8c4d5ea3415827033d1ffea7955fd9a', name: 'Whisper Large V3 Turbo', label: 'Whisper Large V3 Turbo', size: '~1.2 GB', sizeMB: 1200, description: 'Faster multilingual transcription. Includes automatic speaker grouping.', language: 'Multilingual', recommended: true },
+  { id: 'onnx-community/whisper-large-v3', checkpoint: 'Xenova/whisper-large-v3', revision: '67bf02d92b7754a1ff82a7f8545f8b8c378b2ef0', dtype: { encoder_model: 'q8', decoder_model_merged: 'q8' }, session_options: { extra: { session: { disable_prepacking: '1' } } }, requireForwardVerification: true, precision: 'q8', name: 'Whisper Large V3', label: 'Whisper Large V3', size: '~1.7 GB', sizeMB: 1700, description: 'Full multilingual model. Requires more memory and processing time.', language: 'Multilingual', recommended: false },
 ];
+/** Stable saved IDs resolve to pinned exports with word-timestamp attention outputs. */
+export function speechModelConfig(id) {
+  assertModel(id);
+  return MODELS.find(model => model.id === id);
+}
+/** A precision update must not advertise older, larger cached weights as ready. */
+export function speechManifestMatches(data, model) {
+  return data.checkpoint === model.checkpoint && data.revision === model.revision
+    && data.wordTimestamps === true && (data.precision ?? 'q8') === (model.precision ?? 'q8')
+    && (!model.requireForwardVerification || data.forwardVerified === true);
+}
+/** Refuse incompatible exports during download, before marking offline readiness. */
+export function assertWordTimestampSupport(outputNames) {
+  if (!outputNames?.some(name => name.startsWith('cross_attentions.'))) throw new Error('This speech model cannot create word timestamps. Download the updated model in Models and retry.');
+}
 /** Keep saved meetings usable after retiring Tiny and Base. */
 export function resolveSpeechModel(id) {
   return ['onnx-community/whisper-tiny.en', 'onnx-community/whisper-base', undefined, null, ''].includes(id) ? DEFAULT_SPEECH_MODEL : id;

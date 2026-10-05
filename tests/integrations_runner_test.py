@@ -5,6 +5,8 @@ import json
 import tempfile
 import threading
 import unittest
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch, Mock
 from urllib.error import HTTPError
@@ -13,12 +15,183 @@ from urllib.request import Request, urlopen
 spec = importlib.util.spec_from_file_location("meet_runner", Path(__file__).resolve().parents[1] / "runner" / "meet_runner.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+import meet_ui
 SCRATCH = Path(__file__).resolve().parents[1] / "tmp"
 SCRATCH.mkdir(exist_ok=True)
 
 
 class RunnerTests(unittest.TestCase):
     """Exercise runner trust and retry boundaries without Google or browser access."""
+    def test_visible_refusals_preserve_evidence_without_guessing_account_policy(self):
+        """Generic refusal cannot become a claim that an account or headless mode is required."""
+        generic = meet_ui.refusal(["You can't join this video call"])
+        self.assertIn("You can't join this video call", generic)
+        self.assertNotIn("signed-in", generic)
+        self.assertNotIn("browser", generic)
+        self.assertIn("does not support this recording browser", meet_ui.refusal(["This browser is not supported"]))
+        self.assertIn("requires a signed-in participant", meet_ui.refusal(["Sign in to join"]))
+        self.assertIsNone(meet_ui.refusal(["Ready to join?", "Continue without microphone and camera"]))
+        redacted = meet_ui.refusal(["Cannot join https://meet.google.com/abc-defg-hij as person@example.com"])
+        self.assertNotIn("abc-defg-hij", redacted)
+        self.assertNotIn("person@example.com", redacted)
+
+    def test_blocked_device_prejoin_continues_without_enabling_capture(self):
+        """Guest-name entry appears after the receive-only prompt; dangerous controls stay untouched."""
+        page = Mock()
+        continuation, name, join = Mock(), Mock(), Mock()
+        stage = [0]
+        continuation.is_visible.return_value = True
+        continuation.click.side_effect = lambda **_: stage.__setitem__(0, 1)
+        name.is_visible.return_value = True
+        name.input_value.side_effect = lambda: "" if stage[0] < 2 else "Echo Voice - Recording"
+        name.fill.side_effect = lambda _: stage.__setitem__(0, 2)
+        join.is_visible.return_value = True
+        join.is_enabled.side_effect = lambda: stage[0] == 2
+
+        def controls(role, name):
+            found = []
+            if role == "button" and stage[0] == 0 and name.search("Continue without microphone and camera"):
+                found = [continuation]
+            elif role == "textbox" and stage[0] >= 1:
+                found = [globals_name]
+            elif role == "button" and stage[0] >= 1 and name.search("Ask to join"):
+                found = [join]
+            locator = Mock()
+            locator.all.return_value = found
+            return locator
+
+        globals_name = name
+        page.get_by_role.side_effect = controls
+        page.get_by_text.return_value.count.return_value = 0
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root, patch.object(meet_ui, "diagnostics"), patch.object(meet_ui, "verify_receive_only") as verify:
+            self.assertIs(meet_ui.prepare_guest(page, threading.Event(), Path(root)), join)
+            continuation.click.assert_called_once()
+            name.fill.assert_called_once_with("Echo Voice - Recording")
+            join.click.assert_not_called()  # Actual entry remains with the caller's stop/consent fence.
+            self.assertGreaterEqual(verify.call_count, 3)
+            self.assertFalse(any(call.kwargs["name"].search("Turn off camera") or call.kwargs["name"].search("Turn off microphone")
+                                 for call in page.get_by_role.call_args_list if call.args[0] == "button"))
+        for dangerous in ("Use microphone and camera", "Turn on camera", "Turn on microphone", "Join now"):
+            self.assertIsNone(meet_ui.WITHOUT_DEVICES.fullmatch(dangerous))
+
+    def test_join_exception_is_diagnosed_before_browser_cleanup_and_remains_failure(self):
+        """Actionability/timeout failures retain current visible evidence without masking the error."""
+        page = Mock()
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root, patch.object(meet_ui, "diagnostics") as snapshot:
+            folder = Path(root)
+            with self.assertRaisesRegex(RuntimeError, "blocked control"):
+                with meet_ui.capture_join_failure(page, folder):
+                    raise RuntimeError("blocked control")
+            snapshot.assert_called_once_with(page, folder, "join-failed")
+
+    def test_join_diagnostics_redact_links_codes_and_email_and_failed_entry_stays_bounded(self):
+        """Diagnostics retain safe controls while unsupported UI cannot enter a meeting."""
+        self.assertEqual(meet_ui.sanitized_label("Copy https://meet.google.com/abc-defg-hij for person@example.com abc-defg-hij"), "Copy [link] for [email] [meeting code]")
+        page = Mock()
+        page.evaluate.return_value = ["Continue without camera", "Copy https://meet.google.com/abc-defg-hij", "person@example.com"]
+        page.get_by_text.return_value.all.return_value = []
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root:
+            folder = Path(root)
+            meet_ui.diagnostics(page, folder, "prejoin")
+            data = json.loads((folder / "join-diagnostics.json").read_text())
+            self.assertEqual(data["buttons"], ["Continue without camera", "Copy [link]", "[email]"])
+            self.assertNotIn("url", data)
+            with self.assertRaisesRegex(RuntimeError, "could not join this Google Meet"):
+                meet_ui.prepare_guest(page, threading.Event(), folder, timeout=0)
+            self.assertEqual(json.loads((folder / "join-diagnostics.json").read_text())["phase"], "prejoin-timed-out")
+            cancelled = threading.Event()
+            cancelled.set()
+            self.assertIsNone(meet_ui.prepare_guest(page, cancelled, folder))
+
+    def test_recording_requires_written_pcm_not_only_a_live_capture_process(self):
+        """Header-only files and failed processes cannot produce a recording-ready state."""
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root:
+            audio = Path(root) / "meeting.wav"
+            process = Mock()
+            process.poll.return_value = None
+            audio.write_bytes(b"header" + bytes(38))
+            with self.assertRaisesRegex(RuntimeError, "no PCM"):
+                runner.wait_for_pcm(process, audio, timeout=0.001)
+            audio.write_bytes(bytes(44 + 3200))
+            runner.wait_for_pcm(process, audio, timeout=0.1)
+            process.poll.return_value = 1
+            with self.assertRaisesRegex(RuntimeError, "failed before PCM"):
+                runner.wait_for_pcm(process, audio, timeout=0.1)
+
+    def test_container_browser_never_uses_muted_playback_or_disk_shared_memory(self):
+        """Playwright's default audio mute is explicitly excluded on both capture paths."""
+        for container in (False, True):
+            with self.subTest(container=container), patch.dict(runner.os.environ, {"ECHO_RUNNER_CONTAINER": "1" if container else ""}):
+                options = runner.browser_options("private-fixture", False)
+                self.assertIn("--mute-audio", options["ignore_default_args"])
+                self.assertEqual(options["env"]["PULSE_SINK"], "private-fixture")
+                self.assertEqual(options["headless"], container)
+                self.assertNotIn("--use-fake-device-for-media-stream", options["args"])
+                self.assertNotIn("--use-fake-ui-for-media-stream", options["args"])
+                self.assertIn("--deny-permission-prompts", options["args"])
+                if container:
+                    self.assertIn("--disable-dev-shm-usage", options["ignore_default_args"])
+                    self.assertNotIn("--disable-dev-shm-usage", options["args"])
+
+    def test_receive_only_context_denies_both_devices_before_join_and_fails_closed(self):
+        """Apply denials to the exact guest context and stop if enforcement cannot be verified."""
+        context, page, cdp, browser_cdp = Mock(), Mock(), Mock(), Mock()
+        context.new_cdp_session.return_value = cdp
+        context.browser.new_browser_cdp_session.return_value = browser_cdp
+        cdp.send.return_value = {"targetInfo": {"browserContextId": "guest-context"}}
+        self.assertIs(runner.deny_capture(context, page, "https://meet.google.com"), browser_cdp)
+        permissions = [call.args[1] for call in browser_cdp.send.call_args_list if call.args[0] == "Browser.setPermission"]
+        self.assertEqual({item["permission"]["name"] for item in permissions}, {"camera", "microphone"})
+        self.assertTrue(all(item["setting"] == "denied" and item["browserContextId"] == "guest-context" for item in permissions))
+        self.assertTrue(all(item["origin"] == "https://meet.google.com" for item in permissions))
+        self.assertTrue(all(item["embeddingOrigin"] == "https://meet.google.com" for item in permissions))
+        cdp.detach.assert_called_once()
+        browser_cdp.detach.assert_not_called()
+        page.evaluate.return_value = True
+        runner.verify_receive_only(page)
+        for state in (False, None, "denied"):
+            page.evaluate.return_value = state
+            with self.assertRaisesRegex(RuntimeError, "guest did not join"):
+                runner.verify_receive_only(page)
+        cdp.reset_mock()
+        browser_cdp.reset_mock()
+        cdp.send.return_value = {"targetInfo": {}}
+        with self.assertRaisesRegex(RuntimeError, "could not be identified"):
+            runner.deny_capture(context, page, "https://meet.google.com")
+        browser_cdp.send.assert_not_called()
+        cdp.detach.assert_called_once()
+
+    def test_readiness_requires_an_installed_chromium_not_only_python(self):
+        """A live PulseAudio server and installed Python package cannot imply browser readiness."""
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root:
+            executable = Path(root) / "chromium"
+            context = Mock()
+            context.__enter__ = Mock(return_value=SimpleNamespace(chromium=SimpleNamespace(executable_path=str(executable))))
+            context.__exit__ = Mock(return_value=False)
+            module = SimpleNamespace(sync_playwright=lambda: context)
+            with patch.dict(sys.modules, {"playwright.sync_api": module}), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner.shutil, "which", return_value="fixture"), patch.object(runner.Path, "exists", return_value=True), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+                ready, detail = runner.readiness()
+                self.assertFalse(ready)
+                self.assertIn("install chromium", detail)
+                executable.write_text("fixture")
+                executable.chmod(0o600)
+                self.assertFalse(runner.readiness()[0])
+                executable.chmod(0o700)
+                self.assertTrue(runner.readiness()[0])
+
+    def test_container_bind_is_explicit_and_keeps_native_loopback(self):
+        """The broader container listener cannot be selected by ordinary native CLI invocation."""
+        with patch.object(runner.sys, "argv", ["meet_runner.py", "--container-bind"]), patch.dict(runner.os.environ, {"ECHO_RUNNER_CONTAINER": ""}), patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                runner.main()
+            self.assertEqual(error.exception.code, 2)
+        server = Mock()
+        server.serve_forever.side_effect = KeyboardInterrupt
+        for container in (False, True):
+            with self.subTest(container=container), patch.object(runner.sys, "argv", ["meet_runner.py", "--port", "18765"] + (["--container-bind"] if container else [])), patch.object(runner.sys, "platform", "linux"), patch.dict(runner.os.environ, {"ECHO_RUNNER_CONTAINER": "1"}), patch.object(runner, "runner_token", return_value="fixture-token"), patch.object(runner, "recover_sessions"), patch.object(runner, "SESSIONS", {}), patch.object(runner.Path, "mkdir"), patch.object(runner.signal, "signal"), patch.object(runner, "ThreadingHTTPServer", return_value=server) as factory, patch("sys.stdout", io.StringIO()):
+                self.assertEqual(runner.main(), 0)
+                factory.assert_called_once_with(("0.0.0.0" if container else "127.0.0.1", 18765), runner.Handler)
+
     def test_doctor_inspects_existing_credentials_without_writing_them(self):
         """Doctor reports real credential validity and keeps a missing library untouched."""
         with tempfile.TemporaryDirectory(dir=SCRATCH) as root:

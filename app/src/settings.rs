@@ -1,3 +1,4 @@
+use crate::ui::{count_label, ActionButton, ButtonKind, PageHeading};
 use crate::{
     api::{bytes, delete, get, patch, post, text},
     Icon,
@@ -7,17 +8,7 @@ use serde_json::{json, Value};
 
 /// Read one user-selected JSON file and distinguish cancellation from invalid content.
 async fn choose_json_file() -> Result<Option<(String, Value)>, String> {
-    let mut eval = document::eval(
-        r#"
-        const input = document.createElement('input'); input.type='file'; input.accept='.json,application/json';
-        input.addEventListener('cancel',()=>dioxus.send({cancelled:true}),{once:true});
-        input.addEventListener('change',async()=>{try {
-            const file=input.files?.[0]; if(!file){dioxus.send({cancelled:true});return;}
-            if(file.size>256*1024*1024)throw new Error('Choose a JSON file smaller than 256 MB.');
-            dioxus.send({name:file.name,value:JSON.parse(await file.text())});
-        }catch(e){dioxus.send({error:e instanceof SyntaxError?'This file is not valid JSON. Choose an Echo Voice export.':e.message});}},{once:true}); input.click();
-    "#,
-    );
+    let mut eval = document::eval("dioxus.send(await window.echoFiles.chooseJsonFile());");
     let value: Value = eval
         .recv()
         .await
@@ -71,10 +62,7 @@ pub fn Settings(
     });
     rsx! {
         div { class:"settings-page",
-            header { class:"settings-page-heading",
-                div { h1 { "Settings" } }
-                span { class:"settings-local-badge", span {} "Local workspace" }
-            }
+            PageHeading { title:"Settings" }
             nav { class:"settings-tabs", "aria-label":"Settings sections",
                 for (id,label,icon) in [("general","General","settings"),("vocabulary","Vocabulary","book"),("storage","Storage","hard-drive")] {
                     button { r#type:"button", class:if section()==id {"is-active"} else {""}, "aria-current":if section()==id {"page"} else {"false"}, onclick:move |_| section.set(id.into()), Icon { name:icon,size:17 } span { "{label}" } }
@@ -137,10 +125,10 @@ fn GeneralSettings(
     };
     let chatgpt_model = text(&draft(), "chatgptModel");
     rsx! {
-        form { class:"settings-form", onsubmit:move |event| { event.prevent_default(); if saving(){return;} saving.set(true); error.set(String::new()); spawn(async move { match patch("/settings",draft()).await { Ok(updated)=>{draft.set(updated.clone());on_change.call(updated);notify.call("Your preferences are saved.".into());},Err(message)=>error.set(message) } saving.set(false); }); },
+        form { class:"settings-form", onsubmit:move |event| { event.prevent_default(); if saving(){return;} saving.set(true); error.set(String::new()); spawn(async move { match patch("/settings",draft()).await { Ok(updated)=>{draft.set(updated.clone());on_change.call(updated);notify.call("Preferences saved.".into());},Err(message)=>error.set(message) } saving.set(false); }); },
             section { class:"settings-card", div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"settings",size:19}} div {h2 {"Profile"}}}
                 div { class:"settings-field-grid",
-                    label {class:"settings-field",span {"Your name"}input {class:"input",value:text(&draft(),"name"),placeholder:"What should we call you?",maxlength:120,oninput:move |e|draft.write()["name"]=json!(e.value())}small {"Used to personalize your local workspace."}}
+                    label {class:"settings-field",span {"Your name"}input {class:"input",value:text(&draft(),"name"),placeholder:"Name",maxlength:120,oninput:move |e|draft.write()["name"]=json!(e.value())}}
                     label {class:"settings-field",span {"Recording language"}select {class:"input",value:text(&draft(),"language"),onchange:move |e|draft.write()["language"]=json!(e.value()),option {value:"en",selected:text(&draft(),"language")=="en","English"}option {value:"auto",selected:text(&draft(),"language")=="auto","Auto-detect · multilingual model"}option {value:"es",selected:text(&draft(),"language")=="es","Spanish"}option {value:"fr",selected:text(&draft(),"language")=="fr","French"}option {value:"de",selected:text(&draft(),"language")=="de","German"}option {value:"hi",selected:text(&draft(),"language")=="hi","Hindi"}option {value:"ja",selected:text(&draft(),"language")=="ja","Japanese"}option {value:"pt",selected:text(&draft(),"language")=="pt","Portuguese"}option {value:"zh",selected:text(&draft(),"language")=="zh","Chinese"}}}
                 }
             }
@@ -153,7 +141,7 @@ fn GeneralSettings(
                     div {class:"settings-provider-card",div {class:"settings-provider-heading",span {class:"settings-provider-icon",Icon {name:"sparkles",size:19}}div {h3 {"ChatGPT"}span {"Optional cloud processing"}}}
                         p {"When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content."}
                         p {class:"settings-provider-allowance","Sign in through the official Codex flow with an eligible ChatGPT plan. Requests use your plan’s Codex allowance, not API credits. No API key is needed."}
-                        div {class:"settings-provider-bottom",div {span {"ChatGPT model"}strong {if chatgpt_model.is_empty(){"Account default"}else{"{chatgpt_model}"}}small {"Choose from your account’s available models in Models → ChatGPT."}}button {r#type:"button",class:"button button-secondary",onclick:move |_|open_chatgpt_models(),"Set up ChatGPT" Icon {name:"arrow-right",size:15}}}
+                        div {class:"settings-provider-bottom",div {span {"ChatGPT model"}strong {if chatgpt_model.is_empty(){"Account default"}else{"{chatgpt_model}"}}small {"Choose from your account’s available models in Models → ChatGPT."}}ActionButton {button_type:"button",kind:ButtonKind::Secondary,onclick:move |_|open_chatgpt_models(),"Set up ChatGPT" Icon {name:"arrow-right",size:15}}}
                     }
                 } else {
                     div {class:"settings-local-notes-field",label {class:"settings-field",span {"Default local notes model"}input {class:"input",value:text(&draft(),"notesModel"),maxlength:120,placeholder:"qwen2.5:3b",oninput:move |e|draft.write()["notesModel"]=json!(e.value())}small {"The name of a model installed in your local Ollama library. Notes are generated on this computer."}}}
@@ -163,7 +151,7 @@ fn GeneralSettings(
                 if notes_provider == "ollama" {details {class:"settings-advanced",summary {"Local notes connection" Icon {name:"chevron-down",size:16}}div {label {class:"settings-field",span {"Ollama address"}input {class:"input",r#type:"url",value:text(&draft(),"ollamaUrl"),placeholder:"http://127.0.0.1:11434",required:true,oninput:move |e|draft.write()["ollamaUrl"]=json!(e.value())}small {"Only a service running on this computer is supported. Ollama is optional; recording and transcription work without it."}}}}}
             }
             if !error().is_empty() {div {class:"settings-error",role:"alert","{error}"}}
-            div {class:"settings-save-row",span {if changed {"You have unsaved changes."}else {Icon {name:"check",size:15}"Your preferences are up to date"}}div {class:"settings-save-actions",if changed {button {r#type:"button",class:"button button-secondary",disabled:saving(),onclick:move |_|{draft.set(settings());error.set(String::new());},"Discard changes"}}button {r#type:"submit",class:"button button-primary",disabled:!changed||saving(),Icon {name:if saving(){"loader"}else{"check"},size:16}if saving(){"Saving…"}else{"Save changes"}}}}
+            div {class:"settings-save-row",span {if changed {"You have unsaved changes."}else {Icon {name:"check",size:15}"Changes saved"}}div {class:"settings-save-actions",if changed {ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:saving(),onclick:move |_|{draft.set(settings());error.set(String::new());},"Discard changes"}}ActionButton {button_type:"submit",kind:ButtonKind::Primary,disabled:!changed||saving(),Icon {name:if saving(){"loader"}else{"check"},size:16}if saving(){"Saving…"}else{"Save changes"}}}}
         }
     }
 }
@@ -232,18 +220,18 @@ fn VocabularySettings(notify: EventHandler<String>) -> Element {
         .filter(|entry| entry["enabled"].as_bool().unwrap_or(true))
         .count();
     rsx! {
-        div {class:"settings-section-top",div {h2 {"Vocabulary"}}button {id:"settings-add-word",r#type:"button",class:"button button-primary",disabled:busy()||loading(),onclick:move |_|editor.set(Some(json!({"term":"","aliases":""}))),Icon {name:"plus",size:17}"Add word"}}
+        div {class:"settings-section-top",div {h2 {"Vocabulary"}}ActionButton {id:"settings-add-word",button_type:"button",kind:ButtonKind::Primary,disabled:busy()||loading(),onclick:move |_|editor.set(Some(json!({"term":"","aliases":""}))),Icon {name:"plus",size:17}"Add word"}}
         div {class:"settings-info settings-info-vocabulary",Icon {name:"sparkles",size:18}p {"Enabled aliases replace exact phrases in new transcripts. Existing versions remain unchanged."}}
         section {class:"settings-card settings-vocabulary-card",
             div {class:"settings-vocabulary-toolbar",label {class:"settings-search",Icon {name:"search",size:17}input {value:search(),placeholder:"Search your vocabulary…","aria-label":"Search vocabulary",oninput:move |e|search.set(e.value())}}div {
-                button {r#type:"button",class:"button button-ghost",disabled:busy()||loading(),onclick:move |_|{spawn(async move {match choose_json_file().await {Ok(Some((_,value)))=>{busy.set(true);error.set(String::new());let result=import_vocabulary(value,entries,progress).await;match result {Ok(message)=>notify.call(message),Err(message)=>error.set(message)}busy.set(false);progress.set(String::new());},Ok(None)=>{},Err(message)=>error.set(message)}});},Icon {name:"upload",size:15}"Import"}
-                button {r#type:"button",class:"button button-ghost",disabled:busy()||loading()||entries().is_empty(),onclick:move |_|{spawn(async move {if let Err(message)=download_json(json!({"version":1,"entries":entries()}),"echo-voice-vocabulary.json").await {error.set(message);}});},Icon {name:"download",size:15}"Export"}
+                ActionButton {button_type:"button",kind:ButtonKind::Ghost,disabled:busy()||loading(),onclick:move |_|{spawn(async move {match choose_json_file().await {Ok(Some((_,value)))=>{busy.set(true);error.set(String::new());let result=import_vocabulary(value,entries,progress).await;match result {Ok(message)=>notify.call(message),Err(message)=>error.set(message)}busy.set(false);progress.set(String::new());},Ok(None)=>{},Err(message)=>error.set(message)}});},Icon {name:"upload",size:15}"Import"}
+                ActionButton {button_type:"button",kind:ButtonKind::Ghost,disabled:busy()||loading()||entries().is_empty(),onclick:move |_|{spawn(async move {if let Err(message)=download_json(json!({"version":1,"entries":entries()}),"echo-voice-vocabulary.json").await {error.set(message);}});},Icon {name:"download",size:15}"Export"}
             }}
             if let Some(current)=editor() {
                 form {class:"settings-word-editor",onsubmit:move |event|{event.prevent_default();if busy(){return;}let Some(edit)=editor()else{return;};let current_id=text(&edit,"id");let preferred=text(&edit,"term").trim().to_lowercase();if entries().iter().any(|row|text(row,"id")!=current_id&&text(row,"term").trim().to_lowercase()==preferred){error.set("That spelling already exists. Edit the existing word to add more aliases.".into());return;}busy.set(true);error.set(String::new());spawn(async move {let id=text(&edit,"id");let aliases:Vec<String>=text(&edit,"aliases").split(',').map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned).collect();let mut value=json!({"term":text(&edit,"term").trim(),"aliases":aliases});if id.is_empty(){value["enabled"]=json!(true);}let saved=if id.is_empty(){post("/vocabulary",value).await}else{patch(&format!("/vocabulary/{id}"),value).await};match saved{Ok(saved)=>{if id.is_empty(){entries.write().push(saved);}else{let mut rows=entries();for entry in &mut rows {if text(entry,"id")==id{*entry=saved.clone();}}entries.set(rows);}close_vocabulary_editor(editor);notify.call("Vocabulary saved.".into());},Err(message)=>error.set(message)}busy.set(false);});},
-                    div {class:"settings-editor-title",h3 {if text(&current,"id").is_empty(){"A new word for your workspace"}else{"Edit preferred spelling"}}button {r#type:"button",class:"icon-button","aria-label":"Cancel vocabulary editing",disabled:busy(),onclick:move |_|close_vocabulary_editor(editor),Icon {name:"x",size:17}}}
+                    div {class:"settings-editor-title",h3 {if text(&current,"id").is_empty(){"Add word"}else{"Edit preferred spelling"}}button {r#type:"button",class:"icon-button","aria-label":"Cancel vocabulary editing",disabled:busy(),onclick:move |_|close_vocabulary_editor(editor),Icon {name:"x",size:17}}}
                     div {class:"settings-field-grid",label {class:"settings-field",span {"Preferred spelling"}input {class:"input",onmounted:move |event| async move {let _=event.data().set_focus(true).await;},value:text(&current,"term"),required:true,maxlength:120,placeholder:"e.g. Figma",oninput:move |e|{if let Some(value)=editor.write().as_mut(){value["term"]=json!(e.value());}}}}label {class:"settings-field",span {"Heard as " small {"(comma-separated)"}}input {class:"input",value:text(&current,"aliases"),placeholder:"e.g. fig ma, figmah",maxlength:2500,oninput:move |e|{if let Some(value)=editor.write().as_mut(){value["aliases"]=json!(e.value());}}}}}
-                    div {class:"settings-editor-actions",button {r#type:"button",class:"button button-secondary",disabled:busy(),onclick:move |_|close_vocabulary_editor(editor),"Cancel"}button {r#type:"submit",class:"button button-primary",disabled:busy()||text(&current,"term").trim().is_empty(),Icon {name:if busy(){"loader"}else{"check"},size:15}"Save word"}}
+                    div {class:"settings-editor-actions",ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:busy(),onclick:move |_|close_vocabulary_editor(editor),"Cancel"}ActionButton {button_type:"submit",kind:ButtonKind::Primary,disabled:busy()||text(&current,"term").trim().is_empty(),Icon {name:if busy(){"loader"}else{"check"},size:15}"Save word"}}
                 }
             }
             if !error().is_empty() {div {class:"settings-error settings-inset",role:"alert","{error}" if entries().is_empty()&&!loading(){button {r#type:"button",class:"settings-text-button",onclick:move |_|{let next=refresh()+1;refresh.set(next);},"Try again"}}}}
@@ -251,7 +239,7 @@ fn VocabularySettings(notify: EventHandler<String>) -> Element {
             if loading() {div {class:"settings-load-state",role:"status",Icon {name:"loader",size:20}"Loading vocabulary…"}}
             else if filtered.is_empty() {div {class:"settings-empty",span {Icon {name:"book",size:27}}h3 {if search().is_empty(){"No vocabulary yet"}else{"No matching words"}}p {if search().is_empty(){"Add terms and their recognized spellings."}else{"Try another spelling or alias."}}if search().is_empty(){button {r#type:"button",class:"settings-text-button",disabled:busy(),onclick:move |_|editor.set(Some(json!({"term":"","aliases":""}))),"Add your first word" Icon {name:"arrow-right",size:16}}}}}
             else {div {class:"settings-word-list",div {class:"settings-word-list-header",span {"Preferred spelling / heard as"}span {"Enabled"}}for (id,entry) in filtered {VocabularyRow {key:"{id}",entry,entries,busy,error,on_edit:move |value:Value|editor.set(Some(value)),notify}}}}
-            div {class:"settings-vocabulary-footer",span {"{entries().len()} words · {enabled} enabled"}span {"Saved on this computer"}}
+            div {class:"settings-vocabulary-footer",span {{format!("{} · {enabled} enabled",count_label(entries().len(),"word","words"))}}span {"Saved on this computer"}}
         }
     }
 }
@@ -331,13 +319,19 @@ async fn import_vocabulary(
             skipped += 1;
             continue;
         }
-        let saved=post("/vocabulary",json!({"term":term,"aliases":entry["aliases"],"enabled":entry["enabled"].as_bool().unwrap_or(true)})).await.map_err(|message|format!("{added} entries were saved before import stopped. {message}"))?;
+        let saved=post("/vocabulary",json!({"term":term,"aliases":entry["aliases"],"enabled":entry["enabled"].as_bool().unwrap_or(true)})).await.map_err(|message|format!("{} saved before import stopped. {message}",count_label(added,"entry","entries")))?;
         entries.write().push(saved);
         existing.insert(term.to_lowercase());
         added += 1;
     }
     Ok(format!(
-        "Imported {added} entries. {skipped} existing or duplicate spellings skipped."
+        "Imported {}. {} skipped.",
+        count_label(added, "entry", "entries"),
+        count_label(
+            skipped,
+            "existing or duplicate spelling",
+            "existing or duplicate spellings"
+        )
     ))
 }
 
@@ -381,13 +375,13 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
         section {class:"settings-card",div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"hard-drive",size:20}}div {h2 {"Local storage"}}span {class:"settings-soft-badge",Icon {name:"lock",size:12}"Private"}}
             if loading(){p {class:"settings-load-state",role:"status",Icon {name:"loader",size:19}"Checking local storage…"}}
             else if !storage().is_null(){div {class:"settings-storage-stats",div {span {"Library size"}strong {"{bytes(size)}"}}div {span {"Saved meetings"}strong {"{count}"}}div {span {"Available on disk"}strong {"{bytes(available)}"}}}div {class:"settings-storage-meter",role:"img","aria-label":format!("{} used by Echo Voice; {} available",bytes(size),bytes(available)),span {style:"width:{used}%"}}div {class:"settings-storage-legend",span {i {}"Echo Voice library"}span {"Space available for future conversations"}}if available<500.*1024.*1024.{div {class:"settings-storage-warning",role:"status","Your disk has less than 500 MB free. Export your library and free up disk space before a long recording."}}div {class:"settings-storage-path",Icon {name:"folder",size:19}div {span {"Library location on this computer"}code {"{storage_path}"}}}}
-            else{button {r#type:"button",class:"button button-secondary",onclick:move |_|{let n=refresh()+1;refresh.set(n);},"Retry storage check"}}
+            else{ActionButton {button_type:"button",kind:ButtonKind::Secondary,onclick:move |_|{let n=refresh()+1;refresh.set(n);},"Retry storage check"}}
         }
         div {class:"settings-backup-grid",
-            section {class:"settings-card",div {class:"settings-backup-icon",Icon {name:"download",size:22}}h2 {"Export library"}p {"Download recordings, transcripts, notes, and saved moments in one archive."}button {r#type:"button",class:"button button-secondary",disabled:!busy().is_empty()||loading()||storage().is_null(),onclick:move |_|{busy.set("export".into());error.set(String::new());spawn(async move {match export_library().await{Ok(())=>notify.call("Library backup prepared. Check your browser downloads.".into()),Err(message)=>error.set(message)}busy.set(String::new());});},Icon {name:if busy()=="export"{"loader"}else{"download"},size:16}if busy()=="export"{"Preparing backup…"}else{"Export library"}}}
-            section {class:"settings-card",div {class:"settings-backup-icon",Icon {name:"upload",size:22}}h2 {"Restore library"}p {"Restore an Echo Voice Web archive. Requires an empty meeting library and vocabulary list."}button {r#type:"button",class:"button button-secondary",disabled:!busy().is_empty()||loading()||storage().is_null()||count>0||vocabulary_count().is_none_or(|n|n>0),onclick:move |_|{spawn(async move {match choose_json_file().await{Ok(Some((name,value)))=>{if value["format"]!="echo-voice-web"||value["version"]!=1{error.set("Choose a supported Echo Voice Web version 1 library archive.".into());}else{error.set(String::new());archive.set(Some((name,value)));}},Ok(None)=>{},Err(message)=>error.set(message)}});},Icon {name:"file",size:16}"Choose library file"}if count>0||vocabulary_count().is_some_and(|n|n>0){small {class:"settings-import-note","Import requires an empty meeting library and vocabulary list."}}}
+            section {class:"settings-card",div {class:"settings-backup-icon",Icon {name:"download",size:22}}h2 {"Export library"}p {"Download recordings, transcripts, notes, and saved moments in one archive."}ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:!busy().is_empty()||loading()||storage().is_null(),onclick:move |_|{busy.set("export".into());error.set(String::new());spawn(async move {match export_library().await{Ok(())=>notify.call("Library backup prepared. Check your browser downloads.".into()),Err(message)=>error.set(message)}busy.set(String::new());});},Icon {name:if busy()=="export"{"loader"}else{"download"},size:16}if busy()=="export"{"Preparing backup…"}else{"Export library"}}}
+            section {class:"settings-card",div {class:"settings-backup-icon",Icon {name:"upload",size:22}}h2 {"Restore library"}p {"Restore an Echo Voice Web archive. Requires an empty meeting library and vocabulary list."}ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:!busy().is_empty()||loading()||storage().is_null()||count>0||vocabulary_count().is_none_or(|n|n>0),onclick:move |_|{spawn(async move {match choose_json_file().await{Ok(Some((name,value)))=>{if value["format"]!="echo-voice-web"||value["version"]!=1{error.set("Choose a supported Echo Voice Web version 1 library archive.".into());}else{error.set(String::new());archive.set(Some((name,value)));}},Ok(None)=>{},Err(message)=>error.set(message)}});},Icon {name:"file",size:16}"Choose library file"}if count>0||vocabulary_count().is_some_and(|n|n>0){small {class:"settings-import-note","Import requires an empty meeting library and vocabulary list."}}}
         }
-        if let Some((name,_))=archive(){section {class:"settings-card settings-import-review",div {h3 {"Ready to restore" span {"{name}"}}p {"The archive is validated before importing. Desktop libraries, credentials, and model downloads are not imported."}}div {button {r#type:"button",class:"button button-secondary",disabled:!busy().is_empty(),onclick:move |_|archive.set(None),"Cancel"}button {r#type:"button",class:"button button-primary",disabled:!busy().is_empty(),onclick:move |_|{if let Some((_,value))=archive(){busy.set("import".into());error.set(String::new());spawn(async move {match post("/storage/import",value).await{Ok(restored)=>{vocabulary_count.set(Some(restored["vocabulary"].as_u64().unwrap_or(0) as usize));archive.set(None);if let Ok(data)=get("/storage").await{storage.set(data);}let _=document::eval("window.dispatchEvent(new CustomEvent('echo-library-changed'));");notify.call("Your library was restored from the backup.".into());},Err(message)=>error.set(message)}busy.set(String::new());});}},Icon {name:if busy()=="import"{"loader"}else{"upload"},size:16}if busy()=="import"{"Restoring…"}else{"Restore library"}}}}}
+        if let Some((name,_))=archive(){section {class:"settings-card settings-import-review",div {h3 {"Ready to restore" span {"{name}"}}p {"The archive is validated before importing. Desktop libraries, credentials, and model downloads are not imported."}}div {ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:!busy().is_empty(),onclick:move |_|archive.set(None),"Cancel"}ActionButton {button_type:"button",kind:ButtonKind::Primary,disabled:!busy().is_empty(),onclick:move |_|{if let Some((_,value))=archive(){busy.set("import".into());error.set(String::new());spawn(async move {match post("/storage/import",value).await{Ok(restored)=>{vocabulary_count.set(Some(restored["vocabulary"].as_u64().unwrap_or(0) as usize));archive.set(None);if let Ok(data)=get("/storage").await{storage.set(data);}let _=document::eval("window.dispatchEvent(new CustomEvent('echo-library-changed'));");notify.call("Your library was restored from the backup.".into());},Err(message)=>error.set(message)}busy.set(String::new());});}},Icon {name:if busy()=="import"{"loader"}else{"upload"},size:16}if busy()=="import"{"Restoring…"}else{"Restore library"}}}}}
         div {class:"settings-info",Icon {name:"info",size:18}p {"Model downloads are stored in this browser and excluded from backups, along with account credentials. Clearing browser data removes downloaded models."}}
     }
 }

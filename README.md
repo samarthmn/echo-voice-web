@@ -81,7 +81,7 @@ Already have an audio file? Choose **Upload a recording** on the Overview page i
 Echo needs a **speech model** to recognize words. This is a set of files you download once. It runs on your computer and is saved in your browser's storage.
 
 1. Open **Models → Speech models**.
-2. Choose **Whisper Large V3 Turbo** (the default, about 900 MB including speaker models) or **Whisper Large V3** (about 1.7 GB). Both support multiple languages. Choose **Download model**. Large models need substantial free memory and browser storage.
+2. Choose **Whisper Large V3 Turbo** (the default, about 1.2 GB including speaker models) or **Whisper Large V3** (about 1.7 GB). Both support multiple languages. Choose **Download model**. If an older download needs word timestamps, choose **Download update**. Large models need substantial free memory and browser storage.
 3. Keep the tab open until you see **Downloaded · ready to use**.
 4. Open **Settings → General**, select that speech model and your recording language, and save your changes.
 5. Return to the saved meeting and choose **Create transcript**.
@@ -126,7 +126,7 @@ Whichever option you use, check the notes before sharing them. Names, decisions,
 
 Google Calendar and Google Meet need extra setup. This version doesn't provide a one-click hosted meeting bot.
 
-The Calendar connection brings your meeting details into Echo. A separate Linux recording program can join a selected Google Meet as a visible guest. The host may need to let it in. After stopping the guest, choose **Save recording** to bring its audio into Echo.
+The Calendar connection brings your meeting details into Echo. A separate local recording program, run in Docker on macOS/Windows/Linux or directly on Linux, can join a selected Google Meet as a visible guest. The host may need to let it in. After stopping the guest, choose **Save recording** to bring its audio into Echo.
 
 You'll need to [configure Google Calendar](docs/integrations.md#google-calendar-connection) and [set up the meeting recording program](runner/README.md). These steps involve Google developer settings and additional software; ask someone comfortable with those tools to help if needed. Keep both programs running during the meeting.
 

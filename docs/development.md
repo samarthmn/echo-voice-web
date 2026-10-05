@@ -143,6 +143,8 @@ For libraries beyond the in-app backup limit, stop Echo and the runner, then cop
 
 Browser uploads accept supported audio/video containers up to 500 MB. In-app library restore has a smaller limit, including a 180 MB audio limit. Speech decoding is bounded to 512 MB or two hours; the runner import limit is 512 MB. Large recordings can exhaust browser memory or take substantial CPU time. Independent exports and backups remain after deleting a meeting in Echo.
 
+Echo serves `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` so supported browsers can use ONNX WebAssembly CPU threads. The worker uses half the reported CPU cores, capped at four, and falls back to one thread without cross-origin isolation. Bundled JavaScript and WASM remain on the local origin; remote model downloads use CORS. Calendar sign-in uses top-level navigation, and ChatGPT sign-in does not depend on an opener. If you add an external embedded asset or popup integration, check its compatibility with these policies. See [ONNX threading requirements](https://onnxruntime.ai/docs/tutorials/web/env-flags-and-session-options.html) and the [browser isolation guide](https://web.dev/articles/coop-coep).
+
 ## Update a source checkout
 
 Back up the library, note its location, and stop Echo and the runner first. For an unmodified Git checkout:

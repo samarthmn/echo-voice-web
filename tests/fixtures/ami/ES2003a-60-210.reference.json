@@ -1,0 +1,1316 @@
+[
+  {
+    "start": 2.12,
+    "end": 3.0,
+    "speaker": "B",
+    "text": "Right"
+  },
+  {
+    "start": 3.0,
+    "end": 3.15,
+    "speaker": "B",
+    "text": "This"
+  },
+  {
+    "start": 3.15,
+    "end": 3.27,
+    "speaker": "B",
+    "text": "is"
+  },
+  {
+    "start": 3.27,
+    "end": 3.37,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 3.37,
+    "end": 3.71,
+    "speaker": "B",
+    "text": "agenda"
+  },
+  {
+    "start": 3.71,
+    "end": 3.82,
+    "speaker": "B",
+    "text": "for"
+  },
+  {
+    "start": 3.82,
+    "end": 4.16,
+    "speaker": "B",
+    "text": "today's"
+  },
+  {
+    "start": 4.16,
+    "end": 4.62,
+    "speaker": "B",
+    "text": "meeting"
+  },
+  {
+    "start": 4.62,
+    "end": 4.75,
+    "speaker": "B",
+    "text": "As"
+  },
+  {
+    "start": 4.75,
+    "end": 4.84,
+    "speaker": "B",
+    "text": "you"
+  },
+  {
+    "start": 4.84,
+    "end": 4.95,
+    "speaker": "B",
+    "text": "can"
+  },
+  {
+    "start": 4.95,
+    "end": 5.2,
+    "speaker": "B",
+    "text": "see"
+  },
+  {
+    "start": 5.2,
+    "end": 5.35,
+    "speaker": "B",
+    "text": "w"
+  },
+  {
+    "start": 5.35,
+    "end": 5.75,
+    "speaker": "B",
+    "text": "opening"
+  },
+  {
+    "start": 5.75,
+    "end": 6.39,
+    "speaker": "B",
+    "text": "acquaintance"
+  },
+  {
+    "start": 6.39,
+    "end": 6.62,
+    "speaker": "B",
+    "text": "tool"
+  },
+  {
+    "start": 6.62,
+    "end": 7.13,
+    "speaker": "B",
+    "text": "training"
+  },
+  {
+    "start": 7.13,
+    "end": 7.52,
+    "speaker": "B",
+    "text": "project"
+  },
+  {
+    "start": 7.52,
+    "end": 7.76,
+    "speaker": "B",
+    "text": "plan"
+  },
+  {
+    "start": 7.76,
+    "end": 8.45,
+    "speaker": "B",
+    "text": "discussion"
+  },
+  {
+    "start": 8.45,
+    "end": 8.75,
+    "speaker": "B",
+    "text": "and"
+  },
+  {
+    "start": 8.75,
+    "end": 10.17,
+    "speaker": "B",
+    "text": "closing"
+  },
+  {
+    "start": 10.17,
+    "end": 11.52,
+    "speaker": "B",
+    "text": "Um"
+  },
+  {
+    "start": 11.52,
+    "end": 11.63,
+    "speaker": "B",
+    "text": "we"
+  },
+  {
+    "start": 11.63,
+    "end": 11.97,
+    "speaker": "B",
+    "text": "already"
+  },
+  {
+    "start": 11.97,
+    "end": 12.14,
+    "speaker": "B",
+    "text": "got"
+  },
+  {
+    "start": 12.14,
+    "end": 12.19,
+    "speaker": "B",
+    "text": "n"
+  },
+  {
+    "start": 12.19,
+    "end": 12.4,
+    "speaker": "B",
+    "text": "through"
+  },
+  {
+    "start": 12.4,
+    "end": 12.82,
+    "speaker": "B",
+    "text": "opening"
+  },
+  {
+    "start": 12.82,
+    "end": 13.27,
+    "speaker": "B",
+    "text": "and"
+  },
+  {
+    "start": 13.27,
+    "end": 13.72,
+    "speaker": "B",
+    "text": "partially"
+  },
+  {
+    "start": 13.72,
+    "end": 13.92,
+    "speaker": "B",
+    "text": "through"
+  },
+  {
+    "start": 13.92,
+    "end": 15.83,
+    "speaker": "B",
+    "text": "acquaintance"
+  },
+  {
+    "start": 15.83,
+    "end": 16.26,
+    "speaker": "B",
+    "text": "So"
+  },
+  {
+    "start": 16.26,
+    "end": 16.48,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 16.48,
+    "end": 16.81,
+    "speaker": "B",
+    "text": "reason"
+  },
+  {
+    "start": 16.81,
+    "end": 16.96,
+    "speaker": "B",
+    "text": "we're"
+  },
+  {
+    "start": 16.96,
+    "end": 17.51,
+    "speaker": "B",
+    "text": "here"
+  },
+  {
+    "start": 17.51,
+    "end": 17.61,
+    "speaker": "B",
+    "text": "we're"
+  },
+  {
+    "start": 17.61,
+    "end": 17.77,
+    "speaker": "B",
+    "text": "gonna"
+  },
+  {
+    "start": 17.77,
+    "end": 18.07,
+    "speaker": "B",
+    "text": "design"
+  },
+  {
+    "start": 18.07,
+    "end": 18.11,
+    "speaker": "B",
+    "text": "a"
+  },
+  {
+    "start": 18.11,
+    "end": 18.2,
+    "speaker": "B",
+    "text": "new"
+  },
+  {
+    "start": 18.2,
+    "end": 18.48,
+    "speaker": "B",
+    "text": "remote"
+  },
+  {
+    "start": 18.48,
+    "end": 18.87,
+    "speaker": "B",
+    "text": "control"
+  },
+  {
+    "start": 18.87,
+    "end": 18.94,
+    "speaker": "B",
+    "text": "as"
+  },
+  {
+    "start": 18.94,
+    "end": 19.02,
+    "speaker": "B",
+    "text": "you"
+  },
+  {
+    "start": 19.02,
+    "end": 19.32,
+    "speaker": "B",
+    "text": "probably"
+  },
+  {
+    "start": 19.32,
+    "end": 19.52,
+    "speaker": "B",
+    "text": "all"
+  },
+  {
+    "start": 19.52,
+    "end": 21.4,
+    "speaker": "B",
+    "text": "know"
+  },
+  {
+    "start": 21.4,
+    "end": 21.67,
+    "speaker": "B",
+    "text": "The"
+  },
+  {
+    "start": 21.67,
+    "end": 21.93,
+    "speaker": "B",
+    "text": "very"
+  },
+  {
+    "start": 21.93,
+    "end": 22.22,
+    "speaker": "B",
+    "text": "broad"
+  },
+  {
+    "start": 22.22,
+    "end": 22.65,
+    "speaker": "B",
+    "text": "overview"
+  },
+  {
+    "start": 22.65,
+    "end": 22.77,
+    "speaker": "B",
+    "text": "is"
+  },
+  {
+    "start": 22.77,
+    "end": 23.23,
+    "speaker": "B",
+    "text": "original"
+  },
+  {
+    "start": 23.23,
+    "end": 23.84,
+    "speaker": "B",
+    "text": "trendy"
+  },
+  {
+    "start": 23.84,
+    "end": 23.98,
+    "speaker": "B",
+    "text": "and"
+  },
+  {
+    "start": 23.98,
+    "end": 25.24,
+    "speaker": "B",
+    "text": "user-friendly"
+  },
+  {
+    "start": 25.24,
+    "end": 25.48,
+    "speaker": "B",
+    "text": "Course"
+  },
+  {
+    "start": 25.48,
+    "end": 25.57,
+    "speaker": "B",
+    "text": "we'll"
+  },
+  {
+    "start": 25.57,
+    "end": 25.68,
+    "speaker": "B",
+    "text": "have"
+  },
+  {
+    "start": 25.68,
+    "end": 25.76,
+    "speaker": "B",
+    "text": "to"
+  },
+  {
+    "start": 25.76,
+    "end": 25.87,
+    "speaker": "B",
+    "text": "go"
+  },
+  {
+    "start": 25.87,
+    "end": 26.04,
+    "speaker": "B",
+    "text": "into"
+  },
+  {
+    "start": 26.04,
+    "end": 26.09,
+    "speaker": "B",
+    "text": "a"
+  },
+  {
+    "start": 26.09,
+    "end": 26.22,
+    "speaker": "B",
+    "text": "bit"
+  },
+  {
+    "start": 26.22,
+    "end": 26.53,
+    "speaker": "B",
+    "text": "more"
+  },
+  {
+    "start": 26.53,
+    "end": 27.44,
+    "speaker": "B",
+    "text": "um"
+  },
+  {
+    "start": 27.44,
+    "end": 27.91,
+    "speaker": "B",
+    "text": "detail"
+  },
+  {
+    "start": 27.91,
+    "end": 28.09,
+    "speaker": "B",
+    "text": "than"
+  },
+  {
+    "start": 28.09,
+    "end": 29.05,
+    "speaker": "B",
+    "text": "that"
+  },
+  {
+    "start": 29.05,
+    "end": 29.43,
+    "speaker": "B",
+    "text": "but"
+  },
+  {
+    "start": 29.43,
+    "end": 30.46,
+    "speaker": "B",
+    "text": "uh"
+  },
+  {
+    "start": 30.46,
+    "end": 30.88,
+    "speaker": "B",
+    "text": "personally"
+  },
+  {
+    "start": 30.88,
+    "end": 30.92,
+    "speaker": "B",
+    "text": "I"
+  },
+  {
+    "start": 30.92,
+    "end": 31.13,
+    "speaker": "B",
+    "text": "think"
+  },
+  {
+    "start": 31.13,
+    "end": 31.3,
+    "speaker": "B",
+    "text": "that"
+  },
+  {
+    "start": 31.3,
+    "end": 31.41,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 31.41,
+    "end": 32.01,
+    "speaker": "B",
+    "text": "original"
+  },
+  {
+    "start": 32.01,
+    "end": 32.15,
+    "speaker": "B",
+    "text": "is"
+  },
+  {
+    "start": 32.15,
+    "end": 32.72,
+    "speaker": "B",
+    "text": "gonna"
+  },
+  {
+    "start": 32.72,
+    "end": 32.9,
+    "speaker": "B",
+    "text": "be"
+  },
+  {
+    "start": 32.9,
+    "end": 32.95,
+    "speaker": "B",
+    "text": "a"
+  },
+  {
+    "start": 32.95,
+    "end": 33.61,
+    "speaker": "B",
+    "text": "very"
+  },
+  {
+    "start": 33.61,
+    "end": 33.97,
+    "speaker": "B",
+    "text": "key"
+  },
+  {
+    "start": 33.97,
+    "end": 34.46,
+    "speaker": "B",
+    "text": "aspect"
+  },
+  {
+    "start": 34.46,
+    "end": 34.55,
+    "speaker": "B",
+    "text": "to"
+  },
+  {
+    "start": 34.55,
+    "end": 34.71,
+    "speaker": "B",
+    "text": "this"
+  },
+  {
+    "start": 34.71,
+    "end": 35.87,
+    "speaker": "B",
+    "text": "design"
+  },
+  {
+    "start": 35.87,
+    "end": 36.2,
+    "speaker": "B",
+    "text": "Um"
+  },
+  {
+    "start": 36.2,
+    "end": 36.34,
+    "speaker": "B",
+    "text": "there's"
+  },
+  {
+    "start": 36.34,
+    "end": 36.39,
+    "speaker": "B",
+    "text": "a"
+  },
+  {
+    "start": 36.39,
+    "end": 36.53,
+    "speaker": "B",
+    "text": "lot"
+  },
+  {
+    "start": 36.53,
+    "end": 36.6,
+    "speaker": "B",
+    "text": "of"
+  },
+  {
+    "start": 36.6,
+    "end": 36.82,
+    "speaker": "B",
+    "text": "remote"
+  },
+  {
+    "start": 36.82,
+    "end": 37.17,
+    "speaker": "B",
+    "text": "controls"
+  },
+  {
+    "start": 37.17,
+    "end": 37.32,
+    "speaker": "B",
+    "text": "out"
+  },
+  {
+    "start": 37.32,
+    "end": 37.52,
+    "speaker": "B",
+    "text": "there"
+  },
+  {
+    "start": 37.52,
+    "end": 38.0,
+    "speaker": "B",
+    "text": "anyway"
+  },
+  {
+    "start": 38.0,
+    "end": 38.19,
+    "speaker": "B",
+    "text": "so"
+  },
+  {
+    "start": 38.19,
+    "end": 38.28,
+    "speaker": "B",
+    "text": "we're"
+  },
+  {
+    "start": 38.28,
+    "end": 38.41,
+    "speaker": "B",
+    "text": "gonna"
+  },
+  {
+    "start": 38.41,
+    "end": 38.6,
+    "speaker": "B",
+    "text": "need"
+  },
+  {
+    "start": 38.6,
+    "end": 38.92,
+    "speaker": "B",
+    "text": "something"
+  },
+  {
+    "start": 38.92,
+    "end": 39.06,
+    "speaker": "B",
+    "text": "that's"
+  },
+  {
+    "start": 39.06,
+    "end": 39.25,
+    "speaker": "B",
+    "text": "really"
+  },
+  {
+    "start": 39.25,
+    "end": 39.41,
+    "speaker": "B",
+    "text": "gonna"
+  },
+  {
+    "start": 39.41,
+    "end": 39.58,
+    "speaker": "B",
+    "text": "set"
+  },
+  {
+    "start": 39.58,
+    "end": 39.71,
+    "speaker": "B",
+    "text": "it"
+  },
+  {
+    "start": 39.71,
+    "end": 40.18,
+    "speaker": "B",
+    "text": "apart"
+  },
+  {
+    "start": 45.69,
+    "end": 45.94,
+    "speaker": "B",
+    "text": "This"
+  },
+  {
+    "start": 45.94,
+    "end": 46.05,
+    "speaker": "B",
+    "text": "is"
+  },
+  {
+    "start": 46.05,
+    "end": 46.22,
+    "speaker": "B",
+    "text": "how"
+  },
+  {
+    "start": 46.22,
+    "end": 46.45,
+    "speaker": "B",
+    "text": "today"
+  },
+  {
+    "start": 46.45,
+    "end": 46.78,
+    "speaker": "B",
+    "text": "seems"
+  },
+  {
+    "start": 46.78,
+    "end": 46.9,
+    "speaker": "B",
+    "text": "to"
+  },
+  {
+    "start": 46.9,
+    "end": 47.15,
+    "speaker": "B",
+    "text": "be"
+  },
+  {
+    "start": 47.15,
+    "end": 47.36,
+    "speaker": "B",
+    "text": "going"
+  },
+  {
+    "start": 47.36,
+    "end": 47.46,
+    "speaker": "B",
+    "text": "to"
+  },
+  {
+    "start": 47.46,
+    "end": 47.73,
+    "speaker": "B",
+    "text": "work"
+  },
+  {
+    "start": 47.73,
+    "end": 47.82,
+    "speaker": "B",
+    "text": "We're"
+  },
+  {
+    "start": 47.82,
+    "end": 47.96,
+    "speaker": "B",
+    "text": "gonna"
+  },
+  {
+    "start": 47.96,
+    "end": 48.05,
+    "speaker": "B",
+    "text": "have"
+  },
+  {
+    "start": 48.05,
+    "end": 48.11,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 48.11,
+    "end": 48.24,
+    "speaker": "B",
+    "text": "three"
+  },
+  {
+    "start": 48.24,
+    "end": 48.71,
+    "speaker": "B",
+    "text": "kay"
+  },
+  {
+    "start": 48.71,
+    "end": 49.27,
+    "speaker": "B",
+    "text": "phases"
+  },
+  {
+    "start": 49.27,
+    "end": 49.59,
+    "speaker": "B",
+    "text": "as"
+  },
+  {
+    "start": 49.59,
+    "end": 49.81,
+    "speaker": "B",
+    "text": "you've"
+  },
+  {
+    "start": 49.81,
+    "end": 50.08,
+    "speaker": "B",
+    "text": "probably"
+  },
+  {
+    "start": 50.08,
+    "end": 50.36,
+    "speaker": "B",
+    "text": "already"
+  },
+  {
+    "start": 50.36,
+    "end": 50.48,
+    "speaker": "B",
+    "text": "been"
+  },
+  {
+    "start": 50.48,
+    "end": 50.87,
+    "speaker": "B",
+    "text": "told"
+  },
+  {
+    "start": 50.87,
+    "end": 50.94,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 50.94,
+    "end": 51.37,
+    "speaker": "B",
+    "text": "functional"
+  },
+  {
+    "start": 51.37,
+    "end": 51.85,
+    "speaker": "B",
+    "text": "architectural"
+  },
+  {
+    "start": 51.85,
+    "end": 51.96,
+    "speaker": "B",
+    "text": "and"
+  },
+  {
+    "start": 51.96,
+    "end": 52.04,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 52.04,
+    "end": 52.43,
+    "speaker": "B",
+    "text": "detailed"
+  },
+  {
+    "start": 52.43,
+    "end": 53.81,
+    "speaker": "B",
+    "text": "design"
+  },
+  {
+    "start": 53.81,
+    "end": 54.5,
+    "speaker": "B",
+    "text": "Um"
+  },
+  {
+    "start": 59.1,
+    "end": 59.36,
+    "speaker": "B",
+    "text": "First"
+  },
+  {
+    "start": 59.36,
+    "end": 59.51,
+    "speaker": "B",
+    "text": "one's"
+  },
+  {
+    "start": 59.51,
+    "end": 59.69,
+    "speaker": "B",
+    "text": "gonna"
+  },
+  {
+    "start": 59.69,
+    "end": 59.79,
+    "speaker": "B",
+    "text": "be"
+  },
+  {
+    "start": 59.79,
+    "end": 60.09,
+    "speaker": "B",
+    "text": "covering"
+  },
+  {
+    "start": 60.09,
+    "end": 60.16,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 60.16,
+    "end": 60.4,
+    "speaker": "B",
+    "text": "user"
+  },
+  {
+    "start": 60.4,
+    "end": 60.87,
+    "speaker": "B",
+    "text": "requirement"
+  },
+  {
+    "start": 60.87,
+    "end": 61.18,
+    "speaker": "B",
+    "text": "spec"
+  },
+  {
+    "start": 61.18,
+    "end": 61.67,
+    "speaker": "B",
+    "text": "technical"
+  },
+  {
+    "start": 61.67,
+    "end": 62.21,
+    "speaker": "B",
+    "text": "functions"
+  },
+  {
+    "start": 62.21,
+    "end": 62.49,
+    "speaker": "B",
+    "text": "working"
+  },
+  {
+    "start": 62.49,
+    "end": 63.67,
+    "speaker": "B",
+    "text": "design"
+  },
+  {
+    "start": 63.67,
+    "end": 64.13,
+    "speaker": "B",
+    "text": "Second"
+  },
+  {
+    "start": 64.13,
+    "end": 64.36,
+    "speaker": "B",
+    "text": "seems"
+  },
+  {
+    "start": 64.36,
+    "end": 64.5,
+    "speaker": "B",
+    "text": "to"
+  },
+  {
+    "start": 64.5,
+    "end": 64.82,
+    "speaker": "B",
+    "text": "be"
+  },
+  {
+    "start": 64.82,
+    "end": 65.41,
+    "speaker": "B",
+    "text": "conceptual"
+  },
+  {
+    "start": 65.41,
+    "end": 65.9,
+    "speaker": "B",
+    "text": "components"
+  },
+  {
+    "start": 65.9,
+    "end": 66.33,
+    "speaker": "B",
+    "text": "properties"
+  },
+  {
+    "start": 66.33,
+    "end": 66.98,
+    "speaker": "B",
+    "text": "materials"
+  },
+  {
+    "start": 66.98,
+    "end": 67.12,
+    "speaker": "B",
+    "text": "and"
+  },
+  {
+    "start": 67.12,
+    "end": 67.18,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 67.18,
+    "end": 67.49,
+    "speaker": "B",
+    "text": "last"
+  },
+  {
+    "start": 67.49,
+    "end": 67.71,
+    "speaker": "B",
+    "text": "one"
+  },
+  {
+    "start": 67.71,
+    "end": 67.92,
+    "speaker": "B",
+    "text": "is"
+  },
+  {
+    "start": 67.92,
+    "end": 69.52,
+    "speaker": "B",
+    "text": "a"
+  },
+  {
+    "start": 69.52,
+    "end": 69.97,
+    "speaker": "B",
+    "text": "detailed"
+  },
+  {
+    "start": 69.97,
+    "end": 70.53,
+    "speaker": "B",
+    "text": "analysis"
+  },
+  {
+    "start": 70.53,
+    "end": 70.73,
+    "speaker": "B",
+    "text": "of"
+  },
+  {
+    "start": 70.73,
+    "end": 70.92,
+    "speaker": "B",
+    "text": "our"
+  },
+  {
+    "start": 70.92,
+    "end": 71.28,
+    "speaker": "B",
+    "text": "design"
+  },
+  {
+    "start": 71.28,
+    "end": 71.43,
+    "speaker": "B",
+    "text": "so"
+  },
+  {
+    "start": 71.43,
+    "end": 71.85,
+    "speaker": "B",
+    "text": "far"
+  },
+  {
+    "start": 71.85,
+    "end": 71.97,
+    "speaker": "B",
+    "text": "Of"
+  },
+  {
+    "start": 71.97,
+    "end": 72.17,
+    "speaker": "B",
+    "text": "course"
+  },
+  {
+    "start": 72.17,
+    "end": 72.31,
+    "speaker": "B",
+    "text": "you've"
+  },
+  {
+    "start": 72.31,
+    "end": 72.62,
+    "speaker": "B",
+    "text": "all"
+  },
+  {
+    "start": 72.62,
+    "end": 72.81,
+    "speaker": "B",
+    "text": "got"
+  },
+  {
+    "start": 72.81,
+    "end": 72.93,
+    "speaker": "B",
+    "text": "the"
+  },
+  {
+    "start": 72.93,
+    "end": 73.32,
+    "speaker": "B",
+    "text": "similar"
+  },
+  {
+    "start": 73.32,
+    "end": 73.73,
+    "speaker": "B",
+    "text": "emails"
+  },
+  {
+    "start": 73.73,
+    "end": 73.78,
+    "speaker": "B",
+    "text": "I"
+  },
+  {
+    "start": 73.78,
+    "end": 74.72,
+    "speaker": "B",
+    "text": "believe"
+  },
+  {
+    "start": 74.72,
+    "end": 75.0,
+    "speaker": "B",
+    "text": "right"
+  },
+  {
+    "start": 78.15,
+    "end": 78.29,
+    "speaker": "B",
+    "text": "What"
+  },
+  {
+    "start": 78.29,
+    "end": 78.4,
+    "speaker": "B",
+    "text": "can"
+  },
+  {
+    "start": 78.4,
+    "end": 78.45,
+    "speaker": "B",
+    "text": "I"
+  },
+  {
+    "start": 78.45,
+    "end": 79.33,
+    "speaker": "B",
+    "text": "say"
+  },
+  {
+    "start": 79.33,
+    "end": 80.1,
+    "speaker": "B",
+    "text": "Ebenezer"
+  },
+  {
+    "start": 80.1,
+    "end": 80.18,
+    "speaker": "B",
+    "text": "you"
+  },
+  {
+    "start": 80.18,
+    "end": 80.32,
+    "speaker": "B",
+    "text": "wanna"
+  },
+  {
+    "start": 80.32,
+    "end": 80.45,
+    "speaker": "B",
+    "text": "have"
+  },
+  {
+    "start": 80.45,
+    "end": 81.24,
+    "speaker": "B",
+    "text": "a"
+  },
+  {
+    "start": 81.24,
+    "end": 81.34,
+    "speaker": "B",
+    "text": "you"
+  },
+  {
+    "start": 81.34,
+    "end": 81.51,
+    "speaker": "B",
+    "text": "wanna"
+  },
+  {
+    "start": 81.51,
+    "end": 81.75,
+    "speaker": "B",
+    "text": "draw"
+  },
+  {
+    "start": 81.75,
+    "end": 81.88,
+    "speaker": "B",
+    "text": "your"
+  },
+  {
+    "start": 81.88,
+    "end": 82.26,
+    "speaker": "B",
+    "text": "favourite"
+  },
+  {
+    "start": 82.26,
+    "end": 83.48,
+    "speaker": "B",
+    "text": "animal"
+  },
+  {
+    "start": 83.48,
+    "end": 84.06,
+    "speaker": "C",
+    "text": "Sure"
+  },
+  {
+    "start": 87.95,
+    "end": 90.92,
+    "speaker": "C",
+    "text": "Whiteboard"
+  },
+  {
+    "start": 90.92,
+    "end": 92.07,
+    "speaker": "C",
+    "text": "'Kay"
+  },
+  {
+    "start": 94.61,
+    "end": 95.54,
+    "speaker": "C",
+    "text": "S"
+  },
+  {
+    "start": 95.54,
+    "end": 96.83,
+    "speaker": "C",
+    "text": "okay"
+  },
+  {
+    "start": 96.83,
+    "end": 96.87,
+    "speaker": "C",
+    "text": "I"
+  },
+  {
+    "start": 96.87,
+    "end": 96.97,
+    "speaker": "C",
+    "text": "will"
+  },
+  {
+    "start": 96.97,
+    "end": 97.12,
+    "speaker": "C",
+    "text": "make"
+  },
+  {
+    "start": 97.12,
+    "end": 97.26,
+    "speaker": "C",
+    "text": "this"
+  },
+  {
+    "start": 97.26,
+    "end": 97.64,
+    "speaker": "C",
+    "text": "quick"
+  },
+  {
+    "start": 97.64,
+    "end": 97.98,
+    "speaker": "C",
+    "text": "since"
+  },
+  {
+    "start": 97.98,
+    "end": 98.07,
+    "speaker": "C",
+    "text": "we"
+  },
+  {
+    "start": 98.07,
+    "end": 98.23,
+    "speaker": "C",
+    "text": "don't"
+  },
+  {
+    "start": 98.23,
+    "end": 98.38,
+    "speaker": "C",
+    "text": "have"
+  },
+  {
+    "start": 98.38,
+    "end": 98.54,
+    "speaker": "C",
+    "text": "much"
+  },
+  {
+    "start": 98.54,
+    "end": 98.9,
+    "speaker": "C",
+    "text": "time"
+  },
+  {
+    "start": 102.19,
+    "end": 102.66,
+    "speaker": "C",
+    "text": "Um"
+  }
+]

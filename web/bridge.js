@@ -1,6 +1,8 @@
 import './theme.js';
 import { resolveSpeechModel } from './models.js';
 import './inference.js';
+import './notes.js';
+import './files.js';
 import './recorder.js';
 import './accessibility.js';
 

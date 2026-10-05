@@ -42,34 +42,34 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
     assert.equal(await page.evaluate(() => window.__microphoneRequests), 0);
 
     await t.test('preferences save multilingual model/language choices', async () => {
-      await page.getByPlaceholder('What should we call you?').fill('Settings verification');
+      await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Settings verification');
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
       assert.equal((await (await context.request.get(`${baseURL}/api/settings`)).json()).name, 'Settings verification');
       await page.locator('select').filter({ has: page.locator('option[value="auto"]') }).selectOption('fr');
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
       assert.equal((await (await context.request.get(`${baseURL}/api/settings`)).json()).language, 'fr');
       const speechSelect = page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-large-v3"]') });
       await speechSelect.selectOption('onnx-community/whisper-large-v3');
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
       await page.route('**/api/settings', async route => {
         if (route.request().method() === 'GET') await new Promise(resolve => setTimeout(resolve, 350));
         await route.continue();
       });
       await page.reload();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
-      await page.getByPlaceholder('What should we call you?').fill('Keep this unsaved edit');
+      await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Keep this unsaved edit');
       await expect(page.locator('select').filter({ has: page.locator('option[value="auto"]') })).toHaveValue('fr');
       await expect(page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-large-v3"]') })).toHaveValue('onnx-community/whisper-large-v3');
-      await expect(page.getByPlaceholder('What should we call you?')).toHaveValue('Keep this unsaved edit');
+      await expect(page.getByRole('textbox', { name: 'Your name', exact: true })).toHaveValue('Keep this unsaved edit');
       await page.unroute('**/api/settings');
       await page.locator('select').filter({ has: page.locator('option[value="auto"]') }).selectOption(initialSettings.language);
       await page.locator('select').filter({ has: page.locator('option[value="onnx-community/whisper-large-v3"]') }).selectOption(initialSettings.speechModel);
-      await page.getByPlaceholder('What should we call you?').fill(initialSettings.name);
+      await page.getByRole('textbox', { name: 'Your name', exact: true }).fill(initialSettings.name);
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
       await page.screenshot({ path: `${screenshotDir}/general-desktop.png`, fullPage: true });
     });
 
@@ -86,22 +86,22 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await expect(page.getByRole('heading', { name: 'ChatGPT' })).toBeVisible();
       await expect(page.getByText('When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content.')).toBeVisible();
       await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveCount(0);
-      await page.getByPlaceholder('What should we call you?').fill('Draft survives setup');
+      await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Draft survives setup');
       await page.getByRole('button', { name: 'Set up ChatGPT', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await expect(providerSelect).toHaveValue('chatgpt');
-      await expect(page.getByPlaceholder('What should we call you?')).toHaveValue('Draft survives setup');
+      await expect(page.getByRole('textbox', { name: 'Your name', exact: true })).toHaveValue('Draft survives setup');
       assert.equal((await (await context.request.get(`${baseURL}/api/settings`)).json()).notesProvider, 'ollama', 'Setup navigation preserves a draft without saving it implicitly');
       await page.getByRole('button', { name: 'Vocabulary', exact: true }).click();
       await page.getByRole('button', { name: 'General', exact: true }).click();
       await expect(providerSelect).toHaveValue('chatgpt');
       await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
       await expect(providerSelect).toHaveValue('ollama');
-      await expect(page.getByPlaceholder('What should we call you?')).toHaveValue(initialSettings.name);
+      await expect(page.getByRole('textbox', { name: 'Your name', exact: true })).toHaveValue(initialSettings.name);
       await providerSelect.selectOption('chatgpt');
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
       const saved = await (await context.request.get(`${baseURL}/api/settings`)).json();
       assert.equal(saved.notesProvider, 'chatgpt');
       assert.equal(saved.chatgptModel, '');
@@ -114,7 +114,7 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await page.getByRole('combobox', { name: /Default notes provider/ }).selectOption('ollama');
       await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveValue(originalOllamaModel);
       await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
       await page.route('**/api/settings', async route => {
         if (route.request().method() !== 'GET') return route.continue();
         const response = await route.fetch();
@@ -127,7 +127,7 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await expect(page.getByRole('combobox', { name: /Default notes provider/ })).toHaveValue('ollama');
       await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveValue(originalOllamaModel);
-      await expect(page.getByText('Your preferences are up to date')).toBeVisible();
+      await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
       await page.unroute('**/api/settings');
       page.off('request', trackRequests);
     });

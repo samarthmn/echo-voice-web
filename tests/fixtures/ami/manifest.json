@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "source": "AMI Meeting Corpus",
+  "license": "CC BY 4.0",
+  "annotationsSha256": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d",
+  "cases": [
+    {
+      "id": "ES2002a",
+      "sourceAudioUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2002a/audio/ES2002a.Mix-Headset.wav",
+      "sourceAudioSha256": "9c76866990fcc8b84006dc32d273ad99df439090b748ebe72103bb78c3216ee7",
+      "startSeconds": 60.0,
+      "endSeconds": 210.0,
+      "audio": "ES2002a-60-210.wav",
+      "audioSha256": "7e7a345be8cb5258ceb8aed005bde2b6a2971ab4aa6c49941c8037f9823da8c1",
+      "reference": "ES2002a-60-210.reference.txt",
+      "referenceSha256": "a690c059ba64919749e26bc16af327d739ed89e6695fef413f101d6323c258de",
+      "timedReference": "ES2002a-60-210.reference.json",
+      "timedReferenceSha256": "ca82657b175064bd90329bff2e386d8efc40adc59b46bd24c7a3f2e3b2eff65a",
+      "referenceAnnotations": 305,
+      "speakers": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    {
+      "id": "ES2003a",
+      "sourceAudioUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2003a/audio/ES2003a.Mix-Headset.wav",
+      "sourceAudioSha256": "41cf861afafc20e70061c6cc82b2cb1c620d630be6d13361da928f04fc00beea",
+      "startSeconds": 60.0,
+      "endSeconds": 210.0,
+      "audio": "ES2003a-60-210.wav",
+      "audioSha256": "4aa79f1cfd47ad9000e5a3601e4ae4ad91508f6860a70cba8a8199a0c3e2be18",
+      "reference": "ES2003a-60-210.reference.txt",
+      "referenceSha256": "764f5b455947cce25a13bc6feaf154bdc26cee1e725660c68ac838349205fa45",
+      "timedReference": "ES2003a-60-210.reference.json",
+      "timedReferenceSha256": "53ef1d75b01ca14c6c2cf8e7ebbc4dd92f4ce97e68e948243424323de9bb11f2",
+      "referenceAnnotations": 219,
+      "speakers": [
+        "B",
+        "C"
+      ]
+    },
+    {
+      "id": "ES2004a",
+      "sourceAudioUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2004a/audio/ES2004a.Mix-Headset.wav",
+      "sourceAudioSha256": "3e2560b19bee6952c7c7ce041b0f1ea8a7ea9468044c4eea79d2a2c67e24ab0f",
+      "startSeconds": 60.0,
+      "endSeconds": 210.0,
+      "audio": "ES2004a-60-210.wav",
+      "audioSha256": "725449be686290f80dd546a28365adc635d765f0ac46ec9c8c9c8a77c63b26e6",
+      "reference": "ES2004a-60-210.reference.txt",
+      "referenceSha256": "9c5c3ccea9a32c6ff448d2a2d1a735ad06ec4f898de25bd6fb1f7bf3445fcf7e",
+      "timedReference": "ES2004a-60-210.reference.json",
+      "timedReferenceSha256": "4bd9b3edc990d17e4558e63a3a015fa92b9c7e54cab490b81c5a3666d992ded0",
+      "referenceAnnotations": 261,
+      "speakers": [
+        "A",
+        "B"
+      ]
+    }
+  ]
+}

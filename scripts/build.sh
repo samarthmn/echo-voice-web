@@ -12,5 +12,6 @@ if ! command -v wasm-bindgen >/dev/null || [[ "$(wasm-bindgen --version)" != "wa
 fi
 cargo build --locked --release -p echo-app --target wasm32-unknown-unknown
 wasm-bindgen --target web --out-dir public/assets --out-name echo_app target/wasm32-unknown-unknown/release/echo-app.wasm
+node scripts/asset-manifest.mjs
 cargo build --locked --release -p echo-server
 printf '\nEcho Voice is built. Run ./scripts/start.sh and open http://localhost:3000\n'

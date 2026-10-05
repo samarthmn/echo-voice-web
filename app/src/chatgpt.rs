@@ -1,3 +1,4 @@
+use crate::ui::{ActionButton, BadgeTone, ButtonKind, StatusBadge};
 use crate::{
     api::{delete, get, patch, post, text},
     Icon,
@@ -82,10 +83,10 @@ pub fn ChatGptConnection(
         section { id:"chatgpt-connection", class:"panel chatgpt-panel", aria_label:"ChatGPT connection",
             div {class:"chatgpt-heading",
                 span {class:"model-symbol",Icon{name:"sparkles",size:25}}
-                div {h2 {"Bring your ChatGPT plan."}p {"Optional cloud intelligence, through the official Codex integration."}}
-                span {class:if connected{"badge badge-green"}else{"badge"},if connected{"Connected"}else{"Optional connection"}}
+                div {h2 {"ChatGPT"}p {"Use your account for meeting notes."}}
+                StatusBadge{tone:if connected{BadgeTone::Success}else{BadgeTone::Neutral},if connected{"Connected"}else{"Not connected"}}
             }
-            p {class:"chatgpt-disclosure","Use an eligible plan’s Codex allowance for summaries, decisions, and action items. When you confirm a request, transcript text and speaker labels go to OpenAI. Recording and speech transcription stay on this device."}
+            p {class:"chatgpt-disclosure","Notes use your plan’s Codex allowance. Each request asks permission to send transcript text and speaker labels to OpenAI. Audio and transcription stay on this device."}
             if !error().is_empty() {div {class:"inline-error",role:"alert",Icon{name:"alert",size:18},"{error}"}}
             if !provider_error.is_empty() {p {class:"chatgpt-status-message",role:"status","{provider_error}"}}
             if loading() {div {class:"chatgpt-status-message",role:"status",span{class:"spinner"}"Checking the local Codex helper…"}}
@@ -113,7 +114,7 @@ pub fn ChatGptConnection(
                 }
                 if limit["primary"].is_object() || limit["secondary"].is_object() {
                     div {class:"chatgpt-usage",aria_label:"Codex subscription usage",
-                        h3 {"Your Codex allowance"}
+                        h3 {"Codex usage"}
                         if limit["primary"].is_object() {UsageWindow{label:"Current usage window",window:limit["primary"].clone()}}
                         if limit["secondary"].is_object() {UsageWindow{label:"Longer usage window",window:limit["secondary"].clone()}}
                         p {"Reported by OpenAI. Allowances are shared with other Codex sessions; token counts on a note are not a remaining balance."}
@@ -127,23 +128,23 @@ pub fn ChatGptConnection(
                     p {"Open the secure sign-in page in this browser. Return here afterward; Echo will check the connection automatically."}
                     div {class:"chatgpt-actions",
                         if !auth_url.is_empty() {a {class:"button button-primary",href:"{auth_url}",target:"_blank",rel:"noopener noreferrer","Open ChatGPT sign-in" Icon{name:"arrow",size:16}}}
-                        button {class:"button button-secondary",disabled:busy,onclick:move |_| {spawn(async move {operation.set("cancel".into());match delete("/chatgpt/login").await {Ok(_)=>{login.set(Value::Null);refresh+=1;},Err(message)=>error.set(message)}operation.set(String::new());});},"Cancel sign-in"}
+                        ActionButton{kind:ButtonKind::Secondary,disabled:busy,onclick:move |_| {spawn(async move {operation.set("cancel".into());match delete("/chatgpt/login").await {Ok(_)=>{login.set(Value::Null);refresh+=1;},Err(message)=>error.set(message)}operation.set(String::new());});},"Cancel sign-in"}
                     }
                 }
             }
             div {class:"chatgpt-actions",
                 if connected {
-                    button {class:if default{"button button-secondary"}else{"button button-primary"},disabled:busy||default,
+                    ActionButton {kind:if default{ButtonKind::Secondary}else{ButtonKind::Primary},disabled:busy||default,
                         onclick:move |_| {spawn(async move {match patch("/settings",json!({"notesProvider":"chatgpt"})).await {Ok(saved)=>{on_change.call(saved);notify.call("ChatGPT is selected for notes. Each request still asks before sending transcript text.".into());},Err(message)=>error.set(message)}});},
                         Icon{name:if default{"check"}else{"sparkles"},size:16}if default{"Default notes provider"}else{"Use ChatGPT for notes"}}
-                    button {class:"button button-ghost",disabled:busy,onclick:move |_| {spawn(async move {operation.set("logout".into());error.set(String::new());match post("/chatgpt/logout",json!({})).await {Ok(_)=>{status.set(Value::Null);models.set(Vec::new());login.set(Value::Null);notify.call("ChatGPT disconnected from Echo. Your saved notes remain here.".into());refresh+=1;},Err(message)=>error.set(message)}operation.set(String::new());});},"Disconnect ChatGPT"}
+                    ActionButton{kind:ButtonKind::Ghost,disabled:busy,onclick:move |_| {spawn(async move {operation.set("logout".into());error.set(String::new());match post("/chatgpt/logout",json!({})).await {Ok(_)=>{status.set(Value::Null);models.set(Vec::new());login.set(Value::Null);notify.call("ChatGPT disconnected from Echo. Your saved notes remain here.".into());refresh+=1;},Err(message)=>error.set(message)}operation.set(String::new());});},"Disconnect ChatGPT"}
                 } else if installed && !pending {
-                    button {class:"button button-primary",disabled:busy,onclick:move |_| {spawn(async move {operation.set("login".into());error.set(String::new());match post("/chatgpt/login",json!({})).await {Ok(response)=>{if response["pending"]==true {login.set(response);}else {login.set(Value::Null);refresh+=1;}},Err(message)=>error.set(message)}operation.set(String::new());});},
+                    ActionButton{kind:ButtonKind::Primary,disabled:busy,onclick:move |_| {spawn(async move {operation.set("login".into());error.set(String::new());match post("/chatgpt/login",json!({})).await {Ok(response)=>{if response["pending"]==true {login.set(response);}else {login.set(Value::Null);refresh+=1;}},Err(message)=>error.set(message)}operation.set(String::new());});},
                         Icon{name:"link",size:16}if operation()=="login"{"Preparing sign-in…"}else{"Sign in with ChatGPT"}}
                 }
-                button {class:"button button-secondary",disabled:busy||loading(),onclick:move |_| {error.set(String::new());refresh+=1;},Icon{name:"refresh",size:16}"Refresh ChatGPT connection"}
+                ActionButton{kind:ButtonKind::Secondary,disabled:busy||loading(),onclick:move |_| {error.set(String::new());refresh+=1;},Icon{name:"refresh",size:16}"Refresh connection"}
             }
-            p {class:"chatgpt-footnote",Icon{name:"shield",size:15}"Your login is managed by the local Codex helper and excluded from Echo backups. No API key is required. Ollama remains available for fully local notes."}
+            p {class:"chatgpt-footnote",Icon{name:"shield",size:15}"Sign-in is managed by Codex and excluded from backups. No API key is required."}
         }
     }
 }

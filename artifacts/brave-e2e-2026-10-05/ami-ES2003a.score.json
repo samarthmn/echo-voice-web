@@ -1,0 +1,26 @@
+{
+  "case": "ES2003a",
+  "durationSeconds": 150.0,
+  "sourceAudioSha256": "4aa79f1cfd47ad9000e5a3601e4ae4ad91508f6860a70cba8a8199a0c3e2be18",
+  "referenceSha256": "764f5b455947cce25a13bc6feaf154bdc26cee1e725660c68ac838349205fa45",
+  "meetingId": "36d2828b-1301-4560-a4e1-f5dfbfe0c1db",
+  "transcriptVersionId": "6bdca978-32e9-4ccb-98c4-fb366269a7b2",
+  "model": "onnx-community/whisper-large-v3-turbo",
+  "createdAt": "2026-10-05T03:39:36.060Z",
+  "referenceWords": 220,
+  "hypothesisWords": 233,
+  "substitutions": 21,
+  "deletions": 10,
+  "insertions": 23,
+  "wordErrorRate": 0.24545454545454545,
+  "wordAccuracyPercent": 75.45454545454545,
+  "passages": 17,
+  "detectedSpeakerLabels": [
+    "Speaker 1",
+    "Speaker 2",
+    "Speaker 3",
+    "Unknown speaker"
+  ],
+  "normalization": "NFKC, lowercase, punctuation removed, apostrophes preserved; fillers retained",
+  "hypothesis": "Right. This is the agenda for today's meeting. As you can see, opening, acquaintance, tool training, project plan, discussion, and closing. We already got through opening and partially through acquaintance. So the reason we're here, we're going to design a new remote control, as you probably all know. The very broad overview is original, trendy, and user friendly.. Of course we'll have to go into a bit more detail than that, but personally I think that the original is going to be a very key aspect to this design. There's a lot of remote controls out there anyway, so we're going to need something that's really going to set it apart. This is how today seems to be going to work. We now have the 3K phases, as you've probably already been told, the functional, conceptual and the detailed design. The first one's going to be covering the user requirements spec, technical functions, working design. The second seems to be conceptual components, properties, materials. And the last one is a detailed analysis of our design so far. Of course, you've all got the similar emails, I believe. What can I say? Ebonyuser, do you want to draw your favourite animal? Sure. Whiteboard. Okay. Okay. I'm going to make this quick since we don't have much time. Um... Okay. I'm going to make this quick since we don't have much time. Okay.. Thank you."
+}

@@ -1,0 +1,172 @@
+{
+  "activeTranscriptId": "6bdca978-32e9-4ccb-98c4-fb366269a7b2",
+  "consent": true,
+  "createdAt": "2026-10-05T02:57:50.373Z",
+  "duration": 150,
+  "gaps": [],
+  "id": "36d2828b-1301-4560-a4e1-f5dfbfe0c1db",
+  "liveTranscription": false,
+  "mode": "import",
+  "moments": [],
+  "notes": [],
+  "notesModel": "gemma4:e4b-mlx",
+  "speechModel": "onnx-community/whisper-large-v3-turbo",
+  "status": "ready",
+  "title": "ES2003a-60-210",
+  "tracks": [
+    {
+      "bytes": 4800044,
+      "id": "7d85ccdb-a98b-4ece-8a61-be1aa0351c36",
+      "label": "Original recording",
+      "mimeType": "audio/wav",
+      "url": "/api/meetings/36d2828b-1301-4560-a4e1-f5dfbfe0c1db/audio/7d85ccdb-a98b-4ece-8a61-be1aa0351c36"
+    }
+  ],
+  "transcripts": [
+    {
+      "createdAt": "2026-10-05T03:39:36.060Z",
+      "id": "6bdca978-32e9-4ccb-98c4-fb366269a7b2",
+      "model": "onnx-community/whisper-large-v3-turbo",
+      "passages": [
+        {
+          "end": 31.74,
+          "id": "eb7bec78-0e09-416d-abff-ab264a91cdaf",
+          "speaker": "Speaker 1",
+          "start": 2.12,
+          "text": "Right. This is the agenda for today's meeting. As you can see, opening, acquaintance, tool training, project plan, discussion, and closing. We already got through opening and partially through acquaintance. So the reason we're here, we're going to design a new remote control, as you probably all know. The very broad overview is original, trendy, and user friendly.. Of course we'll have to go into a bit more detail than that, but personally I think that the original",
+          "uncertain": false
+        },
+        {
+          "end": 40.1,
+          "id": "1c3d781f-e4c2-499a-85dd-ac4b97ef9888",
+          "speaker": "Speaker 1",
+          "start": 31.74,
+          "text": "is going to be a very key aspect to this design. There's a lot of remote controls out there anyway, so we're going to need something that's really going to set it apart.",
+          "uncertain": false
+        },
+        {
+          "end": 45.94,
+          "id": "725f9c88-28e0-47b7-8b23-52a73408fdf1",
+          "speaker": "Speaker 2",
+          "start": 40.34,
+          "text": "This",
+          "uncertain": true
+        },
+        {
+          "end": 52.84,
+          "id": "26f119e5-1311-410b-b844-43b0b071607f",
+          "speaker": "Speaker 2",
+          "start": 45.94,
+          "text": "is how today seems to be going to work. We now have the 3K phases, as you've probably already been told, the functional, conceptual and the detailed design.",
+          "uncertain": false
+        },
+        {
+          "end": 59.18,
+          "id": "260b8c09-ae47-45fc-8082-2a1da95be553",
+          "speaker": "Speaker 2",
+          "start": 53.5,
+          "text": "The",
+          "uncertain": true
+        },
+        {
+          "end": 74.02,
+          "id": "354a5bfb-791d-431f-a0fa-f11eeddc8515",
+          "speaker": "Speaker 1",
+          "start": 59.18,
+          "text": "first one's going to be covering the user requirements spec, technical functions, working design. The second seems to be conceptual components, properties, materials. And the last one is a detailed analysis of our design so far. Of course, you've all got the similar emails, I believe.",
+          "uncertain": false
+        },
+        {
+          "end": 78.26,
+          "id": "063d41dc-8f01-4d63-ae9e-5eedf5078bdd",
+          "speaker": "Speaker 1",
+          "start": 75.9,
+          "text": "What",
+          "uncertain": true
+        },
+        {
+          "end": 83.94,
+          "id": "b380d4b1-72f8-4fb3-a718-1bae10a8a8e9",
+          "speaker": "Speaker 1",
+          "start": 78.26,
+          "text": "can I say? Ebonyuser, do you want to draw your favourite animal? Sure.",
+          "uncertain": false
+        },
+        {
+          "end": 88.48,
+          "id": "76f6e1d8-c997-42f8-b9c0-da37b247f097",
+          "speaker": "Speaker 1",
+          "start": 85.42,
+          "text": "Whiteboard.",
+          "uncertain": true
+        },
+        {
+          "end": 91.2,
+          "id": "b392daa6-3118-4858-93fe-b19fae1c594f",
+          "speaker": "Speaker 3",
+          "start": 90.22,
+          "text": "Okay.",
+          "uncertain": true
+        },
+        {
+          "end": 96,
+          "id": "35ec648b-365c-4cb2-93e4-318daf215ac8",
+          "speaker": "Speaker 3",
+          "start": 92.78,
+          "text": "Okay.",
+          "uncertain": true
+        },
+        {
+          "end": 96.96,
+          "id": "f44948ad-bf93-4750-bcc6-6e76f8f94b33",
+          "speaker": "Speaker 3",
+          "start": 96.7,
+          "text": "I'm",
+          "uncertain": false
+        },
+        {
+          "end": 96.96,
+          "id": "b541ed2a-39c4-4485-800e-82251e6ed061",
+          "speaker": "Unknown speaker",
+          "start": 96.96,
+          "text": "going",
+          "uncertain": true
+        },
+        {
+          "end": 98.82,
+          "id": "2bda3f3b-b624-40f2-8e70-05922441f80d",
+          "speaker": "Speaker 3",
+          "start": 96.96,
+          "text": "to make this quick since we don't have much time.",
+          "uncertain": false
+        },
+        {
+          "end": 102.5,
+          "id": "52983685-c278-4b17-9592-3c8999585dd8",
+          "speaker": "Speaker 3",
+          "start": 99.9,
+          "text": "Um...",
+          "uncertain": true
+        },
+        {
+          "end": 143.98,
+          "id": "5ca806d6-312e-43eb-8113-178a2d15c0f6",
+          "speaker": "Unknown speaker",
+          "start": 124.38,
+          "text": "Okay. I'm going to make this quick since we don't have much time. Okay..",
+          "uncertain": true
+        },
+        {
+          "end": 150,
+          "id": "a3c7a75f-20a0-438c-9004-b41a8b518fd1",
+          "speaker": "Unknown speaker",
+          "start": 150,
+          "text": "Thank you.",
+          "uncertain": true
+        }
+      ],
+      "vocabulary": []
+    }
+  ],
+  "updatedAt": "2026-10-05T03:39:36.060Z"
+}

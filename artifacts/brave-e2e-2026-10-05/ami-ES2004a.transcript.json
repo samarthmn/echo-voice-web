@@ -1,0 +1,148 @@
+{
+  "activeTranscriptId": "764e3eaa-90e5-4aba-b805-2c3b4d9e4708",
+  "consent": true,
+  "createdAt": "2026-10-05T02:59:01.150Z",
+  "duration": 150,
+  "gaps": [],
+  "id": "1cb5e82c-b9ef-4a90-961e-87dfbca817df",
+  "liveTranscription": false,
+  "mode": "import",
+  "moments": [],
+  "notes": [],
+  "notesModel": "gemma4:e4b-mlx",
+  "speechModel": "onnx-community/whisper-large-v3-turbo",
+  "status": "ready",
+  "title": "ES2004a-60-210",
+  "tracks": [
+    {
+      "bytes": 4800044,
+      "id": "0fac433f-4f1c-4ff2-b11d-334b1904810b",
+      "label": "Original recording",
+      "mimeType": "audio/wav",
+      "url": "/api/meetings/1cb5e82c-b9ef-4a90-961e-87dfbca817df/audio/0fac433f-4f1c-4ff2-b11d-334b1904810b"
+    }
+  ],
+  "transcripts": [
+    {
+      "createdAt": "2026-10-05T03:43:38.046Z",
+      "id": "764e3eaa-90e5-4aba-b805-2c3b4d9e4708",
+      "model": "onnx-community/whisper-large-v3-turbo",
+      "passages": [
+        {
+          "end": 33,
+          "id": "b9410d98-7bf0-4474-8044-5957aea8b521",
+          "speaker": "Speaker 1",
+          "start": 21.88,
+          "text": "Hello everybody, I'm Sarah, the project manager. And this is our first meeting, surprisingly enough. Okay, this is our agenda.",
+          "uncertain": false
+        },
+        {
+          "end": 35.98,
+          "id": "43f7b0cc-75c2-4c75-98e7-e163f1bffae8",
+          "speaker": "Speaker 1",
+          "start": 33.62,
+          "text": "We",
+          "uncertain": true
+        },
+        {
+          "end": 55.6,
+          "id": "e91e0212-f43d-4b2e-aae1-7b75506f5347",
+          "speaker": "Speaker 1",
+          "start": 35.98,
+          "text": "will do some stuff, get to know each other a bit better, feel more comfortable with each other. Then we'll go do tool training, talk about the project plan, discuss our own ideas and everything. And we've got 25 minutes to do that, as far as I can understand.",
+          "uncertain": false
+        },
+        {
+          "end": 57.94,
+          "id": "a42b5e2f-bf2d-4f2d-bb60-8280bfd472e0",
+          "speaker": "Speaker 1",
+          "start": 56.22,
+          "text": "Now,",
+          "uncertain": true
+        },
+        {
+          "end": 81.02,
+          "id": "315809b4-d64c-487b-bf61-5c99a5820168",
+          "speaker": "Speaker 1",
+          "start": 58.2,
+          "text": "we're developing a remote control, which you probably already know. We want it to be original, something that people haven't thought of, it's not out in the shops. Trendy, appealing to a wide market, but, you know, not a hunk of metal. And user-friendly, grannies to kids, maybe even poochers, should be able to use it.",
+          "uncertain": false
+        },
+        {
+          "end": 83.14,
+          "id": "f9dbab8e-9070-4170-928f-d52a81021044",
+          "speaker": "Speaker 1",
+          "start": 81.62,
+          "text": "Okay,",
+          "uncertain": true
+        },
+        {
+          "end": 100.7,
+          "id": "c1ba425a-ba8b-417a-8509-4e490945725a",
+          "speaker": "Speaker 1",
+          "start": 83.8,
+          "text": "first is the functional design. This is where we all go off and do our individual work. What needs need to be fulfilled by the product, what effect the product has to have and how it's actually going to do that. Conceptual design,",
+          "uncertain": false
+        },
+        {
+          "end": 102.48,
+          "id": "dc2f3886-16d4-4159-8962-0ab8247f7197",
+          "speaker": "Speaker 1",
+          "start": 100.8,
+          "text": "what",
+          "uncertain": true
+        },
+        {
+          "end": 107.72,
+          "id": "404e08de-6824-4d37-8966-3df6cb49b094",
+          "speaker": "Speaker 1",
+          "start": 102.48,
+          "text": "we're thinking, how it's going to go, and then the detailed design, how we're actually going to put it into practice and make it work.",
+          "uncertain": false
+        },
+        {
+          "end": 110.7,
+          "id": "949f2415-ad02-4e88-b9ff-7650a2ad85ee",
+          "speaker": "Speaker 1",
+          "start": 108.86,
+          "text": "OK,",
+          "uncertain": true
+        },
+        {
+          "end": 124.46,
+          "id": "a167a10a-6335-4a9e-9e86-ff11272e7cc7",
+          "speaker": "Speaker 1",
+          "start": 111.14,
+          "text": "right. We're going to practice with the pens and draw our favorite animal on the whiteboard. I'll go first. And sum up the characteristics of that animal. So...",
+          "uncertain": false
+        },
+        {
+          "end": 129.16,
+          "id": "c759139f-d4a4-44cd-8de3-11baa57855f7",
+          "speaker": "Speaker 1",
+          "start": 125.74,
+          "text": "Okay.",
+          "uncertain": true
+        },
+        {
+          "end": 131.18,
+          "id": "37cb2ce4-457a-48a1-a119-d4a23d5ccec3",
+          "speaker": "Speaker 1",
+          "start": 129.86,
+          "text": "I'll leave space for everyone else",
+          "uncertain": false
+        },
+        {
+          "end": 150,
+          "id": "d301c34c-2745-406e-ada4-b44b889c11cc",
+          "speaker": "Speaker 1",
+          "start": 131.18,
+          "text": "..",
+          "uncertain": true
+        }
+      ],
+      "vocabulary": []
+    }
+  ],
+  "updatedAt": "2026-10-05T03:43:38.046Z"
+}

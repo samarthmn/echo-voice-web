@@ -12,18 +12,25 @@ export function similarity(a, b) {
   return a.reduce((sum, value, i) => sum + value * b[i], 0);
 }
 /** Match real voice embeddings; local channels in the same window stay distinct. */
-export function matchSpeakers(vectors, speakers, threshold = 0.93) {
-  const used = new Set();
-  const labels = new Map();
+export function matchSpeakers(vectors, speakers, threshold = 0.93, anchors = new Map()) {
+  const indexOf = label => /^Speaker \d+$/.test(label || '') ? Number(label.slice(8)) - 1 : -1;
+  const labels = new Map([...anchors].filter(([, label]) => speakers[indexOf(label)]));
+  const used = new Set([...labels.values()].map(indexOf));
   // Longer clean samples get the first chance to match an existing voice.
-  for (const { channel, vector, seconds } of [...vectors].sort((a, b) => b.seconds - a.seconds)) {
+  for (const { channel, vector, seconds, allowNew = true } of [...vectors].sort((a, b) => b.seconds - a.seconds)) {
     const unit = normalize(vector);
-    let index = -1, best = threshold;
-    speakers.forEach((speaker, i) => {
-      const score = similarity(unit, speaker.vector);
-      if (!used.has(i) && score > best) { best = score; index = i; }
-    });
+    let index = indexOf(labels.get(channel)), best = threshold;
+    // Shared timestamps anchor a continuing voice despite normal variation in
+    // an utterance embedding. Strongly contradictory voice evidence rejects it.
+    if (index >= 0 && similarity(unit, speakers[index].vector) < 0.65) {
+      used.delete(index); labels.delete(channel); index = -1;
+    }
+    if (index < 0) speakers.forEach((speaker, i) => {
+        const score = similarity(unit, speaker.vector);
+        if (!used.has(i) && score > best) { best = score; index = i; }
+      });
     if (index < 0) {
+      if (!allowNew) continue;
       index = speakers.length;
       speakers.push({ vector: unit, weight: seconds });
     } else {
@@ -35,6 +42,42 @@ export function matchSpeakers(vectors, speakers, threshold = 0.93) {
     used.add(index); labels.set(channel, 'Speaker ' + (index + 1));
   }
   return labels;
+}
+
+/** Anchor channels using the same clean speech in adjacent overlapping windows. */
+export function overlapSpeakerAnchors(segments, previous, offset) {
+  const candidates = [];
+  const previousEnd = Math.max(offset, ...previous.map(turn => turn.end));
+  for (let channel = 0; channel < 3; channel++) {
+    const scores = new Map(); let duration = 0;
+    for (const segment of segments.filter(segment => CHANNELS[segment.id]?.length === 1 && CHANNELS[segment.id][0] === channel && segment.confidence >= 0.7)) {
+      const start = offset + segment.start, end = Math.min(previousEnd, offset + segment.end);
+      duration += Math.max(0, end - start);
+      for (const turn of previous.filter(turn => !turn.uncertain && turn.speaker !== 'Unknown speaker')) {
+        const overlap = Math.max(0, Math.min(end, turn.end) - Math.max(start, turn.start));
+        scores.set(turn.speaker, (scores.get(turn.speaker) || 0) + overlap);
+      }
+    }
+    const best = [...scores].sort((a, b) => b[1] - a[1])[0];
+    if (duration >= 0.5 && best?.[1] >= 0.8 * duration) candidates.push({ channel, speaker: best[0], duration: best[1] });
+  }
+  const used = new Set(), anchors = new Map();
+  for (const candidate of candidates.sort((a, b) => b.duration - a.duration)) {
+    if (!used.has(candidate.speaker)) { anchors.set(candidate.channel, candidate.speaker); used.add(candidate.speaker); }
+  }
+  return anchors;
+}
+
+/** Embed one sufficiently long contiguous clean sample, excluding transition edges and padding. */
+export function cleanSpeechSample(segments, channel, samples, length) {
+  const clean = segments.filter(segment => CHANNELS[segment.id]?.length === 1 && CHANNELS[segment.id][0] === channel && segment.confidence >= 0.7)
+    .map(segment => ({ start: Math.max(0, segment.start + 0.1), end: Math.min(length / RATE, segment.end - 0.1) }))
+    .filter(segment => segment.end - segment.start >= 1.5)
+    .sort((a, b) => (b.end - b.start) - (a.end - a.start));
+  if (!clean.length) return null;
+  const seconds = Math.min(6, clean[0].end - clean[0].start);
+  const start = Math.floor((clean[0].start + (clean[0].end - clean[0].start - seconds) / 2) * RATE);
+  return { samples: samples.subarray(start, start + Math.floor(seconds * RATE)), seconds };
 }
 /** Rebuild passages from words so a voice change can split an ASR sentence. */
 export function speakerPassages(words, turns, duration, createId = () => crypto.randomUUID()) {
@@ -62,6 +105,7 @@ export function speakerPassages(words, turns, duration, createId = () => crypto.
 /** Segment ten-second windows, then identify their voices using WavLM embeddings. */
 export async function diarize(audio, segmentation, segmentProcessor, embedding, embedProcessor, speakers, progress) {
   const turns = [];
+  let previous = [];
   const windowSamples = 10 * RATE, step = 8 * RATE;
   for (let offset = 0; offset < audio.length; offset += step) {
     const length = Math.min(windowSamples, audio.length - offset);
@@ -70,29 +114,30 @@ export async function diarize(audio, segmentation, segmentProcessor, embedding, 
     samples.set(audio.subarray(offset, offset + length));
     const { logits } = await segmentation(await segmentProcessor(samples));
     const segments = segmentProcessor.post_process_speaker_diarization(logits, windowSamples)[0];
+    const anchors = overlapSpeakerAnchors(segments, previous, offset / RATE);
     const vectors = [];
     for (let channel = 0; channel < 3; channel++) {
-      const clean = segments.filter(segment => CHANNELS[segment.id]?.length === 1 && CHANNELS[segment.id][0] === channel);
-      const parts = clean.map(segment => samples.subarray(Math.floor(segment.start * RATE), Math.min(length, Math.floor(segment.end * RATE)))).filter(part => part.length);
-      const total = parts.reduce((sum, part) => sum + part.length, 0);
-      if (total < RATE * 0.5) continue;
-      const joined = new Float32Array(total); let cursor = 0;
-      for (const part of parts) { joined.set(part, cursor); cursor += part.length; }
-      const { embeddings } = await embedding(await embedProcessor(joined));
-      vectors.push({ channel, vector: embeddings.data, seconds: total / RATE });
+      const sample = cleanSpeechSample(segments, channel, samples, length);
+      if (!sample) continue;
+      const { embeddings } = await embedding(await embedProcessor(sample.samples));
+      vectors.push({ channel, vector: embeddings.data, seconds: sample.seconds, allowNew: sample.seconds >= 2 });
     }
-    const labels = matchSpeakers(vectors, speakers);
+    const labels = matchSpeakers(vectors, speakers, 0.93, anchors);
+    const current = [];
     const retainedStart = offset === 0 ? 0 : 1;
     const retainedEnd = offset + windowSamples >= audio.length ? length / RATE : 9;
     for (const segment of segments) {
       const channels = CHANNELS[segment.id] || [];
       if (!channels.length) continue;
+      const identified = channels.map(channel => labels.get(channel)).filter(Boolean);
+      const attribution = { speaker: identified[0] || 'Unknown speaker', uncertain: channels.length > 1 || !identified.length || segment.confidence < 0.7 };
+      current.push({ start: segment.start + offset / RATE, end: Math.min(length / RATE, segment.end) + offset / RATE, ...attribution });
       const start = Math.max(retainedStart, segment.start), end = Math.min(retainedEnd, segment.end);
       if (end <= start) continue;
-      const identified = channels.map(channel => labels.get(channel)).filter(Boolean);
-      turns.push({ start: start + offset / RATE, end: end + offset / RATE, speaker: identified[0] || 'Unknown speaker', uncertain: channels.length > 1 || !identified.length || segment.confidence < 0.6 });
+      turns.push({ start: start + offset / RATE, end: end + offset / RATE, ...attribution });
     }
-    progress('Recognizing speakers', Math.min(100, (offset + length) / audio.length * 100));
+    previous = current;
+    progress(`Recognizing speakers · ${speakers.length} voice groups`, Math.min(100, (offset + length) / audio.length * 100));
     if (offset + windowSamples >= audio.length) break;
   }
   return turns;

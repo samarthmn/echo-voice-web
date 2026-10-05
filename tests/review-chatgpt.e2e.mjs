@@ -156,7 +156,7 @@ try {
   // First notes remain local by default, even when a ChatGPT model is configured.
   await openMeeting(emptyMeeting);
   await expect(page.getByRole('heading', { name: 'No notes yet' })).toBeVisible();
-  await expect(page.locator('.review-notes-provider-info')).toContainText('On your computer');
+  await expect(page.locator('.review-notes-provider-info')).toContainText('Transcript stays on this device.');
   await page.getByRole('button', { name: 'Generate meeting notes', exact: true }).click();
   await expect(page.locator('.review-draft-label')).toContainText('Local · Ollama');
   assert.deepEqual(generationRequests, [{ meetingId: emptyMeeting.id, provider: 'ollama', cloudConsent: false }]);
@@ -221,7 +221,6 @@ try {
   await expect(page.locator('.review-draft-label')).toContainText('ChatGPT · OpenAI');
   await expect(page.locator('.review-draft-label')).toContainText(selectedModel);
   await expect(page.locator('.review-notes-usage')).toHaveText('Reported token usage: 1240 input · 380 output · 240 cached input');
-  await expect(page.locator('.review-notes-footer')).toContainText('Generated with ChatGPT. Saved locally');
   assert.deepEqual(generationRequests[1], { meetingId: meeting.id, provider: 'chatgpt', cloudConsent: true, model: selectedModel });
   let saved = await request(`/meetings/${meeting.id}`);
   assert.equal(saved.notes.length, 2);

@@ -1,4 +1,5 @@
-import { resolveSpeechModel, assertModel, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
+import { resolveSpeechModel, assertModel, speechModelConfig, speechManifestMatches, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
+import { createProcessingHeartbeat } from './processing-heartbeat.js';
 export { MODELS } from './models.js';
 
 let worker = null;
@@ -6,7 +7,16 @@ let queue = Promise.resolve();
 let generation = 0;
 let rejectActive = null;
 const activeAudioFetches = new Set();
+const pendingDownloads = new Map();
+let downloadState = { status: 'idle', modelId: '', progress: 0 };
 const cancelled = () => new DOMException('Local processing was cancelled. Your saved audio is unchanged.', 'AbortError');
+
+/** Expose download state independently of the currently mounted workspace page. */
+export function getModelDownloadState() { return { ...downloadState }; }
+function publishDownload(state) {
+  downloadState = { ...state };
+  window.dispatchEvent(new CustomEvent('echo-model-download-state', { detail: getModelDownloadState() }));
+}
 
 /** Queue speech operations so downloads, cache changes, and transcription do not overlap. */
 function serial(operation) {
@@ -22,36 +32,51 @@ function serial(operation) {
 /** Dispatch one worker job and forward its progress until a result or failure arrives. */
 function callWorker(type, modelId, onProgress, audio, options) {
   if (typeof Worker === 'undefined') return Promise.reject(new Error('This browser does not support local speech processing. Try a current Chrome, Edge, Firefox, or Safari browser.'));
-  worker ??= new Worker(new URL('/js/inference-worker.js', location.origin), { type: 'module' });
+  const workerUrl = new URL('/js/inference-worker.js', location.origin);
+  const workerVersion = window.echoAssetVersions?.['/js/inference-worker.js'];
+  if (workerVersion) workerUrl.searchParams.set('v', workerVersion);
+  worker ??= new Worker(workerUrl, { type: 'module' });
   const currentWorker = worker;
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
     const cleanup = () => {
       currentWorker.removeEventListener('message', message);
       currentWorker.removeEventListener('error', error);
+      // Disposing ONNX sessions does not return their grown WASM heap to the
+      // browser. Release the entire worker after each terminal result so a
+      // failed Large V3 job cannot poison a later model or queued operation.
+      currentWorker.terminate();
+      if (worker === currentWorker) worker = null;
       rejectActive = null;
     };
     const fail = (reason) => { cleanup(); reject(reason); };
     const message = (event) => {
       if (event.data.id !== id) return;
-      if (event.data.type === 'progress') { try { onProgress?.(event.data.progress); } catch (error) { console.error('Progress callback failed.', error); } }
+      if (event.data.type === 'progress') {
+        if (event.data.progress?.runtime) console.info('[Echo inference] WASM runtime ' + JSON.stringify(event.data.progress.runtime));
+        try { onProgress?.(event.data.progress); } catch (error) { console.error('Progress callback failed.', error); }
+      }
       else if (event.data.type === 'result') { cleanup(); resolve(event.data.result); }
       else if (event.data.type === 'error') fail(new Error(event.data.error));
     };
     const error = (event) => {
-      currentWorker.terminate(); worker = null;
       fail(new Error(event.message || 'Local speech processing stopped unexpectedly. Try Large V3 Turbo or close other tabs and retry.'));
     };
     rejectActive = fail;
     currentWorker.addEventListener('message', message);
     currentWorker.addEventListener('error', error);
-    currentWorker.postMessage({ id, type, modelId, audio, options }, audio ? [audio.buffer] : []);
+    try {
+      currentWorker.postMessage({ id, type, modelId, audio, options }, audio ? [audio.buffer] : []);
+    } catch (error) {
+      fail(error);
+    }
   });
 }
 
 /** Terminate the worker and reject the current job without discarding downloaded files. */
 export function cancelInference() {
   generation++;
+  processingHeartbeat.clear();
   for (const controller of activeAudioFetches) controller.abort();
   worker?.terminate(); worker = null;
   rejectActive?.(cancelled());
@@ -69,6 +94,8 @@ export async function getDownloadedModels() {
     if (!manifest) continue;
     try {
       const data = await manifest.json();
+      // Keep older files, but require an updated export before advertising readiness.
+      if (!speechManifestMatches(data, model)) continue;
       if (data.files.length && (await Promise.all(data.files.map(url => files.match(url)))).every(Boolean)) downloaded.push(model.id);
       else await manifests.delete(modelManifestUrl(model.id));
     } catch { await manifests.delete(modelManifestUrl(model.id)); }
@@ -76,16 +103,48 @@ export async function getDownloadedModels() {
   return downloaded;
 }
 
+/** Identify preserved legacy downloads that need timestamp-capable replacement weights. */
+export async function getOutdatedModels() {
+  if (typeof caches === 'undefined') return [];
+  const manifests = await caches.open(MODEL_MANIFEST_CACHE);
+  const outdated = [];
+  for (const model of MODELS) {
+    const manifest = await manifests.match(modelManifestUrl(model.id));
+    if (!manifest) continue;
+    try {
+      const data = await manifest.json();
+      if (!speechManifestMatches(data, model)) outdated.push(model.id);
+    } catch { /* Malformed markers are handled by the readiness check. */ }
+  }
+  return outdated;
+}
+
 /** Download an allowlisted speech model and verify it is usable from the local cache. */
 export function downloadModel(id, onProgress) {
   assertModel(id);
+  if (pendingDownloads.has(id)) return pendingDownloads.get(id);
   const token = generation;
-  return serial(async () => {
+  if (!['queued', 'downloading'].includes(downloadState.status)) publishDownload({ modelId: id, status: 'queued', progress: 0, detail: 'Preparing download…' });
+  const job = serial(async () => {
+    publishDownload({ modelId: id, status: 'downloading', progress: 0, detail: 'Preparing download…' });
     if (typeof caches === 'undefined') throw new Error('Model storage requires a secure browser context. Open Echo Voice on localhost.');
     await navigator.storage?.persist?.().catch(() => false);
     if (token !== generation) throw cancelled();
-    await callWorker('download', id, onProgress);
+    await callWorker('download', id, progress => {
+      publishDownload({ modelId: id, status: 'downloading', progress: progress.progress || 0, detail: progress.status || 'Downloading…' });
+      onProgress?.(progress);
+    });
+  }).then(result => {
+    publishDownload({ modelId: id, status: 'completed', progress: 100 });
+    return result;
+  }, error => {
+    publishDownload({ modelId: id, status: error.name === 'AbortError' ? 'cancelled' : 'failed', progress: 0, error: error.message });
+    throw error;
+  }).finally(() => {
+    if (pendingDownloads.get(id) === job) pendingDownloads.delete(id);
   });
+  pendingDownloads.set(id, job);
+  return job;
 }
 
 /** Remove a model's manifest and files while preserving files shared with other models. */
@@ -98,7 +157,7 @@ export function removeModel(id) {
     const cache = await caches.open(MODEL_CACHE);
     for (const request of await cache.keys()) {
       const path = decodeURIComponent(new URL(request.url).pathname);
-      if (path.includes(`/${id}/`)) await cache.delete(request);
+      if ([id, speechModelConfig(id).checkpoint].some(checkpoint => path.includes(`/${checkpoint}/`))) await cache.delete(request);
     }
   });
 }
@@ -134,7 +193,14 @@ export function transcribeAudio(blob, modelId, onProgress, options = {}) {
   });
 }
 
-const processingMeetings = new Set();
+const processingMeetings = new Map();
+// A cancelled generation may still be finishing API cleanup. It no longer owns
+// computation worth protecting; warn only for pending jobs in the current one.
+window.addEventListener('beforeunload', event => {
+  if (![...processingMeetings.values()].some(token => token === generation)) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 /** Explicit literal aliases only. Conflicting aliases and fuzzy guesses are left unchanged. */
 export function applyVocabulary(text, entries) {
   const aliases = new Map();
@@ -154,20 +220,24 @@ export function applyVocabulary(text, entries) {
 }
 
 /** Call the local API and preserve actionable JSON or HTTP status errors. */
-async function requestJson(path, method = 'GET', body) {
-  const response = await fetch(`/api${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+async function requestJson(path, method = 'GET', body, signal) {
+  const response = await fetch(`/api${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, signal });
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.error || `The local server returned ${response.status}.`);
   return data;
 }
 const report = (modelId, meetingId) => detail => window.dispatchEvent(new CustomEvent('echo-model-progress', { detail: { ...detail, modelId, ...(meetingId ? { meetingId } : {}) } }));
+const processingHeartbeat = createProcessingHeartbeat({
+  request: (meetingIds, signal) => requestJson('/processing/heartbeat', 'POST', { meetingIds }, signal),
+  onRestore: () => window.dispatchEvent(new Event('echo-library-changed')),
+});
 
 /** Transcribe a saved audio track and append a new version with a vocabulary snapshot. */
 export async function transcribeMeeting(meetingId, modelId, trackId) {
   modelId = resolveSpeechModel(modelId);
   if (processingMeetings.has(meetingId)) throw new Error('This meeting is already being transcribed.');
-  processingMeetings.add(meetingId);
   const token = generation;
+  processingMeetings.set(meetingId, token);
   const checkCancelled = () => { if (token !== generation) throw cancelled(); };
   const controller = new AbortController();
   activeAudioFetches.add(controller);
@@ -185,6 +255,8 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
     const vocabulary = (vocabularyResponse.entries || []).filter(entry => entry.enabled);
     checkCancelled();
     await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: 'processing', error: '' });
+    checkCancelled();
+    processingHeartbeat.start(meetingId);
     const passages = []; let offset = 0; let speakers = [];
     const settings = await requestJson('/settings');
     for (const track of tracks) {
@@ -204,20 +276,26 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
     checkCancelled();
     if (offset > (meeting.duration || 0)) await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { duration: offset });
     checkCancelled();
+    processingHeartbeat.stop(meetingId);
     const saved = await requestJson(`/meetings/${encodeURIComponent(meetingId)}/transcripts`, 'POST', { model: modelId, passages, vocabulary });
     window.dispatchEvent(new CustomEvent('echo-transcript-saved', { detail: saved }));
     return saved;
   } catch (error) {
+    processingHeartbeat.stop(meetingId);
     if (meeting && !['recording', 'paused'].includes(meeting.status)) {
       await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: meeting.transcripts.length ? 'ready' : 'saved', error: error.message }).catch(() => {});
     }
     report(modelId, meetingId)({ status: error.name === 'AbortError' ? 'Cancelled' : 'Failed', progress: 0, error: error.message });
     window.dispatchEvent(new CustomEvent('echo-transcription-error', { detail: { meetingId, modelId, error: error.message } }));
     throw error;
-  } finally { processingMeetings.delete(meetingId); activeAudioFetches.delete(controller); }
+  } finally {
+    processingHeartbeat.stop(meetingId);
+    if (processingMeetings.get(meetingId) === token) processingMeetings.delete(meetingId);
+    activeAudioFetches.delete(controller);
+  }
 }
 
 window.echoInference = {
-  models: MODELS, getDownloadedModels, removeModel, cancelInference, transcribeAudio, transcribeMeeting,
+  models: MODELS, getDownloadedModels, getOutdatedModels, getModelDownloadState, removeModel, cancelInference, transcribeAudio, transcribeMeeting,
   downloadModel: (id, callback) => downloadModel(id, progress => { report(id)(progress); callback?.(progress); }),
 };

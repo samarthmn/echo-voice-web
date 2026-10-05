@@ -1,0 +1,42 @@
+services:
+  meeting-runner:
+    build:
+      context: ./runner
+      args:
+        RUNNER_UID: ${ECHO_RUNNER_UID:-1000}
+        RUNNER_GID: ${ECHO_RUNNER_GID:-1000}
+    image: echo-voice-meeting-runner:local
+    # Match the native server's ownership on Linux/macOS. Windows Desktop uses
+    # its bind-mount ACL mapping and may keep the default container user.
+    user: "${ECHO_RUNNER_UID:-1000}:${ECHO_RUNNER_GID:-1000}"
+    init: true
+    ports:
+      - "127.0.0.1:${ECHO_RUNNER_PORT:-8765}:8765"
+    volumes:
+      - type: bind
+        source: ${ECHO_RUNNER_DATA_DIR:-./.echo-data}
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ECHO_RUNNER_CONFIG_FILE:-./echo.config.json}
+        target: /app/echo.config.json
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /app/tmp:mode=1777,size=256m
+      - /home/pwuser:mode=1777,size=64m
+    shm_size: 1gb
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python3", "/app/meet_runner.py", "--doctor"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
