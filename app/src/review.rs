@@ -495,10 +495,14 @@ fn SpeakerSamples(
     let start = num(&sample, "start");
     let end = (start + 8.).min(num(&sample, "end").max(start + 1.));
     let excerpt = text(&sample, "text").chars().take(140).collect::<String>();
-    let source = tracks
-        .first()
-        .map(|track| text(track, "url"))
-        .unwrap_or_default();
+    let source = if value["extensionRecording"].is_object() {
+        format!("/api/extensions/meetings/{}/audio", text(&value, "id"))
+    } else {
+        tracks
+            .first()
+            .map(|track| text(track, "url"))
+            .unwrap_or_default()
+    };
     let unavailable = source.is_empty() || samples.is_empty();
     rsx! {
         div { class: "review-speaker-samples",
@@ -560,6 +564,11 @@ fn DetailsPane(
     let locked = is_demo(&value) || is_active(&value) || busy();
     let tracks = list(&value, "tracks");
     let bytes = tracks.iter().map(|t| num(t, "bytes")).sum::<f64>();
+    let continuous = value["extensionRecording"].is_object();
+    let download_url = format!(
+        "/api/extensions/meetings/{}/audio?download=1",
+        text(&value, "id")
+    );
     let has_consent = value["consent"].as_bool().unwrap_or(false);
     let date = readable_date(&text(&value, "createdAt"));
     let duration = api::time(num(&value, "duration"));
@@ -568,7 +577,7 @@ fn DetailsPane(
     rsx! {section { class: "review-details", aria_label: "Meeting details", SectionHeading { class:"review-section-heading", title:"Meeting details" }
         div { class: "review-details-grid",
             section { class: "review-detail-card", h3 {Icon { name: "help", size: 17 } "Recording information"} dl { div {dt {"Created"} dd {"{date}"}} div {dt {"Duration"} dd {"{duration}"}} div {dt {"Recording mode"} dd {"{mode}"}} div {dt {"Participant consent"} dd {if has_consent {"Acknowledged"} else {"Not recorded"}}} div {dt {"Audio stored"} dd {"{api::bytes(bytes)}"}} } }
-            section { class: "review-detail-card", h3 {Icon { name: "volume", size: 17 } "Original audio"} if tracks.is_empty() {p { class: "review-muted", "No original audio is available for this meeting." }} else {div { class: "review-track-list", for track in tracks { {let label=text(&track,"label");let size=api::bytes(num(&track,"bytes"));let mime=text(&track,"mimeType");let url=text(&track,"url");rsx!{div { span { class: "review-file-icon", Icon { name: "volume", size: 18 } } span {strong {"{label}"} small {"{size} · {mime}"}} if !is_demo(&value) {a { class: "icon-button", href: "{url}", download: true, aria_label: "Download {label}", Icon { name: "download", size: 16 } }} }}} } }} p { class: "review-detail-help", "Speaker labels do not represent separate audio files." } }
+            section { class: "review-detail-card", h3 {Icon { name: "volume", size: 17 } "Original audio"} if tracks.is_empty() {p { class: "review-muted", "No original audio is available for this meeting." }} else if continuous {div { class: "review-track-list", div {span {class:"review-file-icon",Icon {name:"volume",size:18}} span {strong {"Meeting recording"} small {"{api::bytes(bytes)} · WAV"}} a {class:"icon-button",href:"{download_url}",download:true,aria_label:"Download meeting recording",Icon {name:"download",size:16}}}}} else {div { class: "review-track-list", for track in tracks { {let label=text(&track,"label");let size=api::bytes(num(&track,"bytes"));let mime=text(&track,"mimeType");let url=text(&track,"url");rsx!{div { span { class: "review-file-icon", Icon { name: "volume", size: 18 } } span {strong {"{label}"} small {"{size} · {mime}"}} if !is_demo(&value) {a { class: "icon-button", href: "{url}", download: true, aria_label: "Download {label}", Icon { name: "download", size: 16 } }} }}} } }} p { class: "review-detail-help", "Speaker labels do not represent separate audio files." } }
             section { class: "review-detail-card review-processing-card", h3 {Icon { name: "sparkles", size: 17 } "Processing choices"} form { onsubmit: move |event|{event.prevent_default();let path=format!("/meetings/{}",text(&meeting(),"id"));let body=json!({"speechModel":speech(),"notesModel":notes().trim()});busy.set(true);spawn(async move {save("PATCH",path,body,meeting,on_change,notify,"Processing choices saved for future runs.").await;busy.set(false);});},
                 label {"Speech recognition" select { class: "input", value: "{speech}", disabled: locked, onchange: move |event|speech.set(event.value()), option {value:"onnx-community/whisper-large-v3-turbo",selected:speech()=="onnx-community/whisper-large-v3-turbo","Whisper Large V3 Turbo"} option {value:"onnx-community/whisper-large-v3",selected:speech()=="onnx-community/whisper-large-v3","Whisper Large V3"} }}
                 label {"Local notes model" input { class: "input", value: "{notes}", maxlength: "100", disabled: locked, placeholder: "qwen2.5:3b", oninput: move |event|notes.set(event.value()) }} ActionButton { button_type: "submit", kind:ButtonKind::Secondary, disabled: locked||notes().trim().is_empty()||(speech()==saved_speech_model&&notes()==text(&value,"notesModel")), "Save choices" }
@@ -619,11 +628,20 @@ fn AudioPlayer(
         .or(tracks.first())
         .cloned()
         .unwrap_or(Value::Null);
-    let url = text(&track, "url");
-    let label = text(&track, "label");
+    let continuous = value["extensionRecording"].is_object();
+    let url = if continuous {
+        format!("/api/extensions/meetings/{}/audio", text(&value, "id"))
+    } else {
+        text(&track, "url")
+    };
+    let label = if continuous {
+        "Meeting audio and permitted microphone".to_string()
+    } else {
+        text(&track, "label")
+    };
     let locked = is_demo(&value) || is_active(&value) || busy();
     rsx! { footer { class: "review-player review-native-player",
-        div { class: "review-player-top", div { class: "review-player-source", span { class: "review-player-icon", Icon { name: "volume", size: 16 } } div { strong { "Original recording" } if tracks.len()>1 {select {aria_label:"Audio track",value:"{track_id}",onchange:move |event|{track_id.set(event.value());failed.set(false);},for item in tracks {option {value:text(&item,"id"),selected:track_id()==text(&item,"id"),{text(&item,"label")}}} }} else {small {"{label}"}} } }
+        div { class: "review-player-top", div { class: "review-player-source", span { class: "review-player-icon", Icon { name: "volume", size: 16 } } div { strong { "Original recording" } if tracks.len()>1 && !continuous {select {aria_label:"Audio track",value:"{track_id}",onchange:move |event|{track_id.set(event.value());failed.set(false);},for item in tracks {option {value:text(&item,"id"),selected:track_id()==text(&item,"id"),{text(&item,"label")}}} }} else {small {"{label}"}} } }
             div { class: "review-player-controls", button {class:"icon-button review-jump",aria_label:"Back five seconds",disabled:failed(),onclick:move |_|js("const a=document.getElementById('review-audio');if(a)a.currentTime=Math.max(0,a.currentTime-5)".into()),Icon {name:"refresh",size:20} span {"5"}} button {class:"icon-button review-jump",aria_label:"Forward five seconds",disabled:failed(),onclick:move |_|js("const a=document.getElementById('review-audio');if(a)a.currentTime=Math.min(a.duration||0,a.currentTime+5)".into()),Icon {name:"refresh",size:20} span {"5"}} }
             div { class: "review-player-right", label {span {class:"review-visually-hidden","Playback speed"} select {aria_label:"Playback speed",value:"{speed}",onchange:move |event|{let next=event.value();if let Ok(rate)=next.parse::<f64>(){js(format!("const a=document.getElementById('review-audio');if(a)a.playbackRate={rate}"));}speed.set(next);},for rate in ["0.75","1","1.25","1.5","2"] {option {value:rate,selected:speed()==rate,"{rate}×"}} }} button {class:"icon-button",aria_label:"Bookmark current playback time",disabled:locked,onclick:move |_|{busy.set(true);spawn(async move{bookmark(meeting,on_change,notify).await;busy.set(false);});},Icon {name:"bookmark",size:17}} }
         }

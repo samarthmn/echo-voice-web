@@ -18,3 +18,5 @@ __pycache__/
 /artifacts/*failure*.png
 /artifacts/.release-stage/
 /tools/codex/
+
+/extension/dist/

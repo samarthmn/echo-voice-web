@@ -124,13 +124,11 @@ Whichever option you use, check the notes before sharing them. Names, decisions,
 
 ## Connect online meetings
 
-Google Calendar and Google Meet need extra setup. This version doesn't provide a one-click hosted meeting bot.
+The Echo browser extension records the meeting you attend in your existing Brave or Chrome session. It captures call audio and, with microphone permission, your voice while the meeting identifies your microphone as unmuted. It never requests camera access. Google Calendar is optional and read-only; **Open meeting** opens a link without recording it.
 
-The Calendar connection brings your meeting details into Echo. A separate local recording program, run natively on macOS or Linux, can join a selected Google Meet using a saved browser session for the connected Google account. Use **Sign in to runner** on the Calendar page and complete Google sign-in once. The helper opens a dedicated Chrome window and keeps its saved profile on that computer. The host may still need to admit that participant. After stopping the guest, choose **Save recording** to bring its audio into Echo. Ubuntu setup and verification, including a copy-and-paste Codex review prompt, are in the [native runner test guide](docs/ubuntu-native-runner-test.md).
+Follow the [extension installation guide](docs/browser-extension.md). The extension stores recordings in its browser profile even when Echo is closed, then transfers them into your paired local library. Optional live text requires a running Echo workspace with Turbo already downloaded. Final transcription and notes use your existing selected models. No Docker, separate meeting browser or meeting runner is required.
 
-You'll need to [configure Google Calendar](docs/integrations.md#google-calendar-connection) and [set up the meeting recording program](runner/README.md). These steps involve Google developer settings and additional software; ask someone comfortable with those tools to help if needed. Keep both programs running during the meeting.
-
-Zoom, Teams, and unattended scheduled joining aren't available. Echo also doesn't record sound directly from another browser tab in this version.
+Compatibility qualification for each browser, OS and meeting service is tracked separately. An unpacked development package is not a store release. See [qualification and Ubuntu handoff](docs/extension-qualification.md) and [migration and recovery](docs/extension-migration.md).
 
 ## Save a backup and update Echo
 
@@ -222,4 +220,4 @@ The [developer guide](docs/development.md) covers OS prerequisites, configuratio
 
 Linux with desktop Chromium is the tested environment. Other operating systems, browsers, and real microphone setups need their own checks. Real model downloads and output, ChatGPT account usage, and live Google meeting connections haven't all been verified in this development environment. Try a short complete recording, transcript, and notes flow on your computer before relying on Echo.
 
-Echo is for one local user. Transcripts aren't live, and speakers are grouped automatically after transcription. Select a speaker label to rename it throughout that transcript. Overlapping or unclear speech is marked for review. Audio cleanup, live transcription, seamless microphone switching, permanent passage/audio redaction, and migration from the desktop app aren't available. Large recordings can take substantial memory and processing time. See the [feature coverage](docs/feature-coverage.md) and [verification record](docs/verification.md) for details.
+Echo is for one local user. Final transcripts and notes remain saved versions; optional extension live text is a provisional draft. and speakers are grouped automatically after transcription. Select a speaker label to rename it throughout that transcript. Overlapping or unclear speech is marked for review. Audio cleanup, seamless in-person microphone switching, permanent passage/audio redaction, and migration from the desktop app aren't available. Large recordings can take substantial memory and processing time. See the [feature coverage](docs/feature-coverage.md) and [verification record](docs/verification.md) for details.

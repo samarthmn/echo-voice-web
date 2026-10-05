@@ -13,12 +13,14 @@ use std::{
 use uuid::Uuid;
 
 type Result<T> = std::result::Result<T, ApiError>;
+#[cfg(test)]
+pub(crate) static TEST_LIBRARY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static DATABASE: OnceLock<Mutex<Option<Connection>>> = OnceLock::new();
 static WORKSPACE_LOCK: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();
 const MAX_AUDIO: usize = 128 * 1024 * 1024;
 const MAX_BACKUP: usize = 180 * 1024 * 1024;
 /// Return a UTC timestamp with millisecond precision for persisted records.
-fn now() -> String {
+pub(crate) fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 /// Generate an independent identifier for a new workspace entity.
@@ -33,7 +35,7 @@ pub fn data_dir() -> PathBuf {
 }
 #[cfg(unix)]
 /// Restrict managed data to the current account on Unix; other platforms use inherited ACLs.
-fn secure(path: &Path, directory: bool) -> Result<()> {
+pub(crate) fn secure(path: &Path, directory: bool) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(
         path,
@@ -43,16 +45,16 @@ fn secure(path: &Path, directory: bool) -> Result<()> {
 }
 #[cfg(not(unix))]
 /// Restrict managed data to the current account on Unix; other platforms use inherited ACLs.
-fn secure(_: &Path, _: bool) -> Result<()> {
+pub(crate) fn secure(_: &Path, _: bool) -> Result<()> {
     Ok(())
 }
 /// Create a managed folder and apply private directory permissions.
-fn mkdir(path: &Path) -> Result<()> {
+pub(crate) fn mkdir(path: &Path) -> Result<()> {
     fs::create_dir_all(path)?;
     secure(path, true)
 }
 /// Write a new private file without replacing an existing recording chunk.
-fn write_private(path: &Path, data: &[u8]) -> Result<()> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     use std::io::Write;
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -67,7 +69,7 @@ fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 /// Serialize database access, acquire the workspace lock, and initialize schema and recovery lazily.
-fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
     let mut guard = DATABASE
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -91,7 +93,7 @@ fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         secure(&lock_path, false)?;
         fs2::FileExt::try_lock_exclusive(&lock).map_err(|_|ApiError::new(409,"Another Echo Voice server is using this data folder. Stop that server or choose a separate ECHO_DATA_DIR."))?;
         let mut db = Connection::open(root.join("workspace.sqlite"))?;
-        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
         CREATE TABLE IF NOT EXISTS meetings(id TEXT PRIMARY KEY,data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS preferences(id TEXT PRIMARY KEY,data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS vocabulary(id TEXT PRIMARY KEY,data TEXT NOT NULL);
@@ -107,6 +109,7 @@ fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
                 secure(&p, false)?;
             }
         }
+        crate::extensions::init_schema(&db)?;
         recover(&mut db)?;
         *guard = Some(db);
         *WORKSPACE_LOCK
@@ -120,6 +123,15 @@ fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
 pub fn init() -> Result<()> {
     with_db(|_| Ok(()))
 }
+#[cfg(test)]
+pub(crate) fn reset_for_tests() {
+    if let Some(db) = DATABASE.get() {
+        db.lock().unwrap().take();
+    }
+    if let Some(lock) = WORKSPACE_LOCK.get() {
+        lock.lock().unwrap().take();
+    }
+}
 /// Identify the restart marker that a still-running browser worker can reconcile.
 const PROCESSING_RESTART_ERROR: &str = "Processing was interrupted by a server restart. Saved audio and earlier results are safe; retry processing.";
 /// Resume durable deletion jobs and mark unfinished recording or processing work as interrupted.
@@ -130,6 +142,7 @@ fn recover(db: &mut Connection) -> Result<()> {
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     };
     for key in pending {
+        crate::extensions::tombstone(db, &key)?;
         if valid_id(&key).is_err() {
             continue;
         }
@@ -140,7 +153,8 @@ fn recover(db: &mut Connection) -> Result<()> {
                     fs::remove_dir_all(dir)?;
                 }
             }
-            Ok::<_, std::io::Error>(())
+            crate::extensions::cleanup_pcm(db, &key)?;
+            Ok::<_, ApiError>(())
         })();
         if removed.is_ok() {
             db.execute("DELETE FROM meetings WHERE id=?", [&key])?;
@@ -571,7 +585,7 @@ fn validate_meeting_url(raw: &str) -> Result<()> {
     Ok(())
 }
 /// Validate the complete portable meeting document, including its history and references.
-fn validate_meeting(m: &Value) -> Result<()> {
+pub(crate) fn validate_meeting(m: &Value) -> Result<()> {
     object(
         m,
         &[
@@ -597,6 +611,7 @@ fn validate_meeting(m: &Value) -> Result<()> {
             "notesModel",
             "liveTranscription",
             "demo",
+            "extensionRecording",
         ],
     )?;
     identifier(m, "id", true)?;
@@ -656,11 +671,41 @@ fn validate_meeting(m: &Value) -> Result<()> {
     for m in m["moments"].as_array().unwrap() {
         validate_moment(m, true)?;
     }
+    if let Some(extension) = m.get("extensionRecording") {
+        crate::extensions::validate_metadata(extension)?;
+        let ids = extension["partTrackIds"].as_array().unwrap();
+        let tracks = m["tracks"].as_array().unwrap();
+        if ids.len() != tracks.len()
+            || ids
+                .iter()
+                .zip(tracks)
+                .any(|(id, track)| id != &track["id"] || track["mimeType"] != "audio/wav")
+        {
+            return Err(ApiError::bad(
+                "Sequential recording parts do not match their saved tracks.",
+            ));
+        }
+        if !tracks.is_empty()
+            && (tracks.iter().any(|track| {
+                track["bytes"].as_u64().is_none_or(|bytes| {
+                    bytes < 44 || (bytes - 44) % 2 != 0 || bytes > 44 + 16000 * 30 * 60 * 2
+                })
+            }) || tracks
+                .iter()
+                .map(|track| (track["bytes"].as_u64().unwrap() - 44) / 2)
+                .sum::<u64>()
+                != extension["totalFrames"].as_u64().unwrap())
+        {
+            return Err(ApiError::bad(
+                "Sequential recording sizes do not match their frame timeline.",
+            ));
+        }
+    }
     validate_gaps(m)?;
     validate_references(m)
 }
 /// Read and decode one meeting without treating a missing record as a storage failure.
-fn read_meeting(db: &Connection, key: &str) -> Result<Option<Value>> {
+pub(crate) fn read_meeting(db: &Connection, key: &str) -> Result<Option<Value>> {
     valid_id(key)?;
     let source: Option<String> = db
         .query_row("SELECT data FROM meetings WHERE id=?", [key], |r| r.get(0))
@@ -670,11 +715,11 @@ fn read_meeting(db: &Connection, key: &str) -> Result<Option<Value>> {
         .transpose()
 }
 /// Return one meeting or the user-facing deleted-meeting error.
-fn require_meeting(db: &Connection, key: &str) -> Result<Value> {
+pub(crate) fn require_meeting(db: &Connection, key: &str) -> Result<Value> {
     read_meeting(db, key)?.ok_or_else(ApiError::not_found)
 }
 /// Update a meeting's modification timestamp and write its JSON within the caller's transaction.
-fn save(db: &Connection, m: &mut Value) -> Result<()> {
+pub(crate) fn save(db: &Connection, m: &mut Value) -> Result<()> {
     m["updatedAt"] = json!(now());
     db.execute(
         "UPDATE meetings SET data=? WHERE id=?",
@@ -754,7 +799,7 @@ fn normalized_settings(saved: Value) -> Result<Value> {
     Ok(settings)
 }
 /// Read normalized preferences using an existing database transaction.
-fn settings_db(db: &Connection) -> Result<Value> {
+pub(crate) fn settings_db(db: &Connection) -> Result<Value> {
     let source: Option<String> = db
         .query_row(
             "SELECT data FROM preferences WHERE id='settings'",
@@ -891,6 +936,9 @@ pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
         {
             return Err(ApiError::bad("Recording requires participant consent."));
         }
+        if patch["status"] == "processing" {
+            crate::extensions::preempt(&tx, key)?;
+        }
         for (k, v) in patch.as_object().unwrap() {
             if v.is_null() {
                 m.as_object_mut().unwrap().remove(k);
@@ -939,6 +987,7 @@ pub fn delete_meeting(key: &str) -> Result<()> {
                 "Stop recording or processing before deleting this meeting.",
             ));
         }
+        crate::extensions::tombstone(&tx, key)?;
         tx.execute("INSERT OR IGNORE INTO deletion_jobs(id) VALUES(?)", [key])?;
         tx.commit()?;
         let removed = (|| {
@@ -948,14 +997,15 @@ pub fn delete_meeting(key: &str) -> Result<()> {
                     fs::remove_dir_all(dir)?;
                 }
             }
-            Ok::<_, std::io::Error>(())
+            crate::extensions::cleanup_pcm(db, key)?;
+            Ok::<_, ApiError>(())
         })();
         if let Err(error) = removed {
             let mut retained = require_meeting(db, key)?;
             retained["status"] = json!("error");
             retained["error"]=json!("Deletion was interrupted. Retry deleting this meeting, or restart Echo Voice to finish the pending deletion.");
             save(db, &mut retained)?;
-            return Err(error.into());
+            return Err(error);
         }
         let tx = db.transaction()?;
         tx.execute("DELETE FROM meetings WHERE id=?", [key])?;
@@ -992,6 +1042,7 @@ pub fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
                 "This meeting reached its 1,000-version history limit.",
             ));
         }
+        crate::extensions::final_succeeded(&tx, key)?;
         input["id"] = json!(id());
         input["createdAt"] = json!(now());
         m["activeTranscriptId"] = input["id"].clone();
@@ -1352,6 +1403,12 @@ pub fn add_audio(
     let result = with_db(|db| {
         let tx = db.transaction()?;
         let mut m = require_meeting(&tx, key)?;
+        if m.get("extensionRecording").is_some() {
+            return Err(ApiError::new(
+                409,
+                "Extension recordings accept audio through their capture connection.",
+            ));
+        }
         let existing_track = m["tracks"]
             .as_array()
             .unwrap()
@@ -1555,7 +1612,7 @@ pub fn export_library() -> Result<Value> {
         let mut settings = settings_db(db)?;
         settings.as_object_mut().unwrap().remove("ollamaUrl");
         Ok(
-            json!({"format":"echo-voice-web","version":1,"exportedAt":now(),"meetings":meetings,"vocabulary":vocabulary_db(db)?,"settings":settings,"audio":audio}),
+            json!({"format":"echo-voice-web","version":1,"exportedAt":now(),"meetings":meetings,"vocabulary":vocabulary_db(db)?,"settings":settings,"audio":audio,"extensionRecordings":crate::extensions::backup_receipts(db)?}),
         )
     })
 }
@@ -1574,6 +1631,7 @@ pub fn import_library(input: Value) -> Result<Value> {
             "format",
             "version",
             "exportedAt",
+            "extensionRecordings",
             "meetings",
             "vocabulary",
             "settings",
@@ -1586,6 +1644,10 @@ pub fn import_library(input: Value) -> Result<Value> {
     timestamp(&input, "exportedAt")?;
     let meetings = arr(&input, "meetings", 10000)?;
     let vocabulary = arr(&input, "vocabulary", 10000)?;
+    let receipts = match input.get("extensionRecordings") {
+        Some(v) => crate::extensions::validate_receipts(v, meetings)?,
+        None => crate::extensions::validate_receipts(&json!([]), meetings)?,
+    };
     unique(meetings)?;
     unique(vocabulary)?;
     for m in meetings {
@@ -1723,6 +1785,7 @@ pub fn import_library(input: Value) -> Result<Value> {
             if count != 0 {
                 return Err(ApiError::new(409,"Import requires an empty library and vocabulary. Export your current workspace, then use a separate empty data folder."));
             }
+            crate::extensions::restore_receipts(&tx, &receipts)?;
             for source in meetings {
                 let mut m = source.clone();
                 let key = m["id"].as_str().unwrap().to_string();
@@ -2020,6 +2083,7 @@ mod tests {
 
     #[test]
     fn durable_recording_versions_backup_validation_and_recovery() {
+        let _guard = TEST_LIBRARY_LOCK.blocking_lock();
         let directory = tempfile::tempdir().unwrap();
         std::env::set_var("ECHO_DATA_DIR", directory.path());
         init().unwrap();

@@ -72,7 +72,7 @@ pub fn Settings(
                 match section().as_str() {
                     "vocabulary" => rsx! { VocabularySettings { notify } },
                     "storage" => rsx! { StorageSettings { notify } },
-                    _ => rsx! { GeneralSettings { settings,draft,snapshot,on_change,notify } }
+                    _ => rsx! { GeneralSettings { settings,draft,snapshot,on_change,notify } crate::extension::ExtensionConnectionPanel { notify } }
                 }
             }
         }
@@ -147,7 +147,7 @@ fn GeneralSettings(
                     div {class:"settings-local-notes-field",label {class:"settings-field",span {"Default local notes model"}input {class:"input",value:text(&draft(),"notesModel"),maxlength:120,placeholder:"qwen2.5:3b",oninput:move |e|draft.write()["notesModel"]=json!(e.value())}small {"The name of a model installed in your local Ollama library. Notes are generated on this computer."}}}
                 }
                 div {class:"settings-toggle-row",div {h3 {"Transcribe after recording"}p {"Start local transcription when a recording is saved. Audio is kept if processing fails."}}Toggle {checked:draft()["autoTranscribe"].as_bool().unwrap_or(true),label:"Transcribe after recording",onchange:move |_|{let enabled=draft()["autoTranscribe"].as_bool().unwrap_or(true);draft.write()["autoTranscribe"]=json!(!enabled);}}}
-                div {class:"settings-info",Icon {name:"info",size:16}p {"Transcription runs after recording. Speakers are grouped automatically. Select a speaker label in the transcript to rename it."}}
+                div {class:"settings-info",Icon {name:"info",size:16}p {"Final transcription runs after recording. Browser meetings can also show live text. Select a speaker label in the final transcript to rename it."}}
                 if notes_provider == "ollama" {details {class:"settings-advanced",summary {"Local notes connection" Icon {name:"chevron-down",size:16}}div {label {class:"settings-field",span {"Ollama address"}input {class:"input",r#type:"url",value:text(&draft(),"ollamaUrl"),placeholder:"http://127.0.0.1:11434",required:true,oninput:move |e|draft.write()["ollamaUrl"]=json!(e.value())}small {"Only a service running on this computer is supported. Ollama is optional; recording and transcription work without it."}}}}}
             }
             if !error().is_empty() {div {class:"settings-error",role:"alert","{error}"}}

@@ -1,5 +1,7 @@
 mod api;
 mod calendar;
+mod extension;
+use extension::ExtensionRecordingStatus;
 mod chatgpt;
 mod models;
 mod review;
@@ -429,7 +431,7 @@ fn App() -> Element {
                     if !load_error().is_empty(){div{class:"load-error inline-error",Icon{name:"alert"}"{load_error}" ActionButton{kind:ButtonKind::Secondary,onclick:move |_|{spawn(async move{loading.set(true);match get("/meetings").await{Ok(v)=>{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());load_error.set(String::new())},Err(e)=>load_error.set(e)}loading.set(false);});},"Retry"}}}
                     if current_page=="overview"{
                         div{class:"page-content overview",PageHeading{title:"Overview"}
-                            div{class:"quick-actions",button{class:"quick-action",disabled:is_recording,onclick:move |_|new_meeting.set(true),span{class:"quick-icon peach",Icon{name:"mic",size:21}}span{strong{"Record in person"}small{"Room microphone"}}Icon{name:"arrow-right",size:17}}button{class:"quick-action",onclick:move |_|page.set("calendar".into()),span{class:"quick-icon lavender",Icon{name:"calendar",size:21}}span{strong{"Online meeting"}small{"Google Meet"}}Icon{name:"arrow-right",size:17}}label{class:"quick-action upload-action",span{class:"quick-icon mint",Icon{name:"upload",size:21}}span{strong{"Upload a recording"}small{"Audio file"}}Icon{name:"arrow-right",size:17}input{r#type:"file","aria-label":"Upload a recording",accept:"audio/*,video/webm,video/mp4",onchange:move |_|{spawn(async move{match crate::api::evaluate("return await window.echo.upload(document.getElementById('audio-upload'))").await{Ok(_)=>{},Err(e)=>toast.set(format!("Upload could not complete: {e}"))}});},id:"audio-upload",class:"file-input"}}}
+                            div{class:"quick-actions",button{class:"quick-action",disabled:is_recording,onclick:move |_|new_meeting.set(true),span{class:"quick-icon peach",Icon{name:"mic",size:21}}span{strong{"Record in person"}small{"Room microphone"}}Icon{name:"arrow-right",size:17}}button{class:"quick-action",onclick:move |_|page.set("calendar".into()),span{class:"quick-icon lavender",Icon{name:"calendar",size:21}}span{strong{"Online meeting"}small{"Browser extension"}}Icon{name:"arrow-right",size:17}}label{class:"quick-action upload-action",span{class:"quick-icon mint",Icon{name:"upload",size:21}}span{strong{"Upload a recording"}small{"Audio file"}}Icon{name:"arrow-right",size:17}input{r#type:"file","aria-label":"Upload a recording",accept:"audio/*,video/webm,video/mp4",onchange:move |_|{spawn(async move{match crate::api::evaluate("return await window.echo.upload(document.getElementById('audio-upload'))").await{Ok(_)=>{},Err(e)=>toast.set(format!("Upload could not complete: {e}"))}});},id:"audio-upload",class:"file-input"}}}
                             if count>0{div{class:"stats-row",div{class:"stat-item",span{class:"stat-icon",Icon{name:"video",size:18}}div{strong{"{count}"}span{"Meetings"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"clock",size:18}}div{strong{"{minutes:.0}"}span{"Minutes"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"sparkles",size:18}}div{strong{"{note_count}"}span{"With notes"}}}div{class:"stat-item privacy-stat",span{class:"stat-icon",Icon{name:"shield",size:18}}div{strong{"Local"}span{"Audio capture"}}}}}
                             div{class:"overview-columns",section{class:"recent-section",SectionHeading{title:"Recent meetings",button{class:"text-button",onclick:move |_|page.set("meetings".into()),"View all" Icon{name:"arrow-right",size:15}}}if count==0{div{class:"empty-library panel",div{class:"empty-library-icon",Icon{name:"mic",size:27}}h3{"No meetings yet"}p{"Record a meeting or upload audio."}ActionButton{kind:ButtonKind::Secondary,onclick:move |_|{spawn(async move{if let Ok(v)=get("/demo").await{selected.set(v);page.set("review".into())}else{toast.set("Sample meeting is unavailable.".into())}});},Icon{name:"play",size:14}"Explore a sample meeting"}span{class:"small-muted","Sample · no audio"}}}else{div{class:"recent-list",for meeting in visible.iter().take(4).cloned(){MeetingCard{meeting,on_open:move |m|{selected.set(m);page.set("review".into());}}}}}
                             }
@@ -444,11 +446,11 @@ fn App() -> Element {
                     }else if current_page=="review"{
                         if selected().is_object(){
                             div{key:"{selected_id}",
-                            if text(&selected(),"mode")=="online" && selected()["tracks"].as_array().map(|t|t.is_empty()).unwrap_or(true){BotStatus{meeting:selected,notify:move|s|toast.set(s)}}
+                            if text(&selected(),"mode")=="online"{ExtensionRecordingStatus{meeting:selected,notify:move|s|toast.set(s)}}
                             MeetingReview{meeting:selected,transcribing:processing_jobs().contains(&selected_id),generating_notes:notes_jobs().get(&selected_id).cloned().unwrap_or_default(),on_back:move |_|{page.set("meetings".into());spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});},on_change:move |m:Value|{if m["id"]==selected()["id"]{selected.set(m);}spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});},notify:move |s|toast.set(s)}
                             }
                         }
-                    }else if current_page=="calendar"{calendar::Calendar{settings,on_meeting:move|m|{selected.set(m);page.set("review".into());spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});},notify:move|s|toast.set(s)}}
+                    }else if current_page=="calendar"{calendar::Calendar{notify:move|s|toast.set(s)}}
                     else if current_page=="models"{models::Models{settings,download:model_download,notes_download,on_change:move|s|settings.set(s),notify:move|s|toast.set(s)}}
                     else if current_page=="settings"{Settings{key:"{settings_section}",settings,draft:settings_draft,snapshot:settings_snapshot,on_change:move|s|settings.set(s),notify:move|s|toast.set(s),initial_section:settings_section()}}
                 }
@@ -502,7 +504,7 @@ fn NewMeeting(
     let mut device = use_signal(String::new);
     let mut tested = use_signal(|| false);
     rsx! {div{class:"dialog-backdrop",div{class:"dialog",id:"new-meeting-dialog",role:"dialog","aria-modal":"true","aria-labelledby":"new-meeting-heading",IconButton{class:"dialog-close",id:"close-new-meeting",label:"Close new meeting",icon:"close",disabled:busy(),onclick:move |_|on_close.call(())}h2{id:"new-meeting-heading","New meeting"}
-        div{class:"meeting-mode-options",div{class:"mode-option selected",span{class:"mode-option-icon",Icon{name:"mic",size:22}}div{strong{"In person"}span{"Capture your room microphone"}}Icon{name:"check",size:17}}button{class:"mode-option",disabled:busy(),onclick:move |_|on_calendar.call(()),span{class:"mode-option-icon",Icon{name:"calendar",size:22}}div{strong{"Online meeting"}span{"Connect a meeting from your calendar"}}Icon{name:"chevron",size:17}}}
+        div{class:"meeting-mode-options",div{class:"mode-option selected",span{class:"mode-option-icon",Icon{name:"mic",size:22}}div{strong{"In person"}span{"Capture your room microphone"}}Icon{name:"check",size:17}}button{class:"mode-option",disabled:busy(),onclick:move |_|on_calendar.call(()),span{class:"mode-option-icon",Icon{name:"calendar",size:22}}div{strong{"Online meeting"}span{"Open a meeting and record with the extension"}}Icon{name:"chevron",size:17}}}
         label{class:"field-label",r#for:"new-meeting-title","Meeting name " span{"Optional"}}input{class:"input",id:"new-meeting-title",placeholder:"e.g. Monday product catch-up",maxlength:"180",disabled:busy(),value:title(),oninput:move|e|title.set(e.value())}
         div{class:"mic-setup",div{Icon{name:"mic",size:18}span{if tested(){"Microphone access is ready"}else{"Choose your microphone"}}}ActionButton{kind:ButtonKind::Secondary,compact:true,disabled:busy(),onclick:move |_|{spawn(async move{busy.set(true);error.set(String::new());match crate::api::evaluate("return await window.echo.testMicrophone()").await{Ok(v)=>{devices.set(v.as_array().cloned().unwrap_or_default());tested.set(true)},Err(e)=>error.set(format!("Microphone access failed. Check your browser permissions. {e}"))}busy.set(false);});},if tested(){"Check again"}else{"Test access"}}}
         if !devices().is_empty(){select{class:"input","aria-label":"Microphone",disabled:busy(),value:device(),onchange:move|e|device.set(e.value()),option{value:"","System default microphone"}for d in devices(){option{value:text(&d,"id"),{text(&d,"label")}}}}}
@@ -528,39 +530,4 @@ fn RecorderBar(
     let elapsed = time(state["elapsed"].as_f64().unwrap_or(0.));
     let level = state["level"].as_f64().unwrap_or(0.);
     rsx! {div{class:"recorder-bar",role:"region","aria-label":"Active recording controls",div{class:"recording-status",span{class:if status=="recording"{"record-dot pulse"}else{"record-dot"}}div{strong{if status=="paused"{"Recording paused"}else if status=="saving"{"Saving recording…"}else if status=="error"{"Recording interrupted"}else if muted{"Microphone muted"}else{"Recording"}}button{onclick:move |_|on_open.call(()),"View active meeting"}}}div{class:"recorder-level","aria-label":"Microphone audio level",for i in 0..12{span{class:if level*12.>i as f64{"lit"}else{""},style:format!("height:{}px",8+(i%5)*3)}}}strong{class:"recorder-time","{elapsed}"}button{class:"icon-button",disabled:status=="saving"||status=="error","aria-label":if muted{"Unmute capture"}else{"Mute capture"},onclick:move |_|{let _=document::eval("window.echoRecorder.toggleMute()");},Icon{name:if muted{"mute"}else{"mic"}}}button{class:"icon-button",disabled:status=="saving"||status=="error","aria-label":if status=="paused"{"Resume recording"}else{"Pause recording"},onclick:move |_|{let _=document::eval(if status=="paused"{"window.echoRecorder.resume()"}else{"window.echoRecorder.pause()"});},Icon{name:if text(&state,"status")=="paused"{"play"}else{"pause"}}}button{class:"button button-record-stop",disabled:text(&state,"status")=="saving",onclick:move |_|{spawn(async move{let script=if text(&recorder(),"status")=="error"{"return await window.echoRecorder.retry()"}else{"return await window.echoRecorder.stop()"};if let Err(e)=crate::api::evaluate(script).await{notify.call(format!("Could not finish saving: {e}. Keep this tab open and retry."));}});},Icon{name:"stop",size:15}if text(&state,"status")=="error"{"Retry save"}else{"Stop & save"}}if let Some(error)=state["error"].as_str(){p{class:"recorder-error","{error}"}}}}
-}
-
-#[component]
-/// Poll a meeting guest's state and expose stop and finalized-audio import actions.
-fn BotStatus(mut meeting: Signal<Value>, notify: EventHandler<String>) -> Element {
-    let mut status = use_signal(|| Value::Null);
-    let mut busy = use_signal(|| false);
-    let id = text(&meeting(), "id");
-    use_future(move || async move {
-        let id = text(&meeting(), "id");
-        loop {
-            match get(&format!("/integrations/bot?meetingId={id}")).await {
-                Ok(v) => {
-                    let state = text(&v, "status");
-                    status.set(v);
-                    if state == "recording" {
-                        if let Ok(m) = get(&format!("/meetings/{id}")).await {
-                            meeting.set(m);
-                        }
-                    }
-                    if state == "completed" || state == "failed" {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    status.set(json!({"status":"Needs attention","detail":e}));
-                    break;
-                }
-            }
-            let _ =
-                document::eval("await new Promise(resolve=>setTimeout(resolve,5000));return true;")
-                    .await;
-        }
-    });
-    rsx! {div{class:"bot-status panel",Icon{name:"video"}div{strong{"Local meeting participant"}p{if status().is_null(){"Check the runner for admission and recording status."}else{{format!("{} · {}",text(&status(),"status"),text(&status(),"detail"))}}}}ActionButton{kind:ButtonKind::Secondary,compact:true,disabled:busy(),onclick:{let id=id.clone();move |_|{let id=id.clone();spawn(async move{busy.set(true);match get(&format!("/integrations/bot?meetingId={id}")).await{Ok(v)=>status.set(v),Err(e)=>notify.call(e)}busy.set(false);});}},"Check status"}ActionButton{kind:ButtonKind::Secondary,compact:true,disabled:busy(),onclick:{let id=id.clone();move |_|{let id=id.clone();spawn(async move{busy.set(true);match api::delete(&format!("/integrations/bot?meetingId={id}")).await{Ok(v)=>{status.set(v);notify.call("Stop requested. Check status, then save the completed recording.".into())},Err(e)=>notify.call(e)}busy.set(false);});}},"Stop bot"}ActionButton{kind:ButtonKind::Primary,compact:true,disabled:busy(),onclick:move |_|{let id=id.clone();spawn(async move{busy.set(true);match post(&format!("/integrations/bot/import?meetingId={id}"),json!({})).await{Ok(v)=>{meeting.set(v["meeting"].clone());let _=document::eval(&format!("window.dispatchEvent(new CustomEvent('echo-recording-saved',{{detail:{}}}))",v["meeting"]));notify.call("Meeting recording saved locally.".into());},Err(e)=>notify.call(e)}busy.set(false);});},"Save recording"}}}
 }

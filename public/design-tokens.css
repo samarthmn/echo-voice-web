@@ -1,0 +1,30 @@
+/* Single source of color and typography tokens for Echo and its extension. */
+:root{--ink:#282736;--muted:#6f687a;--accent:#6d5bda;--accent-dark:#5747bf;--line:#eae7ef;--canvas:#faf9fc;--purple-soft:#f0ecfb;--green:#4b8d73;--sidebar:245px;color-scheme:light;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:var(--ink);background:var(--canvas);font-synthesis:none}
+:root {
+  --surface: #ffffff; --surface-alt: #f2f1f5; --on-accent: #ffffff;
+  --info: #3667a5; --info-soft: #eaf1fa;
+  --focus: #6652c5; --accent-text: #6652c5; --success: #267653; --success-soft: #eaf5ee;
+  --warning: #88601e; --warning-soft: #fff4dd; --danger-fill: #af3543; --danger: #af3543; --danger-soft: #fcebed;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #edeaf4; --muted: #b9b3c6; --canvas: #15131b;
+  --surface: #201d29; --surface-alt: #292534; --line: #403a4c;
+  --accent: #755cd4; --accent-dark: #654bc4; --accent-text: #c0aaff; --focus: #c0aaff;
+  --purple-soft: #342b49; --green: #8ccbaa;
+  --success: #8bd6ae; --success-soft: #203d30;
+  --warning: #e9c483; --warning-soft: #44371f;
+  --danger: #ffa1ac; --danger-soft: #482731;
+  --info: #a3caff; --info-soft: #233952;
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --ink: #edeaf4; --muted: #b9b3c6; --canvas: #15131b;
+  --surface: #201d29; --surface-alt: #292534; --line: #403a4c;
+  --accent: #755cd4; --accent-dark: #654bc4; --accent-text: #c0aaff; --focus: #c0aaff;
+  --purple-soft: #342b49; --green: #8ccbaa;
+  --success: #8bd6ae; --success-soft: #203d30;
+  --warning: #e9c483; --warning-soft: #44371f;
+  --danger: #ffa1ac; --danger-soft: #482731;
+  --info: #a3caff; --info-soft: #233952;
+}}

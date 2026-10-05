@@ -1,12 +1,15 @@
-import { resolveSpeechModel, assertModel, speechModelConfig, speechManifestMatches, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
+import { resolveSpeechModel, assertModel, speechModelConfig, speechManifestMatches, DEFAULT_SPEECH_MODEL, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
 import { createProcessingHeartbeat } from './processing-heartbeat.js';
 import { getNativeSpeechStatus, runNativeSpeech, cancelNativeSpeech } from './native-speech.js';
+import { validatedWhisperWords } from './whisper-alignment.js';
 export { MODELS } from './models.js';
 
 let worker = null;
 let queue = Promise.resolve();
 let generation = 0;
 let rejectActive = null;
+let normalPending = 0;
+let liveWorker = null, liveJob = null;
 const activeAudioFetches = new Set();
 const pendingDownloads = new Map();
 let downloadState = { status: 'idle', modelId: '', progress: 0 };
@@ -21,13 +24,100 @@ function publishDownload(state) {
 
 /** Queue speech operations so downloads, cache changes, and transcription do not overlap. */
 function serial(operation) {
+  normalPending++;
+  releaseLiveInference();
+  publishInferenceState();
   const token = generation;
   const result = queue.catch(() => {}).then(() => {
     if (token !== generation) throw cancelled();
     return operation();
   });
-  queue = result.catch(() => {});
-  return result;
+  const settled = result.finally(() => { normalPending--; publishInferenceState(); });
+  queue = settled.catch(() => {});
+  return settled;
+}
+
+/** Live jobs share a warm ASR worker, but never the final processing queue. */
+export function getInferenceState() {
+  return { busy: normalPending > 0 || processingMeetings.size > 0, liveJobId: liveJob?.jobId ?? null };
+}
+function publishInferenceState() {
+  window.dispatchEvent(new CustomEvent('echo-inference-state', { detail: getInferenceState() }));
+}
+export function cancelLiveInference(jobId) {
+  if (!liveJob || liveJob.jobId !== jobId) return false;
+  liveJob.controller.abort();
+  liveJob.fail?.(cancelled());
+  liveWorker?.terminate(); liveWorker = null;
+  return true;
+}
+export function releaseLiveInference() {
+  if (liveJob) cancelLiveInference(liveJob.jobId);
+  liveWorker?.terminate(); liveWorker = null;
+}
+export async function getLiveModelStatus() {
+  if (typeof caches === 'undefined') return { ready: false, modelId: DEFAULT_SPEECH_MODEL };
+  const model = speechModelConfig(DEFAULT_SPEECH_MODEL);
+  const manifest = await (await caches.open(MODEL_MANIFEST_CACHE)).match(modelManifestUrl(model.id));
+  const data = await manifest?.json().catch(() => null);
+  const cache = await caches.open(MODEL_CACHE);
+  const ready = !!(data && speechManifestMatches(data, model) && Array.isArray(data.files) && data.files.length && (await Promise.all(data.files.map(file => cache.match(file)))).every(Boolean));
+  return { ready, modelId: model.id, modelRevision: model.revision };
+}
+export async function transcribeLiveWindow(audio, { jobId = crypto.randomUUID(), language = 'auto', signal, onProgress } = {}) {
+  if (!(audio instanceof Float32Array) || !audio.length || audio.length > 20 * 16000) throw new Error('Live audio must contain at most twenty seconds.');
+  if (getInferenceState().busy || liveJob) throw Object.assign(new Error('Local processing is busy.'), { code: 'processing-busy' });
+  const job = { jobId, controller: new AbortController() };
+  const duration = audio.length / 16000;
+  liveJob = job;
+  const abort = () => cancelLiveInference(jobId);
+  signal?.addEventListener('abort', abort, { once: true });
+  publishInferenceState();
+  try {
+    if (signal?.aborted) abort();
+    const model = await getLiveModelStatus();
+    if (job.controller.signal.aborted) throw cancelled();
+    if (!model.ready) throw Object.assign(new Error('Download Large V3 Turbo in Models to enable live transcription.'), { code: 'model-missing' });
+    if (getInferenceState().busy) throw Object.assign(new Error('Local processing is busy.'), { code: 'processing-busy' });
+    if (typeof Worker === 'undefined') throw new Error('This browser does not support local speech processing.');
+    const url = new URL('/js/inference-worker.js', location.origin);
+    const version = window.echoAssetVersions?.['/js/inference-worker.js'];
+    if (version) url.searchParams.set('v', version);
+    liveWorker ??= new Worker(url, { type: 'module' });
+    const currentWorker = liveWorker;
+    const result = await new Promise((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        currentWorker.removeEventListener('message', message);
+        currentWorker.removeEventListener('error', error);
+        job.fail = null;
+      };
+      const fail = reason => { if (settled) return; settled = true; cleanup(); currentWorker.terminate(); if (liveWorker === currentWorker) liveWorker = null; reject(reason); };
+      const message = event => {
+        if (event.data.id !== jobId || settled) return;
+        if (event.data.type === 'progress') { try { onProgress?.(event.data.progress); } catch (error) { console.error('Progress callback failed.', error); } }
+        else if (event.data.type === 'result') { settled = true; cleanup(); resolve(event.data.result); }
+        else if (event.data.type === 'error') fail(new Error(event.data.error));
+      };
+      const error = event => fail(new Error(event.message || 'Live speech processing stopped unexpectedly.'));
+      job.fail = fail;
+      currentWorker.addEventListener('message', message); currentWorker.addEventListener('error', error);
+      try { currentWorker.postMessage({ id: jobId, type: 'transcribe-live', modelId: DEFAULT_SPEECH_MODEL, audio, options: { language } }, [audio.buffer]); }
+      catch (error) { fail(error); }
+    });
+    if (job.controller.signal.aborted) throw cancelled();
+    if (result?.duration !== duration) throw new Error('Live speech returned an invalid audio duration.');
+    const words = validatedWhisperWords({ chunks: result?.words }, duration);
+    if (result.modelRevision !== model.modelRevision) throw new Error('Live speech returned an unexpected model revision.');
+    return { ...result, words };
+  } catch (error) {
+    if (liveWorker && liveJob === job) { liveWorker.terminate(); liveWorker = null; }
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    if (liveJob === job) liveJob = null;
+    publishInferenceState();
+  }
 }
 
 /** Dispatch one worker job and forward its progress until a result or failure arrives. */
@@ -83,6 +173,7 @@ export function cancelInference() {
   worker?.terminate(); worker = null;
   rejectActive?.(cancelled());
   rejectActive = null;
+  releaseLiveInference();
 }
 
 /** Return only allowlisted models whose complete manifest still exists in browser cache. */
@@ -272,6 +363,8 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
   if (processingMeetings.has(meetingId)) throw new Error('This meeting is already being transcribed.');
   const token = generation;
   processingMeetings.set(meetingId, token);
+  releaseLiveInference();
+  publishInferenceState();
   const checkCancelled = () => { if (token !== generation) throw cancelled(); };
   const controller = new AbortController();
   activeAudioFetches.add(controller);
@@ -326,11 +419,13 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
   } finally {
     processingHeartbeat.stop(meetingId);
     if (processingMeetings.get(meetingId) === token) processingMeetings.delete(meetingId);
+    publishInferenceState();
     activeAudioFetches.delete(controller);
   }
 }
 
 window.echoInference = {
   models: MODELS, getDownloadedModels, getOutdatedModels, getModelDownloadState, getNativeSpeechStatus, removeModel, cancelInference, transcribeAudio, transcribeMeeting,
+  getLiveModelStatus, transcribeLiveWindow, cancelLiveInference, releaseLiveInference, getInferenceState,
   downloadModel: (id, callback) => downloadModel(id, progress => { report(id)(progress); callback?.(progress); }),
 };

@@ -39,7 +39,11 @@ impl std::error::Error for ApiError {}
 impl IntoResponse for ApiError {
     /// Return API failures as a status and JSON error object.
     fn into_response(self) -> Response {
-        (self.status, Json(json!({"error":self.message}))).into_response()
+        (
+            self.status,
+            Json(json!({"protocolVersion":1,"error":self.message})),
+        )
+            .into_response()
     }
 }
 impl From<std::io::Error> for ApiError {

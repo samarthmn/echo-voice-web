@@ -1,5 +1,5 @@
 import { env, pipeline, AutoProcessor, AutoModelForAudioFrameClassification, AutoModelForXVector } from '@huggingface/transformers';
-import { assertModel, speechModelConfig, assertWordTimestampSupport, SPEAKER_MODELS, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl } from './models.js';
+import { assertModel, speechModelConfig, assertWordTimestampSupport, DEFAULT_SPEECH_MODEL, SPEAKER_MODELS, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl } from './models.js';
 import { diarize, speakerPassages } from './diarization.js';
 import { speechFailureMessage, traceSpeechChunks } from './speech-errors.js';
 import { wasmThreadCount } from './runtime-options.js';
@@ -47,6 +47,7 @@ self.addEventListener('message', async event => {
     runtimeReported = true;
   };
   const download = ['download', 'download-companions'].includes(type);
+  const live = type === 'transcribe-live';
   const loadOptions = {
     device: 'wasm', dtype: 'q8', local_files_only: !download,
     progress_callback: value => progress(value.status === 'progress' ? 'Downloading model file' : value.status === 'done' ? 'Model file saved' : 'Loading model', value.progress ?? (value.status === 'done' ? 100 : 0), value.file),
@@ -55,7 +56,9 @@ self.addEventListener('message', async event => {
   let phase = 'loading the speech model';
   try {
     assertModel(modelId);
-    if (!['download', 'transcribe', 'download-companions', 'diarize'].includes(type)) throw new Error('Unsupported speech operation.');
+    if (!['download', 'transcribe', 'transcribe-live', 'download-companions', 'diarize'].includes(type)) throw new Error('Unsupported speech operation.');
+    if (live && modelId !== DEFAULT_SPEECH_MODEL) throw new Error('Live transcription requires the downloaded Large V3 Turbo model.');
+    if (live && (!audio?.length || audio.length > 20 * 16000)) throw new Error('Live audio must contain at most twenty seconds.');
     const native = speechModelConfig(modelId).engine === 'native';
     if (native !== ['download-companions', 'diarize'].includes(type)) throw new Error('This speech model requires its configured local engine.');
     env.allowLocalModels = !download;
@@ -75,7 +78,9 @@ self.addEventListener('message', async event => {
         if (!audio?.length) throw new Error('No decoded audio was received.');
         progress('Transcribing on this device', 0);
         phase = 'transcribing audio and aligning word timestamps';
-        traceSpeechChunks(transcriber.model, audio.length,
+        // Final jobs own a fresh worker. A warm live model must not accumulate
+        // progress wrappers around generate/session.run on every window.
+        if (!live) traceSpeechChunks(transcriber.model, audio.length,
           value => self.postMessage({ id, type: 'progress', progress: value }),
           next => { phase = next; });
         const output = await transcriber(audio, {
@@ -88,6 +93,11 @@ self.addEventListener('message', async event => {
     } else if (!download) {
       if (!audio?.length || !Array.isArray(options.words)) throw new Error('The local speech engine did not return word timestamps.');
       words = options.words;
+    }
+    if (live) {
+      progress('Live transcript ready', 100);
+      reply = { id, type: 'result', result: { words, duration: audio.length / 16000, model: modelId, modelRevision: speechModelConfig(modelId).revision } };
+      return;
     }
     // Release browser speech before loading the two smaller speaker models.
     await unloadSpeech();
@@ -119,7 +129,7 @@ self.addEventListener('message', async event => {
     const message = speechFailureMessage(error, { download, phase, modelName });
     reply = { id, type: 'error', error: message };
   } finally {
-    await unloadSpeech().catch(() => {});
+    if (!live || reply?.type !== 'result') await unloadSpeech().catch(() => {});
     await segmentation?.dispose().catch(() => {});
     await embedding?.dispose().catch(() => {});
     busy = false;

@@ -1,7 +1,9 @@
 mod api;
 mod chatgpt;
 mod config;
+mod extensions;
 mod integrations;
+mod legacy;
 mod notes;
 mod security;
 mod speech;
@@ -30,8 +32,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     store::init()?;
     speech::recover_spools()?;
-    config::runner_token(&store::data_dir())?;
-    integrations::recover_bot_starts().await;
     let router = Router::new()
         .nest(
             "/api",
@@ -40,6 +40,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .merge(notes::routes())
                 .merge(chatgpt::routes())
                 .merge(speech::routes())
+                .merge(extensions::workspace_routes())
+                .merge(legacy::routes())
                 .route(
                     "/demo",
                     axum::routing::get(|| async {
@@ -53,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .layer(axum::middleware::from_fn(security::local_access)),
         )
+        .nest("/extension/v1", extensions::extension_routes())
         .fallback_service(
             ServeDir::new("public").not_found_service(ServeFile::new("public/index.html")),
         )

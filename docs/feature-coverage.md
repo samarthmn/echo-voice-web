@@ -1,3 +1,5 @@
+> The browser extension replaces all native meeting-runner descriptions in this historical coverage document. Current capture, offline recovery, optional live text, migration and qualification boundaries are defined in [browser-extension.md](browser-extension.md) and [extension-qualification.md](extension-qualification.md). Native Large V3 remains supported.
+
 # Echo Voice web: implementation and qualification
 
 This document maps every section of the attached product plan to the delivered local web implementation. **Implemented** means there is working application code for the workflow; it does not mean every browser, microphone, meeting platform, or model has been qualified. **Limited** identifies an explicit boundary. **Unavailable** identifies a feature that this version does not provide. This is not a claim of full desktop feature parity.
@@ -55,7 +57,7 @@ Tests are intentionally separated from external qualification:
 - `cargo check -p echo-app` checks Dioxus/Rust types and component compilation; a WASM build checks the browser target.
 - Rust backend tests exercise metadata/version preservation, payload validation, path boundaries, duplicate chunks, backup/import, interrupted state and deletion/recovery behavior.
 - `npm test` runs recorder/inference failure and cancellation checks, REST tests, and `tests/chatgpt-protocol.test.mjs`. ChatGPT protocol checks use a local helper fixture; they do not sign in or consume real account usage.
-- Integration tests and `python3 tests/integrations_runner_test.py` cover validation/authentication/recovery without claiming a successful real Google meeting.
+- Extension authorization/capture/recovery tests cover validation/authentication/recovery without claiming a successful real Google meeting.
 - `tests/review.e2e.mjs` exercises the running Dioxus review interface against real REST writes and original audio on a separate test data directory. It is designed to check corrections, speaker labels/samples, saved moments, note versions, evidence, exports, deletion, browser errors and responsive overflow.
 
 Use the actual command results in the [verification record](verification.md) as the executed-test record. A test listed here is not a claim that a real external account, model download, microphone or online meeting has been exercised in this environment.

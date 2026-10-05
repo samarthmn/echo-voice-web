@@ -1,5 +1,4 @@
-//! Public runtime defaults are shared with the Python runner in echo.config.json.
-//! Only Google OAuth credentials belong in .env; runner authentication is generated locally.
+//! Public loopback runtime settings. Legacy runner configuration is ignored.
 use crate::security::ApiError;
 use serde::Deserialize;
 use std::{
@@ -17,16 +16,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub google_redirect_uri: String,
     pub codex_binary: Option<PathBuf>,
-    pub runner: Runner,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Runner {
-    pub url: String,
-    // Applied by the Python runner; deserialize here to validate the shared schema.
-    #[serde(rename = "headless")]
-    pub _headless: bool,
-    pub admission_timeout_seconds: u64,
+    #[serde(default, rename = "runner")]
+    pub _deprecated_runner: Option<serde_json::Value>,
 }
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -48,21 +39,7 @@ pub fn get() -> &'static Config {
         };
         let config: Config = serde_json::from_str(&source)
             .expect("echo.config.json contains invalid runtime settings");
-        assert!(
-            (1..=3600).contains(&config.runner.admission_timeout_seconds),
-            "Runner admission timeout must be 1–3600 seconds"
-        );
-        let runner = url::Url::parse(&config.runner.url).expect("Invalid runner URL");
-        assert!(
-            runner.scheme() == "http"
-                && runner.host_str() == Some("127.0.0.1")
-                && runner.username().is_empty()
-                && runner.password().is_none()
-                && matches!(runner.path(), "" | "/")
-                && runner.query().is_none()
-                && runner.fragment().is_none(),
-            "Runner URL must be http://127.0.0.1:<port>"
-        );
+
         config
     })
 }
@@ -109,66 +86,6 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ApiError> {
     result
 }
 
-/// Both processes use this per-library secret; a checked-in shared secret would be unsafe.
-pub fn runner_token(data: &Path) -> Result<String, ApiError> {
-    let folder = data.join("credentials");
-    fs::create_dir_all(&folder)?;
-    if fs::symlink_metadata(&folder)?.file_type().is_symlink() {
-        return Err(ApiError::bad(
-            "The credentials folder must not be a symbolic link.",
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o700))?;
-    }
-    let path = folder.join("runner-token");
-    let lock_path = folder.join("runner-token.lock");
-    for file in [&path, &lock_path] {
-        if fs::symlink_metadata(file).is_ok_and(|m| m.file_type().is_symlink()) {
-            return Err(ApiError::bad(
-                "Runner credentials must not be symbolic links.",
-            ));
-        }
-    }
-    let mut options = fs::OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let lock = options.open(lock_path)?;
-    fs2::FileExt::lock_exclusive(&lock)?;
-    let token = match fs::read_to_string(&path) {
-        Ok(token) => token,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let token = format!(
-                "{}{}",
-                uuid::Uuid::new_v4().simple(),
-                uuid::Uuid::new_v4().simple()
-            );
-            write_private(&path, token.as_bytes())?;
-            token
-        }
-        Err(e) => return Err(e.into()),
-    };
-    if token.len() < 32
-        || !token
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-    {
-        return Err(ApiError::new(500, "The generated runner credential is invalid. Stop both processes and remove credentials/runner-token to regenerate it."));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(token)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,22 +104,11 @@ mod tests {
         }
     }
     #[test]
-    fn generated_token_is_private_and_stable() {
-        let dir = tempfile::tempdir().unwrap();
-        let token = runner_token(dir.path()).unwrap();
-        assert_eq!(token.len(), 64);
-        assert_eq!(runner_token(dir.path()).unwrap(), token);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(dir.path().join("credentials/runner-token"))
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o600
-            );
-        }
+    fn legacy_runner_settings_are_accepted_and_ignored() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(include_str!("../../echo.config.json")).unwrap();
+        value["runner"] = serde_json::json!({"url":"obsolete", "anyOldField":true});
+        assert!(serde_json::from_value::<Config>(value).is_ok());
+        assert!(serde_json::from_str::<Config>(include_str!("../../echo.config.json")).is_ok());
     }
 }

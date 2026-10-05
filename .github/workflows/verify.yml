@@ -74,13 +74,16 @@ jobs:
       - name: Test browser modules and REST lifecycle
         run: npm test
 
-      - name: Test local meeting runner and native speech API
+      - name: Test native speech API
         env:
           ECHO_TEST_BINARY: target/release/echo-server
         run: |
           # Exercise the built release executable, including when debug output was cached.
           rm -f target/debug/echo-server
-          python3 -B -m unittest discover -s tests -p '*_test.py' -v
+          python3 -B -m unittest discover -s tests -p 'native_speech_http_test.py' -v
+
+      - name: Test extension capture, recovery and authorization
+        run: npm run test:extension
 
       - name: Test browser workflows and accessibility
         run: |

@@ -37,10 +37,10 @@ try {
   }
   const connect = page.getByRole('button', { name: 'Connect calendar', exact: true });
   await connect.click();
-  const close = page.getByRole('button', { name: 'Close connection setup' });
+  const close = page.getByRole('button', { name: 'Close calendar setup' });
   await expect(close).toBeFocused();
   await page.keyboard.press('Shift+Tab');
-  await expect(page.getByRole('button', { name: 'Recheck connections' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Done', exact: true })).toBeFocused();
   await page.keyboard.press('Tab'); await expect(close).toBeFocused();
   await page.keyboard.press('Control+k'); await expect(page.getByRole('dialog')).toBeVisible();
   await audit('calendar-dialog-desktop');

@@ -6,6 +6,7 @@ command -v npm >/dev/null || { echo 'Node.js 22 or newer is required to bundle t
 rustup target add wasm32-unknown-unknown
 npm ci --ignore-scripts
 npm run build:assets
+npm run build:extension
 bindgen_version="$(awk '/name = "wasm-bindgen"/{getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
 if ! command -v wasm-bindgen >/dev/null || [[ "$(wasm-bindgen --version)" != "wasm-bindgen $bindgen_version" ]]; then
   cargo install wasm-bindgen-cli --version "$bindgen_version" --locked

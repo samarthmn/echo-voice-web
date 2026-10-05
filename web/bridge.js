@@ -5,7 +5,7 @@ import './notes.js';
 import './files.js';
 import './recorder.js';
 import './accessibility.js';
-import './runner-auth.js';
+import './extension-workspace.js';
 
 const IMPORT_CHUNK_BYTES = 8 * 1024 * 1024;
 const imports = new Map();
@@ -168,6 +168,7 @@ export async function autoTranscribeMeeting(meeting) {
 }
 
 window.addEventListener('echo-recording-saved', event => { void autoTranscribeMeeting(event.detail); });
+window.addEventListener('echo-extension-import-ready', event => { void autoTranscribeMeeting(event.detail); });
 window.addEventListener('beforeunload', event => { if (imports.size || startingImports.size) { event.preventDefault(); event.returnValue = ''; } });
 window.echo = {
   upload, autoTranscribeMeeting,
@@ -180,3 +181,6 @@ window.echo = {
   },
   date(value, options = { month: 'short', day: 'numeric' }) { return new Date(value).toLocaleDateString(undefined, options); },
 };
+
+import {installExtensionLive} from './extension-live.js';
+installExtensionLive();
