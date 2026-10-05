@@ -85,7 +85,7 @@ def capture_join_failure(page, folder: Path):
         raise
 
 
-def prepare_guest(page, stop_event, folder: Path, timeout: float = 30):
+def prepare_guest(page, stop_event, folder: Path, timeout: float = 30, expected_email=None):
     """Dismiss only receive-only device prompts, fill the guest name, and locate Join."""
     deadline = time.monotonic() + timeout
     phase = "prejoin"
@@ -100,6 +100,8 @@ def prepare_guest(page, stop_event, folder: Path, timeout: float = 30):
             diagnostics(page, folder, phase)
             continue
         name = visible(page.get_by_role("textbox", name=re.compile("your name", re.I)))
+        if name and expected_email:
+            raise RuntimeError("The recording browser lost its Google sign-in. Verify the connected Calendar account again before joining.")
         if name and name.input_value() != "Echo Voice - Recording":
             name.fill("Echo Voice - Recording")
             phase = "guest-name-entered"
@@ -118,4 +120,4 @@ def prepare_guest(page, stop_event, folder: Path, timeout: float = 30):
     if stop_event.is_set():
         return None
     diagnostics(page, folder, phase + "-timed-out")
-    raise RuntimeError("Echo could not join this Google Meet. Confirm the meeting is active and allows participants without a Google account. No meeting audio was recorded.")
+    raise RuntimeError("Echo could not join this Google Meet. Confirm the meeting is active and allows the connected account. No meeting audio was recorded.")

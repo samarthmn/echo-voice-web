@@ -8,7 +8,7 @@ def browser_options(sink: str, headless: bool) -> dict:
     """Keep playback enabled and route only this launched browser to its sink."""
     container = os.environ.get("ECHO_RUNNER_CONTAINER") == "1"
     return {
-        "headless": headless or container,
+        "headless": headless,
         # Use the full Chromium binary checked by readiness, including its
         # current headless WebRTC implementation, rather than headless shell.
         "channel": "chromium",
@@ -21,22 +21,25 @@ def browser_options(sink: str, headless: bool) -> dict:
     }
 
 
-def deny_capture(context, page, origin: str):
+def deny_capture(context, page, origin: str, persistent: bool = False):
     """Set camera/microphone denied for this isolated context before external navigation."""
     session = context.new_cdp_session(page)
     try:
         info = session.send("Target.getTargetInfo")["targetInfo"]
         context_id = info.get("browserContextId")
-        if not context_id:
+        if not context_id and not persistent:
             raise RuntimeError("The receive-only browser context could not be identified. The guest did not join.")
     finally:
         session.detach()
-    session = context.browser.new_browser_cdp_session()
+    # A persistent Chromium profile uses the default context, whose target has
+    # no browserContextId. Browser commands on this owned page session apply to
+    # that default context; omit the ID rather than inventing another context.
+    session = context.new_cdp_session(page) if persistent else context.browser.new_browser_cdp_session()
     try:
         for name in ("camera", "microphone"):
             session.send("Browser.setPermission", {"permission": {"name": name}, "setting": "denied",
-                                                   "browserContextId": context_id, "origin": origin,
-                                                   "embeddingOrigin": origin})
+                                                   **({"browserContextId": context_id} if context_id else {}),
+                                                   "origin": origin, "embeddingOrigin": origin})
     except BaseException:
         session.detach()
         raise

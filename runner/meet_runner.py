@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import load_config, runner_token
 from capture import browser_options, capture_command, deny_capture, verify_receive_only, wait_for_pcm
 from meet_ui import capture_join_failure, prepare_guest, diagnostics as join_diagnostics
+from meet_auth import AuthManager, AuthError, email_address, session_id as auth_session_id, input_command, persistent_context, require_account, START_URL, close_context
 
 os.umask(0o077)
 CONFIG, DATA_ROOT, RUNNER_PORT = load_config()
@@ -36,9 +37,19 @@ TOKEN = ""  # Initialized only when the runner is started, not when tests import
 SESSIONS: dict[str, "Session"] = {}
 LOCK = threading.RLock()
 CHROMIUM_EXECUTABLE: Path | None = None
+AUTH: AuthManager | None = None
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
 MEET_PATTERN = re.compile(r"^/[a-z]{3}-[a-z]{4}-[a-z]{3}/?$")
 ACTIVE = {"joining", "waiting", "recording", "stopping"}
+
+
+def auth_manager():
+    """Initialize lazily so importing tests/doctor never starts an account browser."""
+    global AUTH
+    with LOCK:
+        if AUTH is None:
+            AUTH = AuthManager(DATA_ROOT)
+        return AUTH
 
 
 def utc_now() -> str:
@@ -87,13 +98,14 @@ def readiness() -> tuple[bool, str]:
         return False, "Playwright's Chromium installation could not be checked. Reinstall the runner browser."
     if os.environ.get("ECHO_RUNNER_CONTAINER") == "1" and not (Path(os.environ["XDG_RUNTIME_DIR"]) / "audio-qualified").is_file():
         return False, "The container has not verified audible Chromium playback yet. Check its startup audio test and logs."
-    return True, "Local Google Meet runner is ready; hosts must admit its visible recording guest."
+    return True, "Local Google Meet runner is ready. Sign in to its dedicated recording browser before joining."
 
 
 class Session:
-    def __init__(self, meeting_id: str, url: str, request_id: str):
+    def __init__(self, meeting_id: str, url: str, request_id: str, expected_email: str, lease):
         """Persist a new start identity before its guest browser thread is launched."""
         self.id, self.url, self.request_id = meeting_id, url, request_id
+        self.expected_email, self.profile_lease = expected_email, lease
         self.folder = DATA / meeting_id
         self.folder.mkdir(parents=True, mode=0o700, exist_ok=True)
         self.audio = self.folder / "meeting.wav"
@@ -139,7 +151,7 @@ class Session:
 
     def run(self):
         """Join as a visible muted guest, record after admission, and finalize local resources on exit."""
-        browser = None
+        browser, playwright = None, None
         sink = "echo_" + secrets.token_hex(8)
         failure = None
         try:
@@ -149,65 +161,76 @@ class Session:
             if sink_result.returncode:
                 raise RuntimeError("A private audio sink could not be created. Check PulseAudio.")
             self.sink_module = sink_result.stdout.strip()
-            with sync_playwright() as p:
-                browser = p.chromium.launch(**browser_options(sink, CONFIG["runner"]["headless"]))
-                context = browser.new_context(locale="en-US", viewport={"width": 1280, "height": 900})
-                page = context.new_page()
-                with capture_join_failure(page, self.folder):
-                    _permissions_guard = deny_capture(context, page, "https://meet.google.com")
-                    try:
-                        page.goto(self.url + "?hl=en", wait_until="domcontentloaded", timeout=60_000)
-                    except Exception:
-                        join_diagnostics(page, self.folder, "navigation-failed")
-                        raise
-                    # Guest entry is intentionally used. Do not automate a Google login or save account cookies.
-                    join = prepare_guest(page, self.stop_event, self.folder)
-                    if join is None or self.stop_event.is_set():
-                        return
+            playwright = sync_playwright().start()
+            context = persistent_context(playwright, self.profile_lease.profile, sink)
+            browser = context
+            page = context.pages[0] if context.pages else context.new_page()
+            with capture_join_failure(page, self.folder):
+                _permissions_guard = deny_capture(context, page, "https://meet.google.com", persistent=True)
+                try:
+                    page.goto(START_URL, wait_until="domcontentloaded", timeout=30_000)
                     verify_receive_only(page)
-                    join.click(timeout=15_000)
-                    join_diagnostics(page, self.folder, "entry-requested")
-                    self.set_state("waiting", "Waiting for the host to admit Echo Voice - Recording. No meeting audio is being recorded yet.")
-                    admission_timeout = CONFIG["runner"]["admissionTimeoutSeconds"]
-                    deadline = time.monotonic() + admission_timeout
-                    leave = page.get_by_role("button", name=re.compile("leave call", re.I))
-                    while not self.stop_event.is_set():
+                    require_account(page, self.expected_email)
+                except Exception:
+                    auth_manager().expired()
+                    raise
+                try:
+                    page.goto(self.url + "?hl=en", wait_until="domcontentloaded", timeout=60_000)
+                except Exception:
+                    join_diagnostics(page, self.folder, "navigation-failed")
+                    raise
+                join = prepare_guest(page, self.stop_event, self.folder, expected_email=self.expected_email)
+                if join is None or self.stop_event.is_set():
+                    return
+                verify_receive_only(page)
+                try:
+                    require_account(page, self.expected_email)
+                except Exception:
+                    auth_manager().expired()
+                    raise
+                join.click(timeout=15_000)
+                join_diagnostics(page, self.folder, "entry-requested")
+                self.set_state("waiting", "Waiting for the host to admit the connected recording account. No meeting audio is being recorded yet.")
+                admission_timeout = CONFIG["runner"]["admissionTimeoutSeconds"]
+                deadline = time.monotonic() + admission_timeout
+                leave = page.get_by_role("button", name=re.compile("leave call", re.I))
+                while not self.stop_event.is_set():
+                    if leave.count() and leave.first.is_visible():
+                        break
+                    if page.get_by_text(re.compile("request.*denied|can.t join this.*call|meeting.*ended|no one responded", re.I)).count():
+                        join_diagnostics(page, self.folder, "entry-declined")
+                        raise RuntimeError("The host declined entry, the meeting ended, or guest access is blocked.")
+                    if time.monotonic() > deadline:
+                        join_diagnostics(page, self.folder, "admission-timed-out")
+                        raise RuntimeError(f"No host admitted the recording guest within {admission_timeout} seconds. Ask the host to admit it, then start a new recording.")
+                    page.wait_for_timeout(1000)
+                if not self.stop_event.is_set():
+                    join_diagnostics(page, self.folder, "admitted")
+                    log = open(self.folder / "capture.log", "wb")
+                    try:
+                        self.recording_process = subprocess.Popen(capture_command(sink, self.audio),
+                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log)
+                        wait_for_pcm(self.recording_process, self.audio)
+                        self.started_at = utc_now()
+                        self.set_state("recording", "Recording this Google Meet locally. Microphone and camera remain off.")
+                        start = time.monotonic()
+                        while not self.stop_event.is_set():
+                            if self.recording_process.poll() is not None:
+                                raise RuntimeError("Audio capture stopped unexpectedly. Any completed audio has been preserved.")
+                            if not leave.count() or not leave.first.is_visible():
+                                break
+                            if time.monotonic() - start > 8 * 3600:
+                                raise RuntimeError("The eight-hour recording limit was reached. Saved audio remains available.")
+                            if shutil.disk_usage(self.folder).free < 100 * 1024 * 1024:
+                                raise RuntimeError("Local disk space is low. Recording stopped safely; completed audio remains available.")
+                            page.wait_for_timeout(1000)
                         if leave.count() and leave.first.is_visible():
-                            break
-                        if page.get_by_text(re.compile("request.*denied|can.t join this.*call|meeting.*ended|no one responded", re.I)).count():
-                            join_diagnostics(page, self.folder, "entry-declined")
-                            raise RuntimeError("The host declined entry, the meeting ended, or guest access is blocked.")
-                        if time.monotonic() > deadline:
-                            join_diagnostics(page, self.folder, "admission-timed-out")
-                            raise RuntimeError(f"No host admitted the recording guest within {admission_timeout} seconds. Ask the host to admit it, then start a new recording.")
-                        page.wait_for_timeout(1000)
-                    if not self.stop_event.is_set():
-                        join_diagnostics(page, self.folder, "admitted")
-                        log = open(self.folder / "capture.log", "wb")
-                        try:
-                            self.recording_process = subprocess.Popen(capture_command(sink, self.audio),
-                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log)
-                            wait_for_pcm(self.recording_process, self.audio)
-                            self.started_at = utc_now()
-                            self.set_state("recording", "Recording this Google Meet locally. Microphone and camera remain off.")
-                            start = time.monotonic()
-                            while not self.stop_event.is_set():
-                                if self.recording_process.poll() is not None:
-                                    raise RuntimeError("Audio capture stopped unexpectedly. Any completed audio has been preserved.")
-                                if not leave.count() or not leave.first.is_visible():
-                                    break
-                                if time.monotonic() - start > 8 * 3600:
-                                    raise RuntimeError("The eight-hour recording limit was reached. Saved audio remains available.")
-                                if shutil.disk_usage(self.folder).free < 100 * 1024 * 1024:
-                                    raise RuntimeError("Local disk space is low. Recording stopped safely; completed audio remains available.")
-                                page.wait_for_timeout(1000)
-                            if leave.count() and leave.first.is_visible():
-                                leave.first.click(timeout=5000)
-                        finally:
-                            self.finish_audio()
-                            log.close()
-                    browser.close()
-                    browser = None
+                            leave.first.click(timeout=5000)
+                    finally:
+                        self.finish_audio()
+                        log.close()
+                close_context(browser)
+                browser = None
         except Exception as error:
             # Playwright errors may contain remote page internals. Keep API messages concise.
             failure = str(error).split("\n")[0][:350]
@@ -219,9 +242,12 @@ class Session:
             self.finish_audio()
             if browser:
                 try:
-                    browser.close()
+                    close_context(browser)
                 except Exception:
                     pass
+            if playwright:
+                try: playwright.stop()
+                except Exception: pass
             if self.sink_module:
                 try:
                     subprocess.run(["pactl", "unload-module", self.sink_module], capture_output=True, timeout=10)
@@ -234,7 +260,10 @@ class Session:
                         self.duration = audio.getnframes() / audio.getframerate()
                 except (wave.Error, EOFError):
                     failure = failure or "The audio file was interrupted and could not be finalized. The file remains on disk for recovery."
-            self.set_state("failed" if failure else "completed", failure or ("Local recording saved. Import it into your meeting to transcribe." if self.duration else "The bot left before recording any meeting audio."))
+            try:
+                self.set_state("failed" if failure else "completed", failure or ("Local recording saved. Import it into your meeting to transcribe." if self.duration else "The bot left before recording any meeting audio."))
+            finally:
+                self.profile_lease.close()
 
     def finish_audio(self):
         """Ask FFmpeg to finalize its WAV, escalating termination if graceful shutdown stalls."""
@@ -316,9 +345,46 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return parts[1]
 
+    def auth_body(self):
+        """Read a bounded object without logging credential text or UI input."""
+        length = int(self.headers.get("Content-Length", "0"))
+        if not 0 < length <= 32768:
+            raise ValueError("Provide a recording-browser JSON request smaller than 32 KB.")
+        body = json.loads(self.rfile.read(length))
+        if not isinstance(body, dict):
+            raise ValueError("Provide a recording-browser JSON object.")
+        return body
+
+    def auth_failure(self, error):
+        """Expose known validation messages; never remote Playwright exception details."""
+        self.reply(409 if isinstance(error, AuthError) else 400, {"error": str(error)})
+
     def do_GET(self):
         """Report readiness or session state, or stream a finalized local recording."""
         if not self.authorized():
+            return
+        if self.path == "/auth":
+            self.reply(200, auth_manager().status())
+            return
+        if urlparse(self.path).path == "/auth/screen":
+            try:
+                query = parse_qs(urlparse(self.path).query)
+                if set(query) != {"sessionId"} or len(query["sessionId"]) != 1:
+                    raise ValueError("Provide one recording-browser sign-in ID.")
+                image = auth_manager().command(query["sessionId"][0], "screen")
+            except (AuthError, ValueError) as error:
+                self.auth_failure(error)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(image)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            try:
+                self.wfile.write(image)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
         if self.path == "/health":
             ready, detail = readiness()
@@ -356,6 +422,31 @@ class Handler(BaseHTTPRequestHandler):
         """Start one consent-checked guest with retry identity and reject cancelled attempts."""
         if not self.authorized():
             return
+        if self.path in {"/auth", "/auth/finish", "/auth/cancel", "/auth/input"}:
+            try:
+                body = self.auth_body()
+                if self.path == "/auth":
+                    if set(body) not in ({"email"}, {"email", "sessionId"}):
+                        raise ValueError("Provide the connected Calendar account and optional sign-in ID.")
+                    ready, detail = readiness()
+                    if not ready:
+                        self.reply(503, {"error": detail})
+                        return
+                    with LOCK:
+                        if any(s.status in ACTIVE for s in SESSIONS.values()):
+                            raise AuthError("Stop the active recording before signing in to its browser.")
+                        result = auth_manager().start(body["email"], body.get("sessionId"))
+                elif self.path == "/auth/input":
+                    body = input_command(body)
+                    result = auth_manager().command(body["sessionId"], "input", body)
+                else:
+                    if set(body) != {"sessionId"}:
+                        raise ValueError("Provide one recording-browser sign-in ID.")
+                    result = auth_manager().cancel(body["sessionId"]) if self.path == "/auth/cancel" else auth_manager().command(body["sessionId"], "finish")
+                self.reply(200, result)
+            except (AuthError, ValueError, TypeError, KeyError) as error:
+                self.auth_failure(error)
+            return
         if self.path != "/sessions":
             self.reply(404, {"error": "Unknown runner endpoint."})
             return
@@ -373,6 +464,7 @@ class Handler(BaseHTTPRequestHandler):
             url = validate_url(payload.get("url"))
             if payload.get("consent") is not True:
                 raise ValueError("Participant consent is required before the bot joins.")
+            expected_email = email_address(payload.get("expectedEmail"))
         except (ValueError, TypeError, AttributeError, json.JSONDecodeError) as error:
             self.reply(400, {"error": str(error)})
             return
@@ -398,7 +490,16 @@ class Handler(BaseHTTPRequestHandler):
             if (DATA / meeting_id / "meeting.wav").exists():
                 self.reply(409, {"error": "This meeting already has recorded audio. Import it, then create a new meeting for another recording."})
                 return
-            session = Session(meeting_id, url, request_id)
+            try:
+                lease = auth_manager().recording_lease(expected_email)
+            except (AuthError, ValueError) as error:
+                self.auth_failure(error)
+                return
+            try:
+                session = Session(meeting_id, url, request_id, expected_email, lease)
+            except BaseException:
+                lease.close()
+                raise
             SESSIONS[meeting_id] = session
             session.thread.start()
         self.reply(202, session.public())
@@ -406,6 +507,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         """Stop a matching guest or persist a cancellation fence for an uncertain start."""
         if not self.authorized():
+            return
+        if self.path == "/auth":
+            try:
+                self.reply(200, auth_manager().forget())
+            except (AuthError, ValueError) as error:
+                self.auth_failure(error)
             return
         meeting_id = self.session_id()
         request_id = parse_qs(urlparse(self.path).query).get("requestId", [None])[0]
@@ -477,6 +584,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if AUTH:
+            AUTH.shutdown()
         for session in list(SESSIONS.values()):
             session.stop()
         for session in list(SESSIONS.values()):

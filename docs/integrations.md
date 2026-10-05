@@ -1,4 +1,4 @@
-# Calendar and the local meeting guest
+# Calendar and the local meeting runner
 
 Echo Voice's Dioxus interface opens in your browser. The Rust/Axum server stores the meeting library on your computer. Turbo and speaker models run in the browser; full Large V3 uses the local native speech helper. Optional notes models run in a local provider. Connecting Google Calendar adds an external account connection for calendar metadata. Joining Google Meet connects to Google's meeting service. Recording and AI processing do not use a hosted recording provider.
 
@@ -27,7 +27,7 @@ A Google OAuth project in testing may issue refresh tokens that expire after sev
 
 ## Optional local Google Meet runner (Docker or native Linux)
 
-The runner supports **Docker Linux containers on macOS, Windows and Linux**, plus native Linux with PulseAudio, for guest-accessible Google Meet meetings. The container keeps Chromium playback and capture in its own private audio environment. Zoom, Teams, organization-only meetings and unattended scheduled joining are not implemented. The runner joins only after you choose an event and confirm participant consent. It is a visible guest named **Echo Voice - Recording**; the host must admit it when Meet requires admission.
+The runner supports **Docker Linux containers on macOS, Windows and Linux**, plus native Linux with PulseAudio, for Google Meet meetings accessible to the connected account. The container keeps Chromium playback and capture in its own private audio environment. Zoom, Teams and unattended scheduled joining are not implemented. Google account and organization policies still apply. The runner joins only after you choose an event and confirm participant consent. It joins through a separate saved browser session using the connected Calendar account. Meet displays that Google account’s identity; it does not necessarily display an Echo-specific participant name. The host must admit it when Meet requires admission.
 
 For Docker installation, shared-volume configuration, loopback publishing and the real audio smoke test, follow [runner/README.md](../runner/README.md#docker-setup-macos-windows-and-linux). Docker Desktop runs the Linux container on macOS/Windows; native ScreenCaptureKit or Windows audio drivers are unnecessary. Live meeting admission and playback still need qualification on each setup.
 
@@ -52,10 +52,18 @@ runner/.venv/bin/python runner/meet_runner.py
 
 The config initializes `dataDir`, `runner.url`, headless mode, and admission timeout. The runner and server automatically share a random secret in `<dataDir>/credentials/runner-token` with private Unix permissions. No bot token or runner URL is needed in `.env`. The native runner binds the configured `127.0.0.1` port; Docker publishes that same host loopback port while listening inside its isolated container and rejects browser-origin callers; the Rust server sends authenticated requests directly without proxies or redirects.
 
+## Runner browser sign-in
+
+After connecting Calendar and starting the runner, use **Sign in to runner** on the Calendar page. Echo shows the dedicated browser in a local dialog. Sign in to Google yourself using the displayed Calendar account, complete any Google verification, then choose **Save session**. Echo accepts the session only when it can verify the active Meet account matches Calendar. The runner also rechecks that identity immediately before each join.
+
+The session lives in the library’s private credentials directory, survives container recreation with the same data mount, and is excluded from library backups. **Sign out of runner** removes this dedicated saved session; Calendar access is managed separately. Reconnect after Google expires the session. Switching Calendar accounts does not grant the old runner session access to the new account.
+
+The login browser and recording cannot run simultaneously. Login controls and temporary screenshots use the existing authenticated loopback API through Echo’s same-origin server. There is no separately published remote-desktop port. Typed login input and screenshots are not logged or saved as review evidence. Camera and microphone remain denied. The user completes passwords, passkeys, two-factor verification and CAPTCHAs; Google can refuse automated browsers, and Echo does not bypass those restrictions.
+
 ## Recording behavior
 
-1. Connect Calendar, select a Google Meet event, acknowledge participant consent, and start the local recording guest.
-2. The guest denies camera and microphone permission before navigating to Meet. It never opens real or fake capture devices, and refuses to request entry unless both browser permission states are denied. Blocked devices may have different pre-join labels; it never clicks a control to enable them. No Google login cookies are stored or automated.
+1. Connect Calendar, sign into the runner using the same account, select a Google Meet event, acknowledge participant consent, and start the local recording participant.
+2. The guest denies camera and microphone permission before navigating to Meet. It never opens real or fake capture devices, and refuses to request entry unless both browser permission states are denied. Blocked devices may have different pre-join labels; it never clicks a control to enable them. The dedicated local profile retains the session after the user signs in. The runner checks its active account before joining; expired or mismatched sessions require reconnecting.
 3. While the host admits it, the status is **Waiting**, and no meeting audio is recorded. Admission times out after five minutes. Organization restrictions, rejection, invalid links, missing Chromium, or changed Meet controls produce a failed status.
 4. Once admitted, Chromium's playback routes to a private PulseAudio sink, separate from the user's general desktop output. FFmpeg saves that sink's monitor as mono, 16 kHz PCM WAV. Playwright's default mute-audio flag is explicitly disabled. The status becomes **Recording** only after the capture process is running.
 5. Stop the guest from Echo Voice. It leaves the call, finalizes the WAV header, and offers completed audio for import. Import saves the track into the meeting library as `meeting-bot` in deterministic 64 MB chunks. Retrying a partially completed import verifies existing chunk hashes and resumes safely; importing twice cannot duplicate it. Then use the meeting's local transcription workflow.
@@ -79,13 +87,20 @@ All routes below are on the local Rust server. The server's loopback Host and sa
 | `GET /api/integrations/google/callback` | Verify state, exchange code and store private credentials |
 | `POST /api/integrations/google/disconnect` | Delete local Google credentials |
 | `GET /api/integrations/calendar` | Upcoming primary-calendar event summaries and known meeting URLs |
+| `GET /api/integrations/runner/auth` | Saved runner account and current login state |
+| `POST /api/integrations/runner/auth` | Open a dedicated login session for the connected Calendar account |
+| `POST /api/integrations/runner/auth/finish` | Verify and save the current runner session |
+| `POST /api/integrations/runner/auth/cancel` | Close the matching interactive login session |
+| `DELETE /api/integrations/runner/auth` | Remove the dedicated saved runner profile while idle |
+| `GET /api/integrations/runner/auth/screen` | Current login screenshot for its session ID; never cached |
+| `POST /api/integrations/runner/auth/input` | Bounded click, key, text or scroll input for that login session |
 | `POST /api/integrations/bot` | Start a guest with `{meetingId,url,consent:true}` |
 | `GET /api/integrations/bot?meetingId=...` | Read real joining/waiting/recording/completed/failed state |
 | `DELETE /api/integrations/bot?meetingId=...` | Request the guest stop and finalize its audio |
 | `GET /api/integrations/bot/audio?meetingId=...` | Download a completed local WAV |
 | `POST /api/integrations/bot/import?meetingId=...` | Idempotently import a completed WAV into its saved meeting |
 
-The Python runner exposes authenticated `/health`, `/sessions`, `/sessions/:id`, and `/sessions/:id/audio` routes. Only Echo Voice's server should call them.
+The Python runner exposes authenticated `/auth` login operations, `/health`, `/sessions`, `/sessions/:id`, and `/sessions/:id/audio` routes. Only Echo Voice's server should call them.
 
 ## Verification and limits
 
@@ -102,4 +117,4 @@ A real Google OAuth authorization, Google Meet admission, and audible capture mu
 
 The Docker runner has passed receive-only browser playback and WAV capture checks on macOS with an ARM64 Docker container: camera and microphone permission remain denied while an isolated generated tone reaches the recording. This verifies the local capture pipeline.
 
-A real Google Meet test returned “You can't join this video call” before guest-name entry or an admission request, including with the test meeting temporarily allowing Open access. Google did not expose a more specific reason. Successful live Meet recording is therefore not qualified on that setup; Docker portability does not guarantee that Google accepts the dedicated anonymous browser. The runner never transfers browser login sessions, signs in automatically, or enables camera/microphone capture. Use local recording or upload an existing recording when Meet declines the guest.
+A real Google Meet test returned “You can't join this video call” before guest-name entry or an admission request, including with the test meeting temporarily allowing Open access. Google did not expose a more specific reason. Successful live Meet recording is therefore not qualified on that setup; Docker portability does not guarantee that Google accepts the dedicated anonymous browser. The new saved-session flow requires the user to sign in manually in the dedicated runner browser. It never copies another browser profile or enables camera/microphone capture. Signed-in admission remains unqualified until a real test succeeds. Use local recording or upload an existing recording when Meet declines the guest.

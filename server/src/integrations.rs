@@ -33,6 +33,9 @@ const MAX_AUDIO: usize = 512 * 1024 * 1024;
 const BOT_IMPORT_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 static TOKEN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static BOT_START_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static RUNNER_AUTH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+const MAX_RUNNER_JSON: usize = 64 * 1024;
+const MAX_AUTH_SCREEN: usize = 2 * 1024 * 1024;
 
 /// Register optional Calendar OAuth and authenticated local recorder operations.
 pub fn routes() -> Router {
@@ -51,6 +54,16 @@ pub fn routes() -> Router {
         )
         .route("/integrations/bot/audio", get(bot_audio))
         .route("/integrations/bot/import", post(bot_import))
+        .route(
+            "/integrations/runner/auth",
+            get(runner_auth_status)
+                .post(runner_auth_start)
+                .delete(runner_auth_delete),
+        )
+        .route("/integrations/runner/auth/finish", post(runner_auth_finish))
+        .route("/integrations/runner/auth/cancel", post(runner_auth_cancel))
+        .route("/integrations/runner/auth/screen", get(runner_auth_screen))
+        .route("/integrations/runner/auth/input", post(runner_auth_input))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -188,7 +201,7 @@ fn authorization() -> Result<(String, String, bool), ApiError> {
             "openid email https://www.googleapis.com/auth/calendar.readonly",
         ),
         ("access_type", "offline"),
-        ("prompt", "consent"),
+        ("prompt", "select_account consent"),
         ("state", state.state.as_str()),
         ("code_challenge_method", "S256"),
         ("code_challenge", challenge.as_str()),
@@ -288,6 +301,7 @@ async fn google_response(
 }
 /// Exchange the verified OAuth code and persist the resulting account tokens.
 async fn finish_authorization(code: &str, verifier: &str) -> Result<(), ApiError> {
+    let _auth_guard = RUNNER_AUTH_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let c = google_config();
     if !google_configured() {
@@ -320,6 +334,9 @@ async fn finish_authorization(code: &str, verifier: &str) -> Result<(), ApiError
             .await,
     )
     .await?;
+    if read_tokens()?.and_then(|t| t.email).as_deref() != profile["email"].as_str() {
+        let _ = cancel_interactive_auth().await;
+    }
     save_tokens(&Tokens {
         access_token: access.to_owned(),
         refresh_token: token["refresh_token"].as_str().map(str::to_owned),
@@ -368,13 +385,19 @@ async fn callback(headers: HeaderMap, Query(query): Query<HashMap<String, String
 }
 /// Delete saved Google credentials while retaining meeting data.
 async fn disconnect() -> Result<Json<Value>, ApiError> {
+    let _auth_guard = RUNNER_AUTH_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    // A saved browser profile remains separate from Calendar authorization.
+    // End only the interactive login; an offline runner cannot be controlled.
+    let cancelled = cancel_interactive_auth().await;
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     match fs::remove_file(credentials_file()) {
         Ok(()) => (),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
         Err(e) => return Err(e.into()),
     }
-    Ok(Json(json!({"disconnected":true})))
+    Ok(Json(
+        json!({"disconnected":true,"runnerLoginCancelled":cancelled}),
+    ))
 }
 /// Refresh expired Google access tokens under a lock and preserve the refresh credential.
 async fn access_token() -> Result<Tokens, ApiError> {
@@ -599,7 +622,9 @@ async fn runner_request(
     })?;
     if !response.status().is_success() {
         let status = response.status().as_u16();
-        let data: Value = response.json().await.unwrap_or_default();
+        let data: Value =
+            serde_json::from_slice(&bounded_runner_bytes(response, MAX_RUNNER_JSON).await?)
+                .unwrap_or_default();
         return Err(ApiError::new(
             if (400..600).contains(&status) {
                 status
@@ -620,25 +645,379 @@ async fn runner_json(
     body: Option<Value>,
     timeout: u64,
 ) -> Result<Value, ApiError> {
-    runner_request(method, endpoint, body, timeout)
-        .await?
-        .json()
+    let response = runner_request(method, endpoint, body, timeout).await?;
+    serde_json::from_slice(&bounded_runner_bytes(response, MAX_RUNNER_JSON).await?).map_err(|_| {
+        ApiError::new(
+            502,
+            "The local runner returned an invalid response. Restart it and retry.",
+        )
+    })
+}
+
+/// Bound successful and failed runner payloads before allocation or JSON decoding.
+async fn bounded_runner_bytes(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, ApiError> {
+    if response
+        .content_length()
+        .is_some_and(|size| size > limit as u64)
+    {
+        return Err(ApiError::new(
+            502,
+            "The local runner returned an oversized response.",
+        ));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|_| {
-            ApiError::new(
+        .map_err(|_| ApiError::new(502, "The local runner response was interrupted."))?
+    {
+        if chunk.len() > limit.saturating_sub(bytes.len()) {
+            return Err(ApiError::new(
                 502,
-                "The local runner returned an invalid response. Restart it and retry.",
+                "The local runner returned an oversized response.",
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+fn calendar_email() -> Result<String, ApiError> {
+    connected_email(read_tokens()?.as_ref())
+}
+
+fn connected_email(tokens: Option<&Tokens>) -> Result<String, ApiError> {
+    tokens
+        .and_then(|t| t.email.as_deref())
+        .filter(|email| !email.is_empty() && email.len() <= 254 && email.contains('@'))
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            ApiError::new(
+                401,
+                "Connect Google Calendar before signing into the recording browser.",
             )
         })
+}
+
+fn auth_matches(auth: &Value, email: Option<&str>) -> bool {
+    auth["state"] == "signed_in"
+        && email.is_some_and(|email| {
+            auth["email"]
+                .as_str()
+                .is_some_and(|actual| actual.eq_ignore_ascii_case(email))
+        })
+}
+
+fn auth_view(auth: Value, email: Option<&str>) -> Value {
+    let mut public = json!({"state": auth["state"], "accountMatches":auth_matches(&auth, email)});
+    // Never forward profile paths, cookies, browser storage or unexpected fields.
+    for key in ["email", "expectedEmail", "detail", "sessionId", "hostname"] {
+        if let Some(value) = auth[key].as_str().filter(|value| value.len() <= 1024) {
+            public[key] = json!(value);
+        }
+    }
+    public
+}
+
+fn auth_session(raw: Option<&str>) -> Result<String, ApiError> {
+    let raw =
+        raw.ok_or_else(|| ApiError::bad("A valid recording browser session ID is required."))?;
+    let parsed = Uuid::parse_str(raw)
+        .map_err(|_| ApiError::bad("A valid recording browser session ID is required."))?;
+    if parsed.to_string() != raw || parsed.get_version_num() != 4 {
+        return Err(ApiError::bad(
+            "A valid recording browser session ID is required.",
+        ));
+    }
+    Ok(raw.to_owned())
+}
+
+fn verify_auth_session(auth: &Value, session: &str, email: &str) -> Result<(), ApiError> {
+    if auth["state"] != "signing_in"
+        || auth["sessionId"] != session
+        || !auth["expectedEmail"]
+            .as_str()
+            .is_some_and(|expected| expected.eq_ignore_ascii_case(email))
+    {
+        return Err(ApiError::new(409, "The recording browser sign-in expired or belongs to a different Calendar account. Start again."));
+    }
+    Ok(())
+}
+
+fn verify_same_calendar(expected: &str) -> Result<(), ApiError> {
+    if !calendar_email()?.eq_ignore_ascii_case(expected) {
+        return Err(ApiError::new(
+            409,
+            "The connected Calendar account changed. Start recording browser sign-in again.",
+        ));
+    }
+    Ok(())
+}
+
+// Authentication payloads may contain passwords. Never reflect upstream error text.
+async fn auth_json(
+    method: Method,
+    endpoint: &str,
+    body: Option<Value>,
+    timeout: u64,
+) -> Result<Value, ApiError> {
+    runner_json(method, endpoint, body, timeout).await.map_err(|error| ApiError::new(error.status.as_u16(), "The recording browser could not complete this action. Refresh its status and retry."))
+}
+
+async fn cancel_interactive_auth() -> bool {
+    let Ok(auth) = auth_json(Method::GET, "/auth", None, 2).await else {
+        return false;
+    };
+    if auth["state"] != "signing_in" {
+        return true;
+    }
+    let Ok(session) = auth_session(auth["sessionId"].as_str()) else {
+        return false;
+    };
+    auth_json(
+        Method::POST,
+        "/auth/cancel",
+        Some(json!({"sessionId":session})),
+        35,
+    )
+    .await
+    .is_ok()
+}
+
+async fn runner_auth_status() -> Result<Json<Value>, ApiError> {
+    let email = read_tokens()?.and_then(|t| t.email);
+    Ok(Json(auth_view(
+        auth_json(Method::GET, "/auth", None, 5).await?,
+        email.as_deref(),
+    )))
+}
+
+async fn runner_auth_start(Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let _guard = RUNNER_AUTH_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let email = calendar_email()?;
+    let request = auth_start_request(&email, &body)?;
+    let auth = auth_json(Method::POST, "/auth", Some(request), 20).await?;
+    verify_same_calendar(&email)?;
+    Ok((StatusCode::ACCEPTED, Json(auth_view(auth, Some(&email)))))
+}
+
+fn auth_start_request(email: &str, body: &Value) -> Result<Value, ApiError> {
+    let mut request = json!({"email":email});
+    if let Some(session) = body.get("sessionId") {
+        request["sessionId"] = json!(auth_session(session.as_str())?);
+    }
+    Ok(request)
+}
+
+async fn runner_auth_finish(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let session = auth_session(body["sessionId"].as_str())?;
+    let _guard = RUNNER_AUTH_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .try_lock()
+        .map_err(|_| {
+            ApiError::new(
+                409,
+                "The recording browser is busy. Retry Finish sign-in shortly.",
+            )
+        })?;
+    let email = calendar_email()?;
+    let auth = auth_json(Method::GET, "/auth", None, 5).await?;
+    verify_auth_session(&auth, &session, &email)?;
+    let auth = auth_json(
+        Method::POST,
+        "/auth/finish",
+        Some(json!({"sessionId":session})),
+        48,
+    )
+    .await?;
+    verify_same_calendar(&email)?;
+    if !auth_matches(&auth, Some(&email)) {
+        return Err(ApiError::new(
+            409,
+            "Sign into the recording browser using the connected Calendar account.",
+        ));
+    }
+    Ok(Json(auth_view(auth, Some(&email))))
+}
+
+async fn runner_auth_cancel(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let session = auth_session(body["sessionId"].as_str())?;
+    // Cancellation must fence an in-flight finish/start, rather than wait for it.
+    let auth = auth_json(
+        Method::POST,
+        "/auth/cancel",
+        Some(json!({"sessionId":session})),
+        35,
+    )
+    .await?;
+    let email = read_tokens().ok().flatten().and_then(|tokens| tokens.email);
+    Ok(Json(auth_view(auth, email.as_deref())))
+}
+
+async fn runner_auth_delete() -> Result<Json<Value>, ApiError> {
+    let _guard = RUNNER_AUTH_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let auth = auth_json(Method::DELETE, "/auth", None, 20).await?;
+    let email = read_tokens().ok().flatten().and_then(|tokens| tokens.email);
+    Ok(Json(auth_view(auth, email.as_deref())))
+}
+
+async fn runner_auth_screen(
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Response, ApiError> {
+    let session = auth_session(query.get("sessionId").map(String::as_str))?;
+    let email = calendar_email()?;
+    let auth = auth_json(Method::GET, "/auth", None, 5).await?;
+    verify_auth_session(&auth, &session, &email)?;
+    let response = runner_request(
+        Method::GET,
+        &format!("/auth/screen?sessionId={session}"),
+        None,
+        10,
+    )
+    .await
+    .map_err(|error| {
+        ApiError::new(
+            error.status.as_u16(),
+            "The recording browser screen is unavailable.",
+        )
+    })?;
+    if response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        != Some("image/jpeg")
+    {
+        return Err(ApiError::new(
+            502,
+            "The recording browser returned an invalid screen.",
+        ));
+    }
+    let bytes = bounded_runner_bytes(response, MAX_AUTH_SCREEN).await?;
+    if !bytes.starts_with(&[0xff, 0xd8]) || !bytes.ends_with(&[0xff, 0xd9]) {
+        return Err(ApiError::new(
+            502,
+            "The recording browser returned an invalid screen.",
+        ));
+    }
+    verify_same_calendar(&email)?;
+    let mut response = (
+        [
+            (header::CONTENT_TYPE, "image/jpeg"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        bytes,
+    )
+        .into_response();
+    if let Some(hostname) = auth["hostname"].as_str().filter(|hostname| {
+        !hostname.is_empty()
+            && hostname.len() <= 253
+            && hostname
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
+    }) {
+        if let Ok(value) = HeaderValue::from_str(hostname) {
+            response.headers_mut().insert("x-runner-hostname", value);
+        }
+    }
+    Ok(response)
+}
+
+fn auth_input(body: &Value) -> Result<Value, ApiError> {
+    let session = auth_session(body["sessionId"].as_str())?;
+    let kind = body["type"].as_str().unwrap_or_default();
+    let mut value = json!({"sessionId":session,"type":kind});
+    match kind {
+        "click" => {
+            let x = body["x"].as_u64().filter(|x| *x < 1280).ok_or_else(|| {
+                ApiError::bad("Click coordinates are outside the recording browser.")
+            })?;
+            let y = body["y"].as_u64().filter(|y| *y < 900).ok_or_else(|| {
+                ApiError::bad("Click coordinates are outside the recording browser.")
+            })?;
+            value["x"] = json!(x);
+            value["y"] = json!(y);
+        }
+        "key" => {
+            let key = body["key"]
+                .as_str()
+                .filter(|key| {
+                    matches!(
+                        *key,
+                        "Enter"
+                            | "Tab"
+                            | "Shift+Tab"
+                            | "Backspace"
+                            | "Delete"
+                            | "Escape"
+                            | "ArrowLeft"
+                            | "ArrowRight"
+                            | "ArrowUp"
+                            | "ArrowDown"
+                            | "Home"
+                            | "End"
+                            | "PageUp"
+                            | "PageDown"
+                            | "Control+A"
+                            | "Meta+A"
+                    )
+                })
+                .ok_or_else(|| ApiError::bad("That recording browser key is not supported."))?;
+            value["key"] = json!(key);
+        }
+        "text" => {
+            let text = body["text"]
+                .as_str()
+                .filter(|text| {
+                    !text.is_empty() && text.len() <= 4096 && !text.chars().any(char::is_control)
+                })
+                .ok_or_else(|| {
+                    ApiError::bad("Enter at most 4096 bytes of text without control characters.")
+                })?;
+            value["text"] = json!(text);
+        }
+        "scroll" => {
+            let delta = body["deltaY"]
+                .as_i64()
+                .filter(|delta| (-2000..=2000).contains(delta))
+                .ok_or_else(|| {
+                    ApiError::bad("The recording browser scroll distance is invalid.")
+                })?;
+            value["deltaY"] = json!(delta);
+        }
+        _ => {
+            return Err(ApiError::bad(
+                "That recording browser input is not supported.",
+            ))
+        }
+    }
+    Ok(value)
+}
+
+async fn runner_auth_input(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let input = auth_input(&body)?;
+    let _guard = RUNNER_AUTH_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let email = calendar_email()?;
+    verify_auth_session(
+        &auth_json(Method::GET, "/auth", None, 5).await?,
+        input["sessionId"].as_str().unwrap(),
+        &email,
+    )?;
+    let _ = auth_json(Method::POST, "/auth/input", Some(input), 10).await?;
+    verify_same_calendar(&email)?;
+    Ok(Json(json!({"ok":true})))
 }
 /// Report optional Google and runner setup without returning either integration's credentials.
 async fn status() -> Result<Json<Value>, ApiError> {
     let tokens = read_tokens()?;
     let mut google = json!({"configured":google_configured(),"connected":tokens.is_some()});
-    if let Some(email) = tokens.and_then(|t| t.email) {
+    let email = tokens.and_then(|t| t.email);
+    if let Some(email) = &email {
         google["email"] = json!(email);
     }
-    let mut runner = json!({"configured":false,"reachable":false,"detail":"Optional Google Meet runner needs local setup."});
+    let mut runner = json!({"configured":false,"reachable":false,"joinReady":false,"accountMatches":false,"auth":{"state":"signed_out","accountMatches":false},"detail":"Optional Google Meet runner needs local setup."});
     match runner_config() {
         Ok((_, token)) if !token.is_empty() => {
             runner["configured"] = json!(true);
@@ -647,6 +1026,17 @@ async fn status() -> Result<Json<Value>, ApiError> {
                     runner["reachable"] = json!(true);
                     runner["ready"] = health["ready"].clone();
                     runner["detail"] = health["detail"].clone();
+                    match auth_json(Method::GET, "/auth", None, 2).await {
+                        Ok(auth) => {
+                            let matches = auth_matches(&auth, email.as_deref());
+                            runner["auth"] = auth_view(auth, email.as_deref());
+                            runner["accountMatches"] = json!(matches);
+                            runner["joinReady"] = json!(health["ready"] == true && matches);
+                        }
+                        Err(_) => {
+                            runner["auth"] = json!({"state":"error","accountMatches":false,"detail":"The recording browser status is unavailable."})
+                        }
+                    }
                 }
                 Err(error) => runner["detail"] = json!(error.message),
             }
@@ -670,6 +1060,12 @@ async fn bot_start(Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>),
     if store::get_meeting(id)?.is_none() {
         return Err(ApiError::not_found());
     }
+    let _auth_guard = RUNNER_AUTH_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let email = calendar_email()?;
+    let auth = auth_json(Method::GET, "/auth", None, 5).await?;
+    if !auth_matches(&auth, Some(&email)) {
+        return Err(ApiError::new(409, "Sign into the recording browser using the connected Calendar account before inviting it."));
+    }
     let pending = start_file(id);
     if pending.exists() {
         cancel_start(id, &pending).await?;
@@ -687,7 +1083,7 @@ async fn bot_start(Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>),
     let result = runner_json(
         Method::POST,
         "/sessions",
-        Some(json!({"meetingId":id,"requestId":request_id,"url":url,"consent":true})),
+        Some(json!({"meetingId":id,"requestId":request_id,"url":url,"consent":true,"expectedEmail":email})),
         10,
     )
     .await;
@@ -911,6 +1307,118 @@ async fn bot_import(Query(query): Query<HashMap<String, String>>) -> Result<Json
 #[cfg(test)]
 mod tests {
     use super::*;
+    const TEST_EMAIL: &str = "sublimeinnovationtechnologies@gmail.com";
+    #[test]
+    fn runner_login_uses_calendar_identity_and_fences_sessions() {
+        let session = Uuid::new_v4().to_string();
+        let request = auth_start_request(TEST_EMAIL, &json!({"email":"attacker@example.com","expectedEmail":"attacker@example.com","sessionId":session,"password":"do-not-forward"})).unwrap();
+        assert_eq!(request, json!({"email":TEST_EMAIL,"sessionId":session}));
+        assert!(auth_start_request(TEST_EMAIL, &json!({"sessionId":"../credentials"})).is_err());
+        assert!(auth_session(Some("00000000-0000-0000-0000-000000000000")).is_err());
+        let active = json!({"state":"signing_in","sessionId":session,"expectedEmail":TEST_EMAIL});
+        assert!(verify_auth_session(&active, &session, TEST_EMAIL).is_ok());
+        assert!(verify_auth_session(&active, &Uuid::new_v4().to_string(), TEST_EMAIL).is_err());
+        assert!(verify_auth_session(&active, &session, "other@example.com").is_err());
+        assert!(verify_auth_session(
+            &json!({"state":"expired","sessionId":session,"expectedEmail":TEST_EMAIL}),
+            &session,
+            TEST_EMAIL
+        )
+        .is_err());
+        assert!(connected_email(None).is_err());
+        let signed_in = json!({"state":"signed_in","email":TEST_EMAIL});
+        assert!(!auth_matches(&signed_in, None));
+        assert!(!auth_matches(&signed_in, Some("other@example.com")));
+        assert!(auth_matches(&signed_in, Some(TEST_EMAIL)));
+    }
+
+    #[test]
+    fn runner_auth_public_status_and_input_do_not_forward_private_fields() {
+        let public = auth_view(
+            json!({"state":"signed_in","email":TEST_EMAIL,"cookie":"secret","profilePath":"/credentials/private","storageState":{"token":"secret"}}),
+            Some(TEST_EMAIL),
+        );
+        assert_eq!(
+            public,
+            json!({"state":"signed_in","email":TEST_EMAIL,"accountMatches":true})
+        );
+        let session = Uuid::new_v4().to_string();
+        let text = auth_input(&json!({"sessionId":session,"type":"text","text":"manual secret input","email":"attacker@example.com","url":"file:///etc/passwd"})).unwrap();
+        assert_eq!(
+            text,
+            json!({"sessionId":session,"type":"text","text":"manual secret input"})
+        );
+        for bad in [
+            json!({"type":"click","x":1280,"y":0}),
+            json!({"type":"click","x":0,"y":900}),
+            json!({"type":"click","x":-1,"y":0}),
+            json!({"type":"key","key":"F12"}),
+            json!({"type":"text","text":"secret\nEnter"}),
+            json!({"type":"text","text":"a".repeat(4097)}),
+            json!({"type":"scroll","deltaY":2001}),
+            json!({"type":"evaluate","text":"fetch('/cookies')"}),
+        ] {
+            let mut bad = bad;
+            bad["sessionId"] = json!(session);
+            assert!(auth_input(&bad).is_err());
+        }
+        assert!(auth_input(&json!({"sessionId":session,"type":"key","key":"Shift+Tab"})).is_ok());
+    }
+
+    async fn mock_response(raw: Vec<u8>) -> reqwest::Response {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                assert!(request.len() < 4096);
+                request.push(socket.read_u8().await.unwrap());
+            }
+            let _ = socket.write_all(&raw).await;
+        });
+        Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn runner_proxy_bounds_declared_and_chunked_responses() {
+        let response = mock_response(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                MAX_AUTH_SCREEN + 1
+            )
+            .into_bytes(),
+        )
+        .await;
+        assert_eq!(
+            bounded_runner_bytes(response, MAX_AUTH_SCREEN)
+                .await
+                .unwrap_err()
+                .status,
+            StatusCode::BAD_GATEWAY
+        );
+        let response = mock_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n4\r\nabcd\r\n4\r\nefgh\r\n0\r\n\r\n".to_vec()).await;
+        assert!(bounded_runner_bytes(response, 7).await.is_err());
+        let response = mock_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n\xff\xd8\xff\xd9"
+                .to_vec(),
+        )
+        .await;
+        assert_eq!(
+            bounded_runner_bytes(response, MAX_AUTH_SCREEN)
+                .await
+                .unwrap(),
+            [0xff, 0xd8, 0xff, 0xd9]
+        );
+    }
     #[test]
     fn state_requires_matching_fresh_cookie() {
         let value = OAuthState {

@@ -8,6 +8,7 @@ import { once } from 'node:events';
 import { resolve, join } from 'node:path';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const fixtureEmail = 'sublimeinnovationtechnologies@gmail.com';
 
 /** Allocate an independent loopback listener without touching a developer's running server. */
 async function freePort() {
@@ -32,6 +33,10 @@ async function harness(t, mode = 'success') {
     const token = await readFile(join(data, 'credentials/runner-token'), 'utf8');
     assert.equal(request.headers.authorization, `Bearer ${token}`);
     const reply = (code, value) => { response.writeHead(code, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(value)); };
+    if (request.method === 'GET' && url.pathname === '/auth') {
+      reply(200, { state: 'signed_in', email: mode === 'mismatched-auth' ? 'wrong-account@example.invalid' : fixtureEmail });
+      return;
+    }
     if (request.method === 'POST') {
       const session = { meetingId: body.meetingId, requestId: body.requestId, status: 'joining' };
       sessions.set(body.meetingId, session);
@@ -54,6 +59,12 @@ async function harness(t, mode = 'success') {
   const config = JSON.parse(await readFile('echo.config.json'));
   config.runner.url = `http://127.0.0.1:${runner.address().port}`;
   const configFile = join(root, 'echo.config.json'); await writeFile(configFile, JSON.stringify(config));
+  // Synthetic credentials establish local account ownership only. These tokens
+  // are never sent to Google; the controlled runner cannot join any meeting.
+  if (mode !== 'disconnected') {
+    await mkdir(join(data, 'credentials'), { recursive: true, mode: 0o700 });
+    await writeFile(join(data, 'credentials/google.json'), JSON.stringify({ access_token: 'synthetic-unused-token', refresh_token: null, expires_at: Date.now() + 3600000, email: fixtureEmail }), { mode: 0o600 });
+  }
   let child; let logs = '';
   const stop = async () => {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
@@ -115,13 +126,14 @@ test('recording acceptance publishes a stable start ID and shares a generated cr
   const token = await readFile(join(h.data, 'credentials/runner-token'), 'utf8');
   const pythonToken = execFileSync('python3', ['-c', 'import sys; sys.path.insert(0,"runner"); from config import runner_token; from pathlib import Path; print(runner_token(Path(sys.argv[1])))', h.data], { encoding: 'utf8' }).trim();
   assert.equal(pythonToken, token);
+  assert.equal(h.calls.find(call => call.method === 'POST' && call.path === '/sessions').body.expectedEmail, fixtureEmail);
 });
 
 /** A lost acceptance response must stop the same attempt before reporting failure. */
 test('lost recording-start response triggers an authenticated scoped cancellation', async t => {
   const h = await harness(t, 'lost-response'); await h.startBot(503);
   assert.equal(h.sessions.get(h.meeting.id).status, 'stopping');
-  assert.equal(h.calls.at(-1).requestId, h.calls[0].body.requestId);
+  assert.equal(h.calls.at(-1).requestId, h.calls.find(call => call.method === 'POST' && call.path === '/sessions').body.requestId);
   await assert.rejects(access(join(h.data, 'bot-starts', `${h.meeting.id}.json`)));
 });
 
@@ -154,12 +166,33 @@ test('server restart reconciles an ambiguous recording start before serving requ
   await assert.rejects(access(join(h.data, 'bot-starts', `${h.meeting.id}.json`)));
 });
 
-/** No guest may start when its durable reservation cannot be saved. */
-test('failure to persist a start reservation prevents contacting the runner', async t => {
+/** Reading account status must never start a bot when reservation persistence fails. */
+test('failure to persist a start reservation prevents starting the runner', async t => {
   const h = await harness(t);
   await writeFile(join(h.data, 'bot-starts'), 'Fixture storage obstruction');
   await h.startBot(500);
-  assert.equal(h.calls.length, 0);
+  assert.equal(h.calls.filter(call => call.method === 'POST').length, 0);
+});
+
+/** A saved profile for another account cannot reserve or join a recording. */
+test('mismatched dedicated browser account prevents a recording start', async t => {
+  const h = await harness(t, 'mismatched-auth');
+  await h.startBot(409);
+  assert.equal(h.calls.filter(call => call.method === 'POST').length, 0);
+  await assert.rejects(access(join(h.data, 'bot-starts', `${h.meeting.id}.json`)));
+});
+
+/** Disconnecting Calendar removes ownership even if a runner profile remains saved. */
+test('disconnected Calendar cannot authorize a saved recording browser', async t => {
+  const h = await harness(t);
+  const disconnected = await h.api('/integrations/google/disconnect', 'POST', {});
+  assert.equal(disconnected.disconnected, true);
+  assert.equal(disconnected.runnerLoginCancelled, true);
+  const previousCalls = h.calls.length;
+  await h.startBot(401);
+  assert.equal(h.calls.length, previousCalls);
+  assert.equal(h.calls.filter(call => call.method === 'DELETE' && call.path === '/auth').length, 0);
+  await assert.rejects(access(join(h.data, 'bot-starts', `${h.meeting.id}.json`)));
 });
 
 /** An offline runner returning later is reconciled without requiring another user action. */

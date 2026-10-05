@@ -126,7 +126,7 @@ Whichever option you use, check the notes before sharing them. Names, decisions,
 
 Google Calendar and Google Meet need extra setup. This version doesn't provide a one-click hosted meeting bot.
 
-The Calendar connection brings your meeting details into Echo. A separate local recording program, run in Docker on macOS/Windows/Linux or directly on Linux, can join a selected Google Meet as a visible guest. The host may need to let it in. After stopping the guest, choose **Save recording** to bring its audio into Echo.
+The Calendar connection brings your meeting details into Echo. A separate local recording program, run in Docker on macOS/Windows/Linux or directly on Linux, can join a selected Google Meet using a saved browser session for the connected Google account. Use **Sign in to runner** on the Calendar page and complete Google sign-in once. The host may still need to admit that participant. After stopping the guest, choose **Save recording** to bring its audio into Echo.
 
 You'll need to [configure Google Calendar](docs/integrations.md#google-calendar-connection) and [set up the meeting recording program](runner/README.md). These steps involve Google developer settings and additional software; ask someone comfortable with those tools to help if needed. Keep both programs running during the meeting.
 

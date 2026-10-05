@@ -126,7 +126,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(options["channel"], "chromium")
                 self.assertIn("--mute-audio", options["ignore_default_args"])
                 self.assertEqual(options["env"]["PULSE_SINK"], "private-fixture")
-                self.assertEqual(options["headless"], container)
+                self.assertFalse(options["headless"], "Dedicated account recordings use headed Chromium even inside Docker")
                 self.assertNotIn("--use-fake-device-for-media-stream", options["args"])
                 self.assertNotIn("--use-fake-ui-for-media-stream", options["args"])
                 self.assertIn("--deny-permission-prompts", options["args"])
@@ -323,14 +323,14 @@ class RunnerTests(unittest.TestCase):
                 with urlopen(Request(base + endpoint, method=method, data=data, headers={"Authorization": "Bearer test-token", "Content-Type": "application/json"}), timeout=5) as response:
                     return json.loads(response.read())
 
-            payload = {"meetingId": "meeting-1", "requestId": "start-1", "url": "https://meet.google.com/abc-defg-hij", "consent": True}
+            payload = {"meetingId": "meeting-1", "requestId": "start-1", "url": "https://meet.google.com/abc-defg-hij", "consent": True, "expectedEmail": "fixture@example.com"}
             try:
                 original_init = runner.Session.__init__
                 def fixture_init(session, *args):
                     """Keep real state persistence but replace only the guest thread."""
                     original_init(session, *args)
                     session.thread = Mock()
-                with patch.object(runner.Session, "__init__", fixture_init):
+                with patch.object(runner.Session, "__init__", fixture_init), patch.object(runner, "AUTH", SimpleNamespace(recording_lease=lambda _email: Mock())):
                     first = request("POST", "/sessions", payload)
                     second = request("POST", "/sessions", payload)
                     self.assertEqual(first["requestId"], second["requestId"])

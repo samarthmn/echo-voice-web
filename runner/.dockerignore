@@ -3,6 +3,7 @@
 !config.py
 !capture.py
 !meet_ui.py
+!meet_auth.py
 !meet_runner.py
 !container-entrypoint.sh
 !audio_smoke.py
