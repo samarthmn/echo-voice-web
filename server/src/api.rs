@@ -28,6 +28,7 @@ pub fn routes() -> Router {
         .route("/health", get(health))
         .route("/meetings", get(list).post(create))
         .route("/meetings/{id}", get(read).patch(update).delete(delete))
+        .route("/processing/heartbeat", post(processing_heartbeat))
         .route(
             "/meetings/{id}/audio",
             post(upload).layer(DefaultBodyLimit::max(130 * 1024 * 1024)),
@@ -82,6 +83,25 @@ async fn read(Path(id): Path<String>) -> ApiResult<Json<Value>> {
 /// Apply an allowlisted meeting patch through the store.
 async fn update(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(store::update_meeting(&id, payload(value)?)?))
+}
+/// Restore only restarted status markers claimed by still-running browser jobs.
+async fn processing_heartbeat(value: Payload) -> ApiResult<Json<Value>> {
+    let body = payload(value)?;
+    let ids = body["meetingIds"]
+        .as_array()
+        .filter(|ids| !ids.is_empty() && ids.len() <= 100)
+        .ok_or_else(|| ApiError::bad("Supply between one and 100 active browser meeting IDs."))?;
+    let ids: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| ApiError::bad("Active meeting IDs must be strings."))
+        })
+        .collect::<ApiResult<_>>()?;
+    Ok(Json(
+        json!({"restored": store::resume_browser_processing(&ids)?}),
+    ))
 }
 /// Remove an inactive meeting and return a deletion acknowledgement.
 async fn delete(Path(id): Path<String>) -> ApiResult<Json<Value>> {

@@ -120,6 +120,8 @@ fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
 pub fn init() -> Result<()> {
     with_db(|_| Ok(()))
 }
+/// Identify the restart marker that a still-running browser worker can reconcile.
+const PROCESSING_RESTART_ERROR: &str = "Processing was interrupted by a server restart. Saved audio and earlier results are safe; retry processing.";
 /// Resume durable deletion jobs and mark unfinished recording or processing work as interrupted.
 fn recover(db: &mut Connection) -> Result<()> {
     let pending = {
@@ -162,7 +164,7 @@ fn recover(db: &mut Connection) -> Result<()> {
                 let processing = meeting["status"] == "processing";
                 meeting["status"] = json!(if processing { "error" } else { "interrupted" });
                 meeting["error"] = json!(if processing {
-                    "Processing was interrupted by a server restart. Saved audio and earlier results are safe; retry processing."
+                    PROCESSING_RESTART_ERROR
                 } else {
                     "Recording was interrupted. Review your saved audio or start a new recording after checking consent and microphone access."
                 });
@@ -707,6 +709,29 @@ pub fn list_meetings() -> Result<Vec<Value>> {
 /// Validate the meeting ID and return its current persisted document if present.
 pub fn get_meeting(key: &str) -> Result<Option<Value>> {
     with_db(|db| read_meeting(db, key))
+}
+/// Atomically reconcile only restart errors; late heartbeats cannot undo completed transcripts.
+pub fn resume_browser_processing(ids: &[String]) -> Result<Vec<String>> {
+    for key in ids {
+        valid_id(key)?;
+    }
+    with_db(|db| {
+        let tx = db.transaction()?;
+        let mut restored = Vec::new();
+        for key in ids {
+            let Some(mut meeting) = read_meeting(&tx, key)? else {
+                continue;
+            };
+            if meeting["status"] == "error" && meeting["error"] == PROCESSING_RESTART_ERROR {
+                meeting["status"] = json!("processing");
+                meeting.as_object_mut().unwrap().remove("error");
+                save(&tx, &mut meeting)?;
+                restored.push(key.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(restored)
+    })
 }
 /// Define initial workspace preferences for local speech and notes processing.
 fn defaults() -> Value {
@@ -2079,8 +2104,50 @@ mod tests {
             Some(0)
         )
         .is_err());
+        // A browser worker can survive a server restart. Reconcile only its
+        // claimed meeting, leaving genuinely abandoned jobs interrupted.
+        let orphan = create_meeting(
+            json!({"title":"Abandoned server work","mode":"in-person","consent":true}),
+        )
+        .unwrap();
+        let orphan_id = orphan["id"].as_str().unwrap();
+        update_meeting(key, json!({"status":"processing"})).unwrap();
+        update_meeting(orphan_id, json!({"status":"processing"})).unwrap();
+        with_db(recover).unwrap();
+        assert_eq!(get_meeting(key).unwrap().unwrap()["status"], "error");
+        assert_eq!(resume_browser_processing(&[key.into()]).unwrap(), vec![key]);
+        assert_eq!(get_meeting(key).unwrap().unwrap()["status"], "processing");
+        assert!(get_meeting(key).unwrap().unwrap().get("error").is_none());
+        assert_eq!(get_meeting(orphan_id).unwrap().unwrap()["status"], "error");
+        update_meeting(
+            key,
+            json!({"status":"error","error":"The speech runtime failed."}),
+        )
+        .unwrap();
+        assert!(resume_browser_processing(&[key.into()]).unwrap().is_empty());
+        assert_eq!(
+            get_meeting(key).unwrap().unwrap()["error"],
+            "The speech runtime failed."
+        );
+        update_meeting(
+            key,
+            json!({"status":"error","error":PROCESSING_RESTART_ERROR}),
+        )
+        .unwrap();
+        delete_meeting(orphan_id).unwrap();
+        assert!(resume_browser_processing(&["../../credentials".into()]).is_err());
         add_vocabulary(json!({"term":"Echo Voice","aliases":["echo boys"]})).unwrap();
         let first=add_transcript(key,json!({"model":"whisper-tiny.en","passages":[{"id":"p1","start":0,"end":2,"speaker":"Speaker 1","text":"Ship Friday."}]})).unwrap();
+        assert_eq!(first["status"], "ready");
+        assert!(first.get("error").is_none());
+        assert!(resume_browser_processing(&[key.into()]).unwrap().is_empty());
+        assert_eq!(
+            get_meeting(key).unwrap().unwrap()["transcripts"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         let first_id = first["activeTranscriptId"].clone();
         add_notes(key,json!({"model":"qwen2.5:3b","transcriptVersionId":first_id,"summary":[{"id":"s1","text":"A Friday release was proposed.","passageIds":["p1"]}],"decisions":[],"actions":[]})).unwrap();
         assert!(add_notes(key,json!({"model":"model","transcriptVersionId":first_id,"summary":[{"id":"s2","text":"Invented","passageIds":["missing"]}],"decisions":[],"actions":[]})).is_err());

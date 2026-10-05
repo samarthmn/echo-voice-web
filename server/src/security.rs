@@ -77,6 +77,21 @@ impl From<serde_json::Error> for ApiError {
     }
 }
 
+/// Allow isolated local documents and workers to use SharedArrayBuffer for ONNX CPU threads.
+/// Remote model files are fetched using CORS; OAuth uses top-level navigation without an opener.
+pub async fn browser_isolation(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        "cross-origin-opener-policy",
+        header::HeaderValue::from_static("same-origin"),
+    );
+    response.headers_mut().insert(
+        "cross-origin-embedder-policy",
+        header::HeaderValue::from_static("require-corp"),
+    );
+    response
+}
+
 /// Protects reads from DNS rebinding and changes from hostile browser origins.
 /// The listener is loopback-only; these checks additionally protect browser requests.
 pub async fn local_access(request: Request, next: Next) -> Response {
@@ -142,6 +157,96 @@ mod tests {
     use super::*;
     use axum::{body::Body, routing::get, Router};
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn documents_workers_and_wasm_receive_isolation_without_changing_content_types() {
+        let app = Router::new()
+            .route(
+                "/",
+                get(|| async { ([(header::CONTENT_TYPE, "text/html")], "workspace") }),
+            )
+            .route(
+                "/js/inference-worker.js",
+                get(|| async { ([(header::CONTENT_TYPE, "text/javascript")], "worker") }),
+            )
+            .route(
+                "/wasm/runtime.wasm",
+                get(|| async { ([(header::CONTENT_TYPE, "application/wasm")], "wasm") }),
+            )
+            .layer(axum::middleware::from_fn(browser_isolation));
+        for (path, content_type) in [
+            ("/", "text/html"),
+            ("/js/inference-worker.js", "text/javascript"),
+            ("/wasm/runtime.wasm", "application/wasm"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers()["cross-origin-opener-policy"],
+                "same-origin"
+            );
+            assert_eq!(
+                response.headers()["cross-origin-embedder-policy"],
+                "require-corp"
+            );
+            assert_eq!(response.headers()[header::CONTENT_TYPE], content_type);
+        }
+    }
+
+    #[tokio::test]
+    async fn isolated_oauth_callback_still_accepts_navigation_and_preserves_redirect_cookie() {
+        let app = Router::new()
+            .route(
+                "/api/integrations/google/callback",
+                get(|| async {
+                    (
+                        StatusCode::FOUND,
+                        [
+                            (header::LOCATION, "/"),
+                            (
+                                header::SET_COOKIE,
+                                "oauth_state=; Max-Age=0; HttpOnly; SameSite=Lax",
+                            ),
+                        ],
+                    )
+                }),
+            )
+            .layer(axum::middleware::from_fn(local_access))
+            .layer(axum::middleware::from_fn(browser_isolation));
+        let navigation = Request::builder()
+            .uri("/api/integrations/google/callback")
+            .header("host", "localhost:3000")
+            .header("sec-fetch-site", "cross-site")
+            .header("sec-fetch-mode", "navigate")
+            .header("sec-fetch-dest", "document")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(navigation).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FOUND);
+        assert_eq!(response.headers()[header::LOCATION], "/");
+        assert!(response.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("HttpOnly"));
+        assert_eq!(
+            response.headers()["cross-origin-opener-policy"],
+            "same-origin"
+        );
+        let fetch = Request::builder()
+            .uri("/api/integrations/google/callback")
+            .header("host", "localhost:3000")
+            .header("sec-fetch-site", "cross-site")
+            .header("sec-fetch-mode", "cors")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.oneshot(fetch).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+    }
     #[tokio::test]
     async fn oauth_navigation_allows_canonical_localhost_redirect_but_not_fetch() {
         let app = Router::new()
