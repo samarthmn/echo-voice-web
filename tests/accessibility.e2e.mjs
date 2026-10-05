@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 const base = process.env.ECHO_E2E_URL || 'http://127.0.0.1:3000';
-const screenshots = process.env.ECHO_AUDIT_SCREENSHOTS || '/tmp/echo-accessibility';
+const screenshots = process.env.ECHO_AUDIT_SCREENSHOTS || path.resolve('tmp/echo-accessibility');
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1050 }, reducedMotion: 'reduce' });
 const page = await context.newPage();

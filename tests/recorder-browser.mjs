@@ -9,8 +9,7 @@ import { createServer as createPortReservation } from 'node:net';
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { access, mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -21,7 +20,8 @@ await access(binary);
 await access(resolve(project, 'public/js/bridge.js'));
 const port = Number(process.env.ECHO_TEST_PORT || 3012);
 const origin = `http://127.0.0.1:${port}`;
-const dataDirectory = await mkdtemp(resolve(tmpdir(), 'echo-recorder-e2e-'));
+await mkdir(resolve(project, 'tmp'), { recursive: true });
+const dataDirectory = await mkdtemp(resolve(project, 'tmp', 'echo-recorder-e2e-'));
 const server = spawn(binary, [], {
   cwd: project,
   env: { ...process.env, ECHO_BIND: `127.0.0.1:${port}`, ECHO_DATA_DIR: dataDirectory },

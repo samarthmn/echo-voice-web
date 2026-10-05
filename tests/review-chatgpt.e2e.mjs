@@ -7,13 +7,14 @@
  * No ChatGPT sign-in, model inference, or external network request is permitted.
  */
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 const base = (process.env.ECHO_TEST_URL || 'http://127.0.0.1:3013').replace(/\/$/, '');
 const origin = new URL(base).origin;
-const artifacts = process.env.ECHO_CHATGPT_TEST_ARTIFACTS || '/tmp/echo-review-chatgpt-e2e';
+const artifacts = process.env.ECHO_CHATGPT_TEST_ARTIFACTS || path.resolve('tmp/echo-review-chatgpt-e2e');
 const request = async (path, method = 'GET', body) => {
   const response = await fetch(`${base}/api${path}`, {
     method,

@@ -2,13 +2,13 @@ import { createServer as createPortReservation } from 'node:net';
 // Run after cargo build -p echo-server and npm run build:assets.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from '@playwright/test';
 
-const data = await mkdtemp(join(tmpdir(), 'echo-import-browser-'));
+await mkdir(join(process.cwd(), 'tmp'), { recursive: true });
+const data = await mkdtemp(join(process.cwd(), 'tmp', 'echo-import-browser-'));
 const reservation=createPortReservation();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const freePort=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
 const port = process.env.ECHO_IMPORT_TEST_PORT || String(freePort);
 const origin = `http://127.0.0.1:${port}`;

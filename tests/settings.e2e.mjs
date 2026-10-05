@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { readFile, mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 
 // Run against a fresh local data directory, for example:
-// ECHO_DATA_DIR=/tmp/echo-settings-e2e ECHO_BIND=127.0.0.1:3011 ./target/debug/echo-server
+// ECHO_DATA_DIR="$PWD/tmp/echo-settings-e2e" ECHO_BIND=127.0.0.1:3011 ./target/debug/echo-server
 // ECHO_E2E_URL=http://127.0.0.1:3011 node tests/settings.e2e.mjs
 const baseURL = process.env.ECHO_E2E_URL || 'http://127.0.0.1:3011';
-const screenshotDir = process.env.ECHO_E2E_SCREENSHOTS || '/tmp/echo-settings-screenshots';
+const screenshotDir = process.env.ECHO_E2E_SCREENSHOTS || path.resolve('tmp/echo-settings-screenshots');
 
 test('Settings persist local preferences, vocabulary, backups, and explicit microphone access', { timeout: 120_000 }, async (t) => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
