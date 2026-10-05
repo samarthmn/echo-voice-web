@@ -38,7 +38,7 @@ pub fn ActionButton(
         button {
             class: "button {variant} {size} {width} {class}",
             id,
-            r#type: button_type,
+            r#type: button_type.unwrap_or_else(|| "button".into()),
             aria_label,
             disabled,
             onclick: move |event| { if let Some(handler) = onclick { handler.call(event); } },

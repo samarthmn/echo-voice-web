@@ -168,8 +168,9 @@ class RunnerTests(unittest.TestCase):
             context = Mock()
             context.__enter__ = Mock(return_value=SimpleNamespace(chromium=SimpleNamespace(executable_path=str(executable))))
             context.__exit__ = Mock(return_value=False)
-            module = SimpleNamespace(sync_playwright=lambda: context)
-            with patch.dict(sys.modules, {"playwright.sync_api": module}), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner.shutil, "which", return_value="fixture"), patch.object(runner.Path, "exists", return_value=True), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+            factory = Mock(return_value=context)
+            module = SimpleNamespace(sync_playwright=factory)
+            with patch.dict(sys.modules, {"playwright.sync_api": module}), patch.object(runner, "CHROMIUM_EXECUTABLE", None), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner.shutil, "which", return_value="fixture"), patch.object(runner.Path, "exists", return_value=True), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
                 ready, detail = runner.readiness()
                 self.assertFalse(ready)
                 self.assertIn("install chromium", detail)
@@ -178,6 +179,36 @@ class RunnerTests(unittest.TestCase):
                 self.assertFalse(runner.readiness()[0])
                 executable.chmod(0o700)
                 self.assertTrue(runner.readiness()[0])
+                self.assertEqual(factory.call_count, 3, "Missing or non-executable paths must not be cached")
+                self.assertTrue(runner.readiness()[0])
+                self.assertEqual(factory.call_count, 3, "Health/start checks should reuse the verified browser path")
+                executable.chmod(0o600)
+                self.assertFalse(runner.readiness()[0])
+                self.assertIsNone(runner.CHROMIUM_EXECUTABLE)
+                executable.chmod(0o700)
+                self.assertTrue(runner.readiness()[0])
+                self.assertEqual(factory.call_count, 4, "A restored installation can be verified again")
+                executable.unlink()
+                self.assertFalse(runner.readiness()[0], "Removing a cached browser must invalidate readiness")
+                self.assertIsNone(runner.CHROMIUM_EXECUTABLE)
+
+    def test_failed_browser_discovery_is_retried(self):
+        """A temporary Playwright inspection failure cannot poison future health checks."""
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root:
+            executable = Path(root) / "chromium"
+            executable.write_text("fixture")
+            executable.chmod(0o700)
+            context = Mock()
+            context.__enter__ = Mock(side_effect=[RuntimeError("fixture failure"), SimpleNamespace(chromium=SimpleNamespace(executable_path=str(executable)))])
+            context.__exit__ = Mock(return_value=False)
+            factory = Mock(return_value=context)
+            with patch.dict(sys.modules, {"playwright.sync_api": SimpleNamespace(sync_playwright=factory)}), patch.object(runner, "CHROMIUM_EXECUTABLE", None), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner.shutil, "which", return_value="fixture"), patch.object(runner.Path, "exists", return_value=True), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+                ready, detail = runner.readiness()
+                self.assertFalse(ready)
+                self.assertIn("could not be checked", detail)
+                self.assertIsNone(runner.CHROMIUM_EXECUTABLE)
+                self.assertTrue(runner.readiness()[0])
+                self.assertEqual(factory.call_count, 2)
 
     def test_container_bind_is_explicit_and_keeps_native_loopback(self):
         """The broader container listener cannot be selected by ordinary native CLI invocation."""

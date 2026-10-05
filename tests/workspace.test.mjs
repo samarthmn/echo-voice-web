@@ -7,14 +7,16 @@ const files = await import('../web/files.js');
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
 test('notes pulls retain streamed progress across page visits and reuse one active request', async () => {
-  let stream, requests = 0;
-  globalThis.fetch = async () => {
-    requests++;
+  let stream;
+  const requests = [];
+  globalThis.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body).model);
     return new Response(new ReadableStream({ start(controller) { stream = controller; } }));
   };
   const pull = notes.downloadModel('qwen2.5:3b');
   try {
-  assert.equal(notes.downloadModel('other-model'), pull);
+  assert.equal(notes.downloadModel('qwen2.5:3b'), pull);
+  await assert.rejects(notes.downloadModel('other-model'), /Wait for qwen2\.5:3b to finish/);
   await turn();
   stream.enqueue(new TextEncoder().encode('{"status":"pulling weights","completed":57,"total":100}\n'));
   await turn();
@@ -25,7 +27,15 @@ test('notes pulls retain streamed progress across page visits and reuse one acti
   stream.enqueue(new TextEncoder().encode('cess"}'));
   stream.close();
   await pull;
-  assert.equal(requests, 1);
+  assert.deepEqual(requests, ['qwen2.5:3b']);
+  assert.equal(notes.getDownloadState().status, 'completed');
+  const retry = notes.downloadModel('other-model');
+  await turn();
+  assert.deepEqual(requests, ['qwen2.5:3b', 'other-model']);
+  stream.enqueue(new TextEncoder().encode('{"status":"success"}\n'));
+  stream.close();
+  await retry;
+  assert.equal(notes.getDownloadState().model, 'other-model');
   assert.equal(notes.getDownloadState().status, 'completed');
   } finally {
     try { stream?.close(); } catch { /* The successful path already closes it. */ }

@@ -16,6 +16,11 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def write_utf8(path, text):
+    # Explicit UTF-8 and LF bytes keep reference checksums stable on Windows.
+    path.write_bytes(text.encode("utf-8"))
+
+
 def main():
     scratch = ROOT / "tmp"
     target = ROOT / "tests/fixtures/ami"
@@ -52,9 +57,9 @@ def main():
             words.sort(key=lambda word: (word["start"], word["end"], word["speaker"]))
             assert words, f"Missing reference for {case}"
             reference = target / f"{case}-60-210.reference.txt"
-            reference.write_text(" ".join(word["text"] for word in words) + "\n")
+            write_utf8(reference, " ".join(word["text"] for word in words) + "\n")
             timing = target / f"{case}-60-210.reference.json"
-            timing.write_text(json.dumps(words, indent=2, ensure_ascii=False) + "\n")
+            write_utf8(timing, json.dumps(words, indent=2, ensure_ascii=False) + "\n")
             manifest["cases"].append({"id": case, "sourceAudioUrl":
                 f"https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/{case}/audio/{case}.Mix-Headset.wav",
                 "sourceAudioSha256": digest(source), "startSeconds": START, "endSeconds": END,
@@ -62,8 +67,9 @@ def main():
                 "referenceSha256": digest(reference), "timedReference": timing.name,
                 "timedReferenceSha256": digest(timing), "referenceAnnotations": len(words),
                 "speakers": sorted({word["speaker"] for word in words})})
-    (target / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (target / "LICENSE.txt").write_text("\n".join(line.rstrip() for line in (scratch / "ami-CCBY4.0.txt").read_text().splitlines()).rstrip() + "\n")
+    write_utf8(target / "manifest.json", json.dumps(manifest, indent=2) + "\n")
+    license_text = (scratch / "ami-CCBY4.0.txt").read_text(encoding="utf-8")
+    write_utf8(target / "LICENSE.txt", "\n".join(line.rstrip() for line in license_text.splitlines()).rstrip() + "\n")
     print(json.dumps(manifest, indent=2))
 
 

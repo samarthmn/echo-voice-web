@@ -44,20 +44,21 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     fixtures = ROOT / "tests/fixtures/ami"
-    manifest = json.loads((fixtures / "manifest.json").read_text())
+    manifest = json.loads((fixtures / "manifest.json").read_text(encoding="utf-8"))
     case = next(item for item in manifest["cases"] if item["id"] == args.case)
     for name, checksum in (("audio", "audioSha256"), ("reference", "referenceSha256")):
         assert hashlib.sha256((fixtures / case[name]).read_bytes()).hexdigest() == case[checksum]
-    meeting = json.loads(args.meeting_json.read_text())
+    meeting = json.loads(args.meeting_json.read_text(encoding="utf-8"))
     version = next(item for item in meeting["transcripts"] if item["id"] == meeting["activeTranscriptId"])
     hypothesis = " ".join(item["text"] for item in version["passages"])
-    reference = tokens((fixtures / case["reference"]).read_text())
+    reference = tokens((fixtures / case["reference"]).read_text(encoding="utf-8"))
     actual = tokens(hypothesis)
     assert reference and version["passages"], "A failed inference is not an accuracy result"
     counts = word_errors(reference, actual)
     wer = sum(counts.values()) / len(reference)
     result = {"case": args.case, "durationSeconds": case["endSeconds"] - case["startSeconds"],
-              "sourceAudioSha256": case["audioSha256"], "referenceSha256": case["referenceSha256"],
+              "sourceAudioSha256": case["sourceAudioSha256"], "audioSha256": case["audioSha256"],
+              "referenceSha256": case["referenceSha256"],
               "meetingId": meeting["id"], "transcriptVersionId": version["id"], "model": version["model"],
               "createdAt": version["createdAt"], "referenceWords": len(reference),
               "hypothesisWords": len(actual), **counts, "wordErrorRate": wer,
@@ -66,7 +67,8 @@ def main():
               "normalization": "NFKC, lowercase, punctuation removed, apostrophes preserved; fillers retained",
               "hypothesis": hypothesis}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
+    # Write UTF-8 bytes so Windows newline translation cannot change the artifact.
+    args.output.write_bytes((json.dumps(result, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     print(json.dumps({key: value for key, value in result.items() if key != "hypothesis"}, indent=2))
 
 

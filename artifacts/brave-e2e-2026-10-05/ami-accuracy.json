@@ -1,5 +1,5 @@
 {
-  "protocol": "AMI three independent headset-mix excerpts, 60\u2013210 seconds; references provided only after actual audio inference",
+  "protocol": "AMI three independent headset-mix excerpts, 60–210 seconds; references provided only after actual audio inference",
   "model": "onnx-community/whisper-large-v3-turbo",
   "checkpoint": "onnx-community/whisper-large-v3-turbo_timestamped",
   "revision": "b3f77bf9a8c4d5ea3415827033d1ffea7955fd9a",
@@ -12,7 +12,8 @@
     {
       "case": "ES2002a",
       "durationSeconds": 150.0,
-      "sourceAudioSha256": "7e7a345be8cb5258ceb8aed005bde2b6a2971ab4aa6c49941c8037f9823da8c1",
+      "sourceAudioSha256": "9c76866990fcc8b84006dc32d273ad99df439090b748ebe72103bb78c3216ee7",
+      "audioSha256": "7e7a345be8cb5258ceb8aed005bde2b6a2971ab4aa6c49941c8037f9823da8c1",
       "referenceSha256": "a690c059ba64919749e26bc16af327d739ed89e6695fef413f101d6323c258de",
       "meetingId": "863db8d3-9a73-4a1b-9351-d77e84163032",
       "transcriptVersionId": "70a6aa1e-6fe3-45d5-be86-0a2535905f6e",
@@ -41,7 +42,8 @@
     {
       "case": "ES2003a",
       "durationSeconds": 150.0,
-      "sourceAudioSha256": "4aa79f1cfd47ad9000e5a3601e4ae4ad91508f6860a70cba8a8199a0c3e2be18",
+      "sourceAudioSha256": "41cf861afafc20e70061c6cc82b2cb1c620d630be6d13361da928f04fc00beea",
+      "audioSha256": "4aa79f1cfd47ad9000e5a3601e4ae4ad91508f6860a70cba8a8199a0c3e2be18",
       "referenceSha256": "764f5b455947cce25a13bc6feaf154bdc26cee1e725660c68ac838349205fa45",
       "meetingId": "36d2828b-1301-4560-a4e1-f5dfbfe0c1db",
       "transcriptVersionId": "6bdca978-32e9-4ccb-98c4-fb366269a7b2",
@@ -67,7 +69,8 @@
     {
       "case": "ES2004a",
       "durationSeconds": 150.0,
-      "sourceAudioSha256": "725449be686290f80dd546a28365adc635d765f0ac46ec9c8c9c8a77c63b26e6",
+      "sourceAudioSha256": "3e2560b19bee6952c7c7ce041b0f1ea8a7ea9468044c4eea79d2a2c67e24ab0f",
+      "audioSha256": "725449be686290f80dd546a28365adc635d765f0ac46ec9c8c9c8a77c63b26e6",
       "referenceSha256": "9c5c3ccea9a32c6ff448d2a2d1a735ad06ec4f898de25bd6fb1f7bf3445fcf7e",
       "meetingId": "1cb5e82c-b9ef-4a90-961e-87dfbca817df",
       "transcriptVersionId": "764e3eaa-90e5-4aba-b805-2c3b4d9e4708",

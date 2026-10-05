@@ -1,7 +1,8 @@
 {
   "case": "ES2004a",
   "durationSeconds": 150.0,
-  "sourceAudioSha256": "725449be686290f80dd546a28365adc635d765f0ac46ec9c8c9c8a77c63b26e6",
+  "sourceAudioSha256": "3e2560b19bee6952c7c7ce041b0f1ea8a7ea9468044c4eea79d2a2c67e24ab0f",
+  "audioSha256": "725449be686290f80dd546a28365adc635d765f0ac46ec9c8c9c8a77c63b26e6",
   "referenceSha256": "9c5c3ccea9a32c6ff448d2a2d1a735ad06ec4f898de25bd6fb1f7bf3445fcf7e",
   "meetingId": "1cb5e82c-b9ef-4a90-961e-87dfbca817df",
   "transcriptVersionId": "764e3eaa-90e5-4aba-b805-2c3b4d9e4708",

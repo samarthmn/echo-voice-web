@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Fingerprint actual browser assets, including the separately built Rust WASM. */
@@ -14,7 +14,7 @@ export async function writeAssetManifest(publicRoot = resolve('public')) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) await collect(path);
       else if (/\.(?:js|mjs|wasm|css)$/.test(entry.name)) {
-        const url = '/' + path.slice(publicRoot.length + 1).split('\\').join('/');
+        const url = '/' + relative(publicRoot, path).split('\\').join('/');
         versions[url] = createHash('sha256').update(await readFile(path)).digest('hex');
       }
     }

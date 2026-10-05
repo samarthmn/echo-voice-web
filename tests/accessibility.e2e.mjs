@@ -34,7 +34,7 @@ try {
   for (const [name, slug] of [['Overview', 'overview'], ['All meetings', 'library'], ['Models', 'models'], ['Calendar', 'calendar']]) {
     await navigate(name); await audit(`${slug}-desktop`);
   }
-  const connect = page.getByRole('button', { name: 'Connect Google Calendar', exact: true });
+  const connect = page.getByRole('button', { name: 'Connect calendar', exact: true });
   await connect.click();
   const close = page.getByRole('button', { name: 'Close connection setup' });
   await expect(close).toBeFocused();
@@ -73,7 +73,7 @@ try {
   for (const [name, slug] of [['Overview', 'overview'], ['Models', 'models'], ['Calendar', 'calendar']]) {
     await navigate(name); await audit(`${slug}-mobile`);
   }
-  await page.getByRole('button', { name: 'Connect Google Calendar', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect calendar', exact: true }).click();
   await audit('calendar-dialog-mobile'); await page.keyboard.press('Escape');
   await newMeeting.click(); await audit('new-meeting-mobile'); await page.keyboard.press('Escape');
   for (const theme of ['dark', 'light']) {

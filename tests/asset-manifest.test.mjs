@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile, readFile, rm, rmdir } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { resolve, join, sep } from 'node:path';
 import { writeAssetManifest } from '../scripts/asset-manifest.mjs';
 
 test('fingerprints change with WASM bytes independently of JavaScript and are included in packaged assets', async () => {
@@ -21,6 +21,25 @@ test('fingerprints change with WASM bytes independently of JavaScript and are in
     assert.notEqual(second['/assets/echo_app_bg.wasm'], first['/assets/echo_app_bg.wasm']);
     assert.equal(second['/assets/echo_app.js'], first['/assets/echo_app.js']);
     assert.deepEqual(JSON.parse(await readFile(join(fixture, 'js/asset-manifest.json'), 'utf8')), second);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+    await rmdir(scratchRoot).catch(error => { if (error.code !== 'ENOTEMPTY') throw error; });
+  }
+});
+
+test('public roots with trailing separators preserve full nested asset URL names', async () => {
+  const scratchRoot = resolve('tmp');
+  await mkdir(scratchRoot, { recursive: true });
+  const fixture = await mkdtemp(join(scratchRoot, 'asset-manifest-trailing-separator-'));
+  try {
+    await mkdir(join(fixture, 'assets'));
+    await writeFile(join(fixture, 'assets/echo_app_bg.wasm'), 'same WASM bytes');
+    await writeFile(join(fixture, 'theme.css'), ':root { color: black; }');
+    const plain = await writeAssetManifest(fixture);
+    const trailing = await writeAssetManifest(fixture + sep);
+    assert.deepEqual(trailing, plain);
+    assert.deepEqual(Object.keys(trailing).sort(), ['/assets/echo_app_bg.wasm', '/theme.css']);
+    assert.deepEqual(JSON.parse(await readFile(join(fixture, 'js/asset-manifest.json'), 'utf8')), trailing);
   } finally {
     await rm(fixture, { recursive: true, force: true });
     await rmdir(scratchRoot).catch(error => { if (error.code !== 'ENOTEMPTY') throw error; });

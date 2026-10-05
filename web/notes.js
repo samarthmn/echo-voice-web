@@ -10,7 +10,10 @@ function publish(next) {
 
 /** Consume Ollama's NDJSON stream and require its final success confirmation. */
 export function downloadModel(model) {
-  if (activePull) return activePull;
+  if (activePull) {
+    if (activePull.model === model) return activePull.promise;
+    return Promise.reject(new Error(`Wait for ${activePull.model} to finish downloading before downloading ${model}.`));
+  }
   publish({ status: 'downloading', model, progress: 0, detail: 'Preparing download…' });
   const job = (async () => {
     let reader;
@@ -46,8 +49,8 @@ export function downloadModel(model) {
     } finally {
       await reader?.cancel().catch(() => {});
     }
-  })().finally(() => { if (activePull === job) activePull = null; });
-  activePull = job;
+  })().finally(() => { if (activePull?.promise === job) activePull = null; });
+  activePull = { model, promise: job };
   return job;
 }
 

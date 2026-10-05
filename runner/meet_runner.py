@@ -35,6 +35,7 @@ DATA = DATA_ROOT / "bot"
 TOKEN = ""  # Initialized only when the runner is started, not when tests import it.
 SESSIONS: dict[str, "Session"] = {}
 LOCK = threading.RLock()
+CHROMIUM_EXECUTABLE: Path | None = None
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
 MEET_PATTERN = re.compile(r"^/[a-z]{3}-[a-z]{4}-[a-z]{3}/?$")
 ACTIVE = {"joining", "waiting", "recording", "stopping"}
@@ -57,6 +58,7 @@ def validate_url(raw: str) -> str:
 
 def readiness() -> tuple[bool, str]:
     """Check Linux, PulseAudio, FFmpeg, and Playwright prerequisites without joining a meeting."""
+    global CHROMIUM_EXECUTABLE
     missing = [x for x in ("ffmpeg", "pactl") if not shutil.which(x)]
     if importlib.util.find_spec("playwright") is None:
         missing.append("Python playwright")
@@ -71,11 +73,16 @@ def readiness() -> tuple[bool, str]:
     except (OSError, subprocess.TimeoutExpired):
         return False, "PulseAudio could not be reached."
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as playwright:
-            executable = Path(playwright.chromium.executable_path)
+        with LOCK:
+            executable = CHROMIUM_EXECUTABLE
+            if executable is None:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as playwright:
+                    executable = Path(playwright.chromium.executable_path)
             if not executable.is_file() or not os.access(executable, os.X_OK):
+                CHROMIUM_EXECUTABLE = None
                 return False, "Install the runner's Chromium browser with python -m playwright install chromium."
+            CHROMIUM_EXECUTABLE = executable
     except Exception:
         return False, "Playwright's Chromium installation could not be checked. Reinstall the runner browser."
     if os.environ.get("ECHO_RUNNER_CONTAINER") == "1" and not (Path(os.environ["XDG_RUNTIME_DIR"]) / "audio-qualified").is_file():
