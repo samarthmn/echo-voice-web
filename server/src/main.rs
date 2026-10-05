@@ -4,6 +4,7 @@ mod config;
 mod integrations;
 mod notes;
 mod security;
+mod speech;
 mod store;
 use axum::{
     http::{header, HeaderValue},
@@ -28,6 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &std::env::var("ECHO_BIND").unwrap_or_else(|_| config::get().bind.clone()),
     )?;
     store::init()?;
+    speech::recover_spools()?;
     config::runner_token(&store::data_dir())?;
     integrations::recover_bot_starts().await;
     let router = Router::new()
@@ -37,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .merge(integrations::routes())
                 .merge(notes::routes())
                 .merge(chatgpt::routes())
+                .merge(speech::routes())
                 .route(
                     "/demo",
                     axum::routing::get(|| async {
@@ -77,8 +80,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, router)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
+            speech::shutdown().await;
         })
         .await?;
+    speech::shutdown().await;
     chatgpt::shutdown().await;
     Ok(())
 }

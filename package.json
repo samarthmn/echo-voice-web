@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "build:assets": "node scripts/build-assets.mjs",
-    "test": "node --test tests/inference.test.mjs tests/processing-heartbeat.test.mjs tests/diarization.test.mjs tests/speech-errors.test.mjs tests/speech-sessions.test.mjs tests/runtime-options.test.mjs tests/theme.test.mjs tests/workspace.test.mjs tests/asset-manifest.test.mjs tests/recorder.test.mjs tests/rest.test.mjs tests/chatgpt-protocol.test.mjs tests/bot-recovery.test.mjs",
+    "test": "node --test tests/inference.test.mjs tests/native-speech-client.test.mjs tests/native-speech.test.mjs tests/processing-heartbeat.test.mjs tests/diarization.test.mjs tests/speech-errors.test.mjs tests/whisper-alignment.test.mjs tests/runtime-options.test.mjs tests/theme.test.mjs tests/workspace.test.mjs tests/asset-manifest.test.mjs tests/recorder.test.mjs tests/rest.test.mjs tests/chatgpt-protocol.test.mjs tests/bot-recovery.test.mjs",
     "test:e2e": "node scripts/test-browser.mjs",
     "test:speakers": "node scripts/smoke-speakers.mjs"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1"
+    "@huggingface/transformers": "3.8.1",
+    "onnxruntime-node": "1.21.0"
   },
   "overrides": {
     "sharp": "^0.35.4"

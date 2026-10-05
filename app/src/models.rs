@@ -21,6 +21,7 @@ pub fn Models(
     let mut outdated = use_signal(Vec::<String>::new);
     let mut error = use_signal(String::new);
     let mut notes = use_signal(|| Value::Null);
+    let mut native_speech = use_signal(|| Value::Null);
     let mut refresh = use_signal(|| 0);
     let download_status = use_memo(move || text(&download(), "status"));
     let notes_download_status = use_memo(move || text(&notes_download(), "status"));
@@ -62,6 +63,9 @@ pub fn Models(
                         .unwrap_or_default(),
                 );
             }
+            if let Ok(value) = get("/speech").await {
+                native_speech.set(value);
+            }
             if let Ok(v) = get("/notes").await {
                 notes.set(v)
             }
@@ -77,9 +81,12 @@ pub fn Models(
                 text(model, "size"),
                 text(model, "language"),
                 model["recommended"] == true,
+                text(model, "engine") == "native",
             )
         })
         .collect();
+    let native_available = native_speech()["available"].as_bool().unwrap_or(false);
+    let native_detail = text(&native_speech(), "detail");
     let available = notes()["available"].as_bool().unwrap_or(false);
     let notes_downloading = notes_download_status() == "downloading";
     let notes_progress = notes_download()["progress"].as_f64().unwrap_or(0.);
@@ -93,13 +100,13 @@ pub fn Models(
     rsx! {div{class:"page-content",PageHeading{title:"Models"}
     nav{class:"model-section-links",aria_label:"Model setup sections",a{href:"#speech-models",Icon{name:"mic",size:16}"Speech models"}a{href:"#local-notes",Icon{name:"cpu",size:16}"Local notes"}a{href:"#chatgpt-connection",Icon{name:"sparkles",size:16}"ChatGPT"}}
     if !error().is_empty(){div{class:"inline-error",role:"alert",Icon{name:"alert"}"{error}"}}
-    if download_status()=="failed"{div{class:"inline-error",role:"alert",Icon{name:"alert"}"Download failed: {download_error.trim().trim_end_matches('.')}. Check your connection and retry."}}
-    SectionHeading{id:"speech-models",title:"Transcription",description:"Downloads include speaker recognition. Large models need a capable device."}
-    div{class:"model-grid",for (id,name,description,size,language,recommended) in models{
-    article{class:if text(&settings(),"speechModel")==id{"model-card panel model-selected"}else{"model-card panel"},div{class:"model-card-top",span{class:"model-symbol",Icon{name:"cpu",size:26}}StatusBadge{tone:if recommended{BadgeTone::Accent}else{BadgeTone::Neutral},if recommended{"Recommended"}else{"Full-size model"}}}h3{"{name}"}p{"{description}"}div{class:"model-specs",span{Icon{name:"download",size:14}"{size}"}span{"{language}"}span{Icon{name:"cpu",size:14}"Runs locally"}}div{class:"model-status",span{class:if installed().contains(&id.to_string()){"connection-dot ready"}else{"connection-dot"}}if installed().contains(&id.to_string()){"Downloaded · ready to use"}else if speech_downloading && download_id==id{"Downloading"}else if outdated().contains(&id){"Model update required"}else{"Not downloaded"}if text(&settings(),"speechModel")==id{span{class:"small-muted","Default"}}}
+    if download_status()=="failed"{div{class:"inline-error",role:"alert",Icon{name:"alert"}"{download_error}"}}
+    SectionHeading{id:"speech-models",title:"Transcription",description:"Downloads include speaker recognition."}
+    div{class:"model-grid",for (id,name,description,size,language,recommended,native) in models{
+    article{class:if text(&settings(),"speechModel")==id{"model-card panel model-selected"}else{"model-card panel"},div{class:"model-card-top",span{class:"model-symbol",Icon{name:"cpu",size:26}}StatusBadge{tone:if recommended{BadgeTone::Accent}else{BadgeTone::Neutral},if recommended{"Recommended"}else{"Full-size model"}}}h3{"{name}"}p{"{description}"}if native&&!native_available{p{class:"small-muted",if native_detail.is_empty(){"Install Node.js 22 or newer, run npm ci, then check again."}else{"{native_detail}"}}ActionButton{kind:ButtonKind::Ghost,compact:true,onclick:move |_|refresh+=1,"Check engine"}}div{class:"model-specs",span{Icon{name:"download",size:14}"{size}"}span{"{language}"}span{Icon{name:"cpu",size:14}"Runs locally"}}div{class:"model-status",span{class:if installed().contains(&id.to_string()){"connection-dot ready"}else{"connection-dot"}}if installed().contains(&id.to_string()){"Downloaded · ready to use"}else if speech_downloading && download_id==id{"Downloading"}else if outdated().contains(&id){"Model update required"}else{"Not downloaded"}if text(&settings(),"speechModel")==id{span{class:"small-muted","Default"}}}
     if speech_downloading && download_id==id{div{class:"download-status",div{span{"{progress_text}"}IconButton{label:"Cancel model download",icon:"close",onclick:move |_|{let _=document::eval("window.echoInference.cancelInference()");}}}progress{value:progress.to_string(),max:"100"}}}
     else if installed().contains(&id.to_string()){div{class:"model-card-actions",ActionButton{kind:ButtonKind::Secondary,disabled:notes_downloading||speech_downloading||text(&settings(),"speechModel")==id,onclick:{let id=id.clone();move |_|{let id=id.clone();spawn(async move{match patch("/settings",json!({"speechModel":id})).await{Ok(v)=>{on_change.call(v);notify.call("Default speech model updated.".into());},Err(e)=>notify.call(e)}});}},Icon{name:"check",size:16}if text(&settings(),"speechModel")==id{"Default model"}else{"Use as default"}}IconButton{icon:"trash",label:format!("Remove {name}"),disabled:notes_downloading||speech_downloading,onclick:{let id=id.clone();move |_|{let id=id.clone();spawn(async move{match crate::api::evaluate(&format!("return await window.echoInference.removeModel({})",json!(id))).await{Ok(_)=>{refresh+=1;notify.call("Model removed. Saved transcripts are unchanged.".into());},Err(e)=>notify.call(format!("Could not remove model: {e}"))}});}}}}}
-    else{ActionButton{kind:ButtonKind::Primary,full_width:true,disabled:notes_downloading||speech_downloading,onclick:{let id=id.clone();move |_|{error.set(String::new());let _=document::eval(&format!("window.echoInference.downloadModel({}).catch(()=>{{}});",json!(id)));}},Icon{name:"download",size:16}if outdated().contains(&id){"Download update"}else{"Download model"}}}
+    else{ActionButton{kind:ButtonKind::Primary,full_width:true,disabled:notes_downloading||speech_downloading||(native&&!native_available),onclick:{let id=id.clone();move |_|{error.set(String::new());let _=document::eval(&format!("window.echoInference.downloadModel({}).catch(()=>{{}});",json!(id)));}},Icon{name:"download",size:16}if outdated().contains(&id){"Download update"}else{"Download model"}}}
     }
     }}
     SectionHeading{id:"local-notes",class:"notes-model-heading",title:"Local notes"}

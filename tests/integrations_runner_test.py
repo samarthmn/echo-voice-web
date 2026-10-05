@@ -123,6 +123,7 @@ class RunnerTests(unittest.TestCase):
         for container in (False, True):
             with self.subTest(container=container), patch.dict(runner.os.environ, {"ECHO_RUNNER_CONTAINER": "1" if container else ""}):
                 options = runner.browser_options("private-fixture", False)
+                self.assertEqual(options["channel"], "chromium")
                 self.assertIn("--mute-audio", options["ignore_default_args"])
                 self.assertEqual(options["env"]["PULSE_SINK"], "private-fixture")
                 self.assertEqual(options["headless"], container)

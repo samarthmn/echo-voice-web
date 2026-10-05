@@ -1,6 +1,6 @@
 # Calendar and the local meeting guest
 
-Echo Voice's Dioxus interface opens in your browser. The Rust/Axum server stores the meeting library on your computer. Optional speech models run in the browser; optional notes models run in a local provider. Connecting Google Calendar adds an external account connection for calendar metadata. Joining Google Meet connects to Google's meeting service. Recording and AI processing do not use a hosted recording provider.
+Echo Voice's Dioxus interface opens in your browser. The Rust/Axum server stores the meeting library on your computer. Turbo and speaker models run in the browser; full Large V3 uses the local native speech helper. Optional notes models run in a local provider. Connecting Google Calendar adds an external account connection for calendar metadata. Joining Google Meet connects to Google's meeting service. Recording and AI processing do not use a hosted recording provider.
 
 A browser tab cannot independently join a meeting as another participant or keep a headless meeting browser recording after the tab closes. The optional runner below supplies that local capability. It requires one-time local runtime setup. There is no Chrome extension, hosted recording bot, or silent cloud fallback.
 

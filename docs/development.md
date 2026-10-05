@@ -27,7 +27,7 @@ Install Apple's command-line tools:
 xcode-select --install
 ```
 
-Complete the installation window, then install stable Rust and Node.js as above. Build on the Mac itself; the Linux package won't run there. These instructions haven't been qualified on macOS, and the optional Meet recording runner is Linux-only.
+Complete the installation window, then install stable Rust and Node.js as above. Build on the Mac itself; the Linux package won't run there. The source app has been exercised on macOS. The optional Meet recording runner uses a Linux Docker container on macOS; see its separate live-admission limits in the [integration guide](integrations.md).
 
 ### Windows with WSL
 
@@ -72,7 +72,7 @@ Use a GitHub account with repository access if required. You can also extract **
 
 The build script installs the WASM target, runs `npm ci --ignore-scripts`, bundles the recorder and Transformers.js inference bridge, copies ONNX runtime assets, installs the `wasm-bindgen` CLI version matching `Cargo.lock`, and builds the release app and server. Completion prints **“Echo Voice is built.”** It doesn't download speech or Ollama models.
 
-Open [http://localhost:3000](http://localhost:3000) and keep the terminal open. The compiled app doesn't need Rust or Node.js at runtime. An optional Codex npm wrapper may need Node.js; a bundled native helper doesn't.
+Open [http://localhost:3000](http://localhost:3000) and keep the terminal open. The compiled app and browser-based Turbo model don't need Rust or Node.js at runtime. Full Large V3 requires Node.js 22+ and the dependencies installed by `npm ci --ignore-scripts`; the server supervises its native CPU helper. An optional Codex npm wrapper may also need Node.js; a bundled Codex executable doesn't.
 
 ## Find and change the code
 
@@ -133,7 +133,8 @@ Check **Settings → Storage** for the actual data path. Default locations are:
 | Recorded and imported audio | `.echo-data/audio/` |
 | ChatGPT credentials and helper state | `.echo-data/chatgpt/` |
 | Google credentials | Private server data folder |
-| Speech models | Browser profile storage for the app's origin |
+| Turbo and speaker models | Browser profile storage for the app's origin |
+| Full Large V3 speech model | `.echo-data/models/native-large-v3/` |
 | Ollama models | Ollama's model folder |
 | Original Meet guest recordings | Runner data folder; copied into Echo when saved |
 

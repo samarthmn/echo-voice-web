@@ -1,0 +1,60 @@
+{
+  "activeTranscriptId": "4b3b1586-c59b-4fa1-8af9-c5f9faa68f79",
+  "consent": true,
+  "createdAt": "2026-10-05T04:59:58.420Z",
+  "duration": 13,
+  "gaps": [],
+  "id": "f0e48e21-2a04-4789-9003-da2c8ed20f1c",
+  "liveTranscription": false,
+  "mode": "import",
+  "moments": [],
+  "notes": [],
+  "notesModel": "qwen2.5:3b",
+  "speechModel": "onnx-community/whisper-large-v3-turbo",
+  "status": "ready",
+  "title": "AMI-ES2002a-13s",
+  "tracks": [
+    {
+      "bytes": 416044,
+      "id": "4b06b179-c773-4dcb-ab55-ebccbfb0590e",
+      "label": "Original recording",
+      "mimeType": "audio/wav",
+      "url": "/api/meetings/f0e48e21-2a04-4789-9003-da2c8ed20f1c/audio/4b06b179-c773-4dcb-ab55-ebccbfb0590e"
+    }
+  ],
+  "transcripts": [
+    {
+      "createdAt": "2026-10-05T05:01:26.251Z",
+      "id": "3fad9a69-5269-4558-8b14-e0b26d2d477f",
+      "model": "onnx-community/whisper-large-v3-turbo",
+      "passages": [
+        {
+          "end": 13,
+          "id": "92f13b56-ec11-41fe-b70d-fb69d31d8f2a",
+          "speaker": "Unknown speaker",
+          "start": 13,
+          "text": "This is just what we're going to be doing over the next 25 minutes. So first of all, just to kind of make sure that we all know each other.",
+          "uncertain": true
+        }
+      ],
+      "vocabulary": []
+    },
+    {
+      "createdAt": "2026-10-05T05:11:56.547Z",
+      "id": "4b3b1586-c59b-4fa1-8af9-c5f9faa68f79",
+      "model": "onnx-community/whisper-large-v3-turbo",
+      "passages": [
+        {
+          "end": 12.44,
+          "id": "28b209cd-3c7d-441e-8598-a33ab3d9cfc5",
+          "speaker": "Speaker 1",
+          "start": 4.12,
+          "text": "This is just what we're going to be doing over the next 25 minutes. So first of all, just to kind of make sure that we all know each other.",
+          "uncertain": false
+        }
+      ],
+      "vocabulary": []
+    }
+  ],
+  "updatedAt": "2026-10-05T05:11:56.547Z"
+}

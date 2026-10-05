@@ -3,7 +3,7 @@ import { assertModel, speechModelConfig, assertWordTimestampSupport, SPEAKER_MOD
 import { diarize, speakerPassages } from './diarization.js';
 import { speechFailureMessage, traceSpeechChunks } from './speech-errors.js';
 import { wasmThreadCount } from './runtime-options.js';
-import { alternateSpeechSessions, verifySpeechForward } from './speech-sessions.js';
+import { correctWhisperAlignment, validatedWhisperWords } from './whisper-alignment.js';
 
 env.allowLocalModels = false;
 env.useBrowserCache = false;
@@ -46,47 +46,50 @@ self.addEventListener('message', async event => {
     self.postMessage({ id, type: 'progress', progress: { status, progress: amount, file, ...(!runtimeReported ? { runtime } : {}) } });
     runtimeReported = true;
   };
-  const download = type === 'download';
+  const download = ['download', 'download-companions'].includes(type);
   const loadOptions = {
     device: 'wasm', dtype: 'q8', local_files_only: !download,
     progress_callback: value => progress(value.status === 'progress' ? 'Downloading model file' : value.status === 'done' ? 'Model file saved' : 'Loading model', value.progress ?? (value.status === 'done' ? 100 : 0), value.file),
   };
-  let segmentation, embedding, reply, lifecycle, forwardVerified = false;
+  let segmentation, embedding, reply;
   let phase = 'loading the speech model';
   try {
     assertModel(modelId);
-    if (!['download', 'transcribe'].includes(type)) throw new Error('Unsupported speech operation.');
+    if (!['download', 'transcribe', 'download-companions', 'diarize'].includes(type)) throw new Error('Unsupported speech operation.');
+    const native = speechModelConfig(modelId).engine === 'native';
+    if (native !== ['download-companions', 'diarize'].includes(type)) throw new Error('This speech model requires its configured local engine.');
     env.allowLocalModels = !download;
-    if (download || loadedModel !== modelId || !transcriber) {
-      await unloadSpeech(); usedFiles = new Set();
-      progress(download ? 'Preparing download' : 'Loading speech model', 0);
-      const config = speechModelConfig(modelId);
-      transcriber = await pipeline('automatic-speech-recognition', config.checkpoint, { ...loadOptions, dtype: config.dtype ?? 'q8', session_options: config.session_options, revision: config.revision });
-      assertWordTimestampSupport(transcriber.model.sessions.decoder_model_merged.outputNames);
-      if (config.requireForwardVerification) lifecycle = alternateSpeechSessions(transcriber.model, config, await caches.open(MODEL_CACHE));
-      loadedModel = modelId;
-    }
+    usedFiles = new Set();
     let words = [];
-    if (download && lifecycle) {
-      phase = 'checking local speech execution';
-      progress('Checking local transcription', 0);
-      forwardVerified = await verifySpeechForward(transcriber, lifecycle);
+    if (!native) {
+      if (download || loadedModel !== modelId || !transcriber) {
+        await unloadSpeech();
+        progress(download ? 'Preparing download' : 'Loading speech model', 0);
+        const config = speechModelConfig(modelId);
+        transcriber = await pipeline('automatic-speech-recognition', config.checkpoint, { ...loadOptions, dtype: config.dtype ?? 'q8', revision: config.revision });
+        assertWordTimestampSupport(transcriber.model.sessions.decoder_model_merged.outputNames);
+        correctWhisperAlignment(transcriber.model);
+        loadedModel = modelId;
+      }
+      if (!download) {
+        if (!audio?.length) throw new Error('No decoded audio was received.');
+        progress('Transcribing on this device', 0);
+        phase = 'transcribing audio and aligning word timestamps';
+        traceSpeechChunks(transcriber.model, audio.length,
+          value => self.postMessage({ id, type: 'progress', progress: value }),
+          next => { phase = next; });
+        const output = await transcriber(audio, {
+          return_timestamps: 'word', chunk_length_s: 29, stride_length_s: 5,
+          ...(options.language && options.language !== 'auto' ? { language: options.language, task: 'transcribe' } : {}),
+        });
+        const result = Array.isArray(output) ? output[0] : output;
+        words = validatedWhisperWords(result, audio.length / 16000);
+      }
     } else if (!download) {
-      if (!audio?.length) throw new Error('No decoded audio was received.');
-      progress('Transcribing on this device', 0);
-      phase = 'transcribing audio and aligning word timestamps';
-      traceSpeechChunks(transcriber.model, audio.length,
-        value => self.postMessage({ id, type: 'progress', progress: value }),
-        next => { phase = next; });
-      const output = await transcriber(audio, {
-        return_timestamps: 'word', chunk_length_s: 29, stride_length_s: 5,
-        ...(options.language && options.language !== 'auto' ? { language: options.language, task: 'transcribe' } : {}),
-      });
-      const result = Array.isArray(output) ? output[0] : output;
-      words = result.chunks || [];
-      if (result.text?.trim() && !words.length) throw new Error('Word timestamps could not be created. Retry transcription to recognize speaker changes.');
+      if (!audio?.length || !Array.isArray(options.words)) throw new Error('The local speech engine did not return word timestamps.');
+      words = options.words;
     }
-    // Release Large V3 before loading the two smaller speaker models.
+    // Release browser speech before loading the two smaller speaker models.
     await unloadSpeech();
     phase = 'loading speaker recognition';
     progress(download ? 'Preparing speaker recognition' : 'Loading speaker recognition', 0);
@@ -100,7 +103,7 @@ self.addEventListener('message', async event => {
       const cache = await caches.open(MODEL_CACHE);
       if (!(await Promise.all([...usedFiles].map(file => cache.match(file)))).every(Boolean)) throw new Error('The browser could not save every model file. Free storage and retry.');
       const config = speechModelConfig(modelId);
-      await (await caches.open(MODEL_MANIFEST_CACHE)).put(modelManifestUrl(modelId), new Response(JSON.stringify({ files: [...usedFiles], checkpoint: config.checkpoint, revision: config.revision, precision: config.precision ?? 'q8', wordTimestamps: true, ...(config.requireForwardVerification ? { forwardVerified } : {}), createdAt: new Date().toISOString() }), { headers: { 'Content-Type': 'application/json' } }));
+      await (await caches.open(MODEL_MANIFEST_CACHE)).put(modelManifestUrl(modelId), new Response(JSON.stringify({ files: [...usedFiles], ...(native ? { engine: 'native-companions-v1', speakerModels: SPEAKER_MODELS } : { checkpoint: config.checkpoint, revision: config.revision, precision: config.precision ?? 'q8', wordTimestamps: true }), createdAt: new Date().toISOString() }), { headers: { 'Content-Type': 'application/json' } }));
       progress('Ready for offline transcription and speaker recognition', 100);
       reply = { id, type: 'result' }; return;
     }

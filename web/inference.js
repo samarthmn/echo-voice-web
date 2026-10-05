@@ -1,5 +1,6 @@
 import { resolveSpeechModel, assertModel, speechModelConfig, speechManifestMatches, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
 import { createProcessingHeartbeat } from './processing-heartbeat.js';
+import { getNativeSpeechStatus, runNativeSpeech, cancelNativeSpeech } from './native-speech.js';
 export { MODELS } from './models.js';
 
 let worker = null;
@@ -76,6 +77,7 @@ function callWorker(type, modelId, onProgress, audio, options) {
 /** Terminate the worker and reject the current job without discarding downloaded files. */
 export function cancelInference() {
   generation++;
+  cancelNativeSpeech();
   processingHeartbeat.clear();
   for (const controller of activeAudioFetches) controller.abort();
   worker?.terminate(); worker = null;
@@ -89,6 +91,7 @@ export async function getDownloadedModels() {
   const manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const files = await caches.open(MODEL_CACHE);
   const downloaded = [];
+  const native = await getNativeSpeechStatus().catch(() => null);
   for (const model of MODELS) {
     const manifest = await manifests.match(modelManifestUrl(model.id));
     if (!manifest) continue;
@@ -96,7 +99,9 @@ export async function getDownloadedModels() {
       const data = await manifest.json();
       // Keep older files, but require an updated export before advertising readiness.
       if (!speechManifestMatches(data, model)) continue;
-      if (data.files.length && (await Promise.all(data.files.map(url => files.match(url)))).every(Boolean)) downloaded.push(model.id);
+      if (data.files.length && (await Promise.all(data.files.map(url => files.match(url)))).every(Boolean)) {
+        if (model.engine !== 'native' || (native?.available === true && native?.ready === true)) downloaded.push(model.id);
+      }
       else await manifests.delete(modelManifestUrl(model.id));
     } catch { await manifests.delete(modelManifestUrl(model.id)); }
   }
@@ -130,10 +135,31 @@ export function downloadModel(id, onProgress) {
     if (typeof caches === 'undefined') throw new Error('Model storage requires a secure browser context. Open Echo Voice on localhost.');
     await navigator.storage?.persist?.().catch(() => false);
     if (token !== generation) throw cancelled();
-    await callWorker('download', id, progress => {
+    const progress = progress => {
       publishDownload({ modelId: id, status: 'downloading', progress: progress.progress || 0, detail: progress.status || 'Downloading…' });
       onProgress?.(progress);
-    });
+    };
+    const native = speechModelConfig(id).engine === 'native';
+    if (native) {
+      const status = await getNativeSpeechStatus();
+      if (token !== generation) throw cancelled();
+      if (!status.available) throw new Error(status.detail || 'Install Node.js 22 or newer and run npm ci to enable Full Large V3.');
+      await runNativeSpeech('download', undefined, 'auto', progress);
+      if (token !== generation) throw cancelled();
+    }
+    await callWorker(native ? 'download-companions' : 'download', id, progress);
+    if (native) {
+      if (token !== generation) throw cancelled();
+      if (!(await getDownloadedModels()).includes(id)) throw new Error('The local speech model and speaker files could not be verified. Retry the download.');
+      if (token !== generation) throw cancelled();
+      // Only retire browser ASR weights after both replacement stages verify.
+      // Speaker companions are shared with Turbo and must stay cached.
+      const cache = await caches.open(MODEL_CACHE);
+      for (const request of await cache.keys()) {
+        const path = decodeURIComponent(new URL(request.url).pathname);
+        if ([id, speechModelConfig(id).checkpoint].some(checkpoint => path.includes(`/${checkpoint}/`))) await cache.delete(request);
+      }
+    }
   }).then(result => {
     publishDownload({ modelId: id, status: 'completed', progress: 100 });
     return result;
@@ -152,6 +178,7 @@ export function removeModel(id) {
   assertModel(id);
   cancelInference();
   return serial(async () => {
+    if (speechModelConfig(id).engine === 'native') await requestJson('/speech/model', 'DELETE');
     const manifest = await caches.open(MODEL_MANIFEST_CACHE);
     await manifest.delete(modelManifestUrl(id));
     const cache = await caches.open(MODEL_CACHE);
@@ -189,6 +216,13 @@ export function transcribeAudio(blob, modelId, onProgress, options = {}) {
     onProgress?.({ status: 'Decoding saved audio', progress: 0 });
     const audio = await decodeAudio(blob);
     if (token !== generation) throw cancelled();
+    if (speechModelConfig(modelId).engine === 'native') {
+      const result = await runNativeSpeech('transcribe', audio, options.language, onProgress);
+      if (token !== generation) throw cancelled();
+      const duration = audio.length / 16000;
+      if (!Array.isArray(result?.words) || result.words.some(word => typeof word.text !== 'string' || !Array.isArray(word.timestamp) || word.timestamp.length !== 2 || word.timestamp.some(time => !Number.isFinite(time)) || word.timestamp[0] < 0 || word.timestamp[1] < word.timestamp[0] || word.timestamp[1] > duration + .1)) throw new Error('The local speech engine returned invalid word timestamps. Your saved audio is unchanged.');
+      return await callWorker('diarize', modelId, onProgress, audio, { ...options, words: result.words });
+    }
     return await callWorker('transcribe', modelId, onProgress, audio, options);
   });
 }
@@ -256,6 +290,7 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
     checkCancelled();
     await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: 'processing', error: '' });
     checkCancelled();
+    window.dispatchEvent(new Event('echo-library-changed'));
     processingHeartbeat.start(meetingId);
     const passages = []; let offset = 0; let speakers = [];
     const settings = await requestJson('/settings');
@@ -296,6 +331,6 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
 }
 
 window.echoInference = {
-  models: MODELS, getDownloadedModels, getOutdatedModels, getModelDownloadState, removeModel, cancelInference, transcribeAudio, transcribeMeeting,
+  models: MODELS, getDownloadedModels, getOutdatedModels, getModelDownloadState, getNativeSpeechStatus, removeModel, cancelInference, transcribeAudio, transcribeMeeting,
   downloadModel: (id, callback) => downloadModel(id, progress => { report(id)(progress); callback?.(progress); }),
 };

@@ -78,10 +78,10 @@ Already have an audio file? Choose **Upload a recording** on the Overview page i
 
 ## Turn the recording into text
 
-Echo needs a **speech model** to recognize words. This is a set of files you download once. It runs on your computer and is saved in your browser's storage.
+Echo needs a **speech model** to recognize words. This is a set of files you download once. Turbo and speaker detection run in your browser. Full Large V3 uses a native local engine and stores its speech files in Echo's data folder.
 
 1. Open **Models → Speech models**.
-2. Choose **Whisper Large V3 Turbo** (the default, about 1.2 GB including speaker models) or **Whisper Large V3** (about 1.7 GB). Both support multiple languages. Choose **Download model**. If an older download needs word timestamps, choose **Download update**. Large models need substantial free memory and browser storage.
+2. Choose **Whisper Large V3 Turbo** (the default, about 1.2 GB including speaker models) or **Whisper Large V3** (about 1.7 GB). Both support multiple languages. Choose **Download model**. If an older download needs word timestamps, choose **Download update**. Large models need substantial free memory and disk space. Full Large V3 also requires Node.js 22 or newer: install it, then run `npm ci --ignore-scripts` in the Echo folder before downloading the model. Turbo does not require Node.js at runtime. See [native engine setup](docs/native-speech.md).
 3. Keep the tab open until you see **Downloaded · ready to use**.
 4. Open **Settings → General**, select that speech model and your recording language, and save your changes.
 5. Return to the saved meeting and choose **Create transcript**.

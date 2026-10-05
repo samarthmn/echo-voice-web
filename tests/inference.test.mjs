@@ -19,14 +19,30 @@ class FakeWorker extends EventTarget {
   constructor() { super(); instances.push(this); }
   postMessage(message) { this.lastMessage = message; workerCalls.push(message); }
   terminate() { this.terminated = true; }
-  finish(result) { this.dispatchEvent(new MessageEvent('message', { data: { id: this.lastMessage.id, type: 'result', result } })); }
+  async finish(result) {
+    if (this.lastMessage.type === 'download-companions') {
+      // This fake worker verifies the orchestration contract, not real model execution.
+      const files = await caches.open(MODEL_CACHE), manifests = await caches.open(MODEL_MANIFEST_CACHE);
+      const path = 'https://huggingface.co/test/companion-download.onnx';
+      await files.put(path, new Response('fixture companion'));
+      await manifests.put(modelManifestUrl(this.lastMessage.modelId), new Response(JSON.stringify(manifestData(this.lastMessage.modelId, [path]))));
+    }
+    this.dispatchEvent(new MessageEvent('message', { data: { id: this.lastMessage.id, type: 'result', result } })); }
 }
 globalThis.Worker = FakeWorker;
 const inference = await import('../web/inference.js');
-const { MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, speechModelConfig, MODELS } = await import('../web/models.js');
+const { MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, speechModelConfig, MODELS, SPEAKER_MODELS } = await import('../web/models.js');
 const turbo = MODELS[0].id; const large = MODELS[1].id;
-const manifestData = (id, files) => ({ files, checkpoint: speechModelConfig(id).checkpoint, revision: speechModelConfig(id).revision, precision: speechModelConfig(id).precision ?? 'q8', wordTimestamps: true, ...(speechModelConfig(id).requireForwardVerification ? { forwardVerified: true } : {}) });
+const manifestData = (id, files) => speechModelConfig(id).engine === 'native' ? ({ files, engine: 'native-companions-v1', speakerModels: SPEAKER_MODELS }) : ({ files, checkpoint: speechModelConfig(id).checkpoint, revision: speechModelConfig(id).revision, precision: speechModelConfig(id).precision ?? 'q8', wordTimestamps: true });
 const turn = () => new Promise(resolve => setImmediate(resolve));
+
+let nativeReady = true;
+globalThis.fetch = async (url, options = {}) => {
+  if (url === '/api/speech') return Response.json({ available: true, ready: nativeReady });
+  if (options.method === 'POST' && url.startsWith('/api/speech/jobs?')) return Response.json({ jobId: new URL(url, location.origin).searchParams.get('jobId'), state: 'queued' });
+  if (url.startsWith('/api/speech/jobs/')) return Response.json({ state: options.method === 'DELETE' ? 'cancelled' : 'completed' });
+  assert.fail(`Unexpected native request: ${options.method || 'GET'} ${url}`);
+};
 
 test('partial downloads are never reported as offline ready and missing cached files invalidate readiness', async () => {
   const files = await caches.open(MODEL_CACHE); const manifests = await caches.open(MODEL_MANIFEST_CACHE);
@@ -52,12 +68,11 @@ test('older complete downloads require the timestamp-capable checkpoint without 
   await manifests.delete(modelManifestUrl(turbo));
 });
 
-test('Large V3 invalidates a different precision without removing weights while existing Turbo stays ready', async () => {
-  const files = await caches.open(MODEL_CACHE); const manifests = await caches.open(MODEL_MANIFEST_CACHE);
+test('old browser Large markers never report native readiness and saved weights are retained', async () => {
+  const files = await caches.open(MODEL_CACHE), manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const path = `https://huggingface.co/${speechModelConfig(large).checkpoint}/resolve/main/encoder_model_quantized.onnx`;
   await files.put(path, new Response('old large encoder'));
-  const old = manifestData(large, [path]); old.precision = 'q4-encoder-q8-decoder';
-  await manifests.put(modelManifestUrl(large), new Response(JSON.stringify(old)));
+  await manifests.put(modelManifestUrl(large), new Response(JSON.stringify({ files: [path], checkpoint: speechModelConfig(large).checkpoint, revision: speechModelConfig(large).revision, precision: 'q8', wordTimestamps: true, forwardVerified: true })));
   assert.ok(!(await inference.getDownloadedModels()).includes(large));
   assert.ok((await inference.getOutdatedModels()).includes(large));
   assert.ok(await files.match(path));
@@ -70,18 +85,18 @@ test('Large V3 invalidates a different precision without removing weights while 
   await manifests.delete(modelManifestUrl(large));
 });
 
-test('Large cached files require successful forward qualification while older Turbo markers stay compatible', async () => {
+test('Large readiness combines native qualification and complete speaker cache files', async () => {
   const files = await caches.open(MODEL_CACHE), manifests = await caches.open(MODEL_MANIFEST_CACHE);
-  const path = `https://huggingface.co/${speechModelConfig(large).checkpoint}/resolve/main/decoder_model_merged_quantized.onnx`;
-  await files.put(path, new Response('weights'));
-  const old = manifestData(large, [path]); delete old.forwardVerified;
-  await manifests.put(modelManifestUrl(large), new Response(JSON.stringify(old)));
-  assert.ok(!(await inference.getDownloadedModels()).includes(large));
-  assert.ok((await inference.getOutdatedModels()).includes(large));
-  assert.ok(await files.match(path));
+  const path = 'https://huggingface.co/test/speaker.onnx';
+  await files.put(path, new Response('speaker weights'));
   await manifests.put(modelManifestUrl(large), new Response(JSON.stringify(manifestData(large, [path]))));
+  nativeReady = false;
+  assert.ok(!(await inference.getDownloadedModels()).includes(large));
+  nativeReady = true;
   assert.ok((await inference.getDownloadedModels()).includes(large));
-  await manifests.delete(modelManifestUrl(large));
+  await files.delete(path);
+  assert.ok(!(await inference.getDownloadedModels()).includes(large));
+  assert.equal(await manifests.match(modelManifestUrl(large)), undefined);
 });
 
 test('downloads serialize and cancelling rejects active and queued jobs', async () => {
@@ -291,12 +306,16 @@ test('reload protection follows pending transcript jobs and releases on success,
     createBufferSource() { return { connect() {}, start() {} }; }
     async startRendering() { return { getChannelData: () => new Float32Array(16000) }; }
   };
+  let processingPatched = false, refreshed = 0;
+  const libraryRefresh = () => { assert.equal(processingPatched, true); refreshed++; };
+  window.addEventListener('echo-library-changed', libraryRefresh);
   globalThis.fetch = async (url, options = {}) => {
     const path = new URL(url, location.origin).pathname;
     if (path.endsWith('/audio')) return new Response('fixture audio');
     if (path === '/api/vocabulary') return Response.json({ entries: [] });
     if (path === '/api/settings') return Response.json({ language: 'english' });
     if (path.endsWith('/transcripts')) return Response.json({ id: 'saved-transcript' });
+    if (options.method === 'PATCH' && JSON.parse(options.body).status === 'processing') processingPatched = true;
     if (path.startsWith('/api/meetings/')) return Response.json({ status: 'saved', transcripts: [], duration: 1, tracks: [{ id: 'track', url: '/api/meetings/unload-test/audio' }] });
     assert.fail(`Unexpected request: ${options.method || 'GET'} ${path}`);
   };
@@ -305,6 +324,7 @@ test('reload protection follows pending transcript jobs and releases on success,
     await manifests.put(key, new Response(JSON.stringify(manifestData(turbo, [fixture]))));
     assert.equal(warns(), false);
     for (const outcome of ['success', 'error', 'cancel']) {
+      processingPatched = false; refreshed = 0;
       const count = instances.length;
       const job = inference.transcribeMeeting(`unload-${outcome}`, turbo);
       // Covers metadata/audio loading and a job that has not reached its worker yet.
@@ -312,6 +332,7 @@ test('reload protection follows pending transcript jobs and releases on success,
       const rejected = outcome === 'success' ? null : assert.rejects(job, outcome === 'cancel' ? error => error.name === 'AbortError' : /native failure/);
       await turn();
       assert.equal(instances.length, count + 1);
+      assert.equal(refreshed, 1, 'Library refresh follows the processing patch before inference');
       const current = instances.at(-1);
       assert.equal(current.lastMessage.type, 'transcribe');
       assert.equal(warns(), true);
@@ -337,10 +358,73 @@ test('reload protection follows pending transcript jobs and releases on success,
     assert.equal(warns(), false);
   } finally {
     inference.cancelInference();
+    window.removeEventListener('echo-library-changed', libraryRefresh);
     globalThis.fetch = originalFetch;
     globalThis.AudioContext = originalAudioContext;
     globalThis.OfflineAudioContext = originalOfflineContext;
     await files.delete(fixture);
     if (previous) await manifests.put(key, previous); else await manifests.delete(key);
   }
+});
+
+test('Large ASR uses the native engine then sends decoded audio and real word timestamps only to diarization', async () => {
+  const previousFetch = globalThis.fetch, previousAudio = globalThis.AudioContext, previousOffline = globalThis.OfflineAudioContext;
+  const files = await caches.open(MODEL_CACHE), manifests = await caches.open(MODEL_MANIFEST_CACHE);
+  const fixture = 'https://huggingface.co/test/native-companion.onnx';
+  let nativeId, nativeRequests = [];
+  globalThis.AudioContext = class { async decodeAudioData() { return { duration: 1 }; } async close() {} };
+  globalThis.OfflineAudioContext = class {
+    createBufferSource() { return { connect() {}, start() {} }; }
+    async startRendering() { return { getChannelData: () => new Float32Array(16000).fill(.1) }; }
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    nativeRequests.push({ url, options });
+    if (url === '/api/speech') return Response.json({ available: true, ready: true });
+    if (options.method === 'POST') {
+      const query = new URL(url, location.origin).searchParams;
+      assert.equal(query.get('modelId'), large); assert.equal(query.get('language'), 'fr');
+      assert.equal(query.get('operation'), 'transcribe'); assert.equal(options.body.byteLength, 16000 * 4);
+      nativeId = query.get('jobId'); return Response.json({ jobId: nativeId });
+    }
+    assert.equal(url, `/api/speech/jobs/${nativeId}`);
+    return Response.json({ state: 'completed', result: { words: [{ text: 'bonjour', timestamp: [0, .9] }], duration: 1 } });
+  };
+  try {
+    await files.put(fixture, new Response('companion weights'));
+    await manifests.put(modelManifestUrl(large), new Response(JSON.stringify(manifestData(large, [fixture]))));
+    const count = instances.length;
+    const job = inference.transcribeAudio(new Blob(['recording']), large, undefined, { language: 'fr', speakers: [] });
+    await turn();
+    assert.equal(instances.length, count + 1);
+    const current = instances.at(-1);
+    assert.equal(current.lastMessage.type, 'diarize');
+    assert.equal(current.lastMessage.audio.length, 16000);
+    assert.deepEqual(current.lastMessage.options.words, [{ text: 'bonjour', timestamp: [0, .9] }]);
+    current.finish({ passages: [{ text: 'bonjour', start: 0, end: .9, speaker: 'speaker-1' }], duration: 1, speakers: [] });
+    const result = await job;
+    assert.equal(result.passages[0].text, 'bonjour');
+    assert.equal(nativeRequests.filter(request => request.options.method === 'POST').length, 1);
+  } finally {
+    inference.cancelInference(); globalThis.fetch = previousFetch; globalThis.AudioContext = previousAudio; globalThis.OfflineAudioContext = previousOffline;
+    await files.delete(fixture); await manifests.delete(modelManifestUrl(large));
+  }
+});
+
+test('successful native migration retires only browser Large ASR weights while failure preserves them', async () => {
+  const files = await caches.open(MODEL_CACHE);
+  const retired = ['https://huggingface.co/Xenova/whisper-large-v3/resolve/pinned/onnx/encoder_model_quantized.onnx', 'https://huggingface.co/onnx-community/whisper-large-v3/resolve/main/decoder.onnx'];
+  const retained = ['https://huggingface.co/Xenova/wavlm-base-plus-sv/resolve/main/model.onnx', 'https://huggingface.co/onnx-community/pyannote-segmentation-3.0/resolve/main/model.onnx', 'https://huggingface.co/onnx-community/whisper-large-v3-turbo_timestamped/resolve/pinned/model.onnx'];
+  for (const path of [...retired, ...retained]) await files.put(path, new Response('weights'));
+  const failedDownload = inference.downloadModel(large);
+  const failed = assert.rejects(failedDownload, /companion failure/);
+  await turn();
+  const failedWorker = instances.at(-1);
+  assert.equal(failedWorker.lastMessage.type, 'download-companions');
+  failedWorker.dispatchEvent(new MessageEvent('message', { data: { id: failedWorker.lastMessage.id, type: 'error', error: 'companion failure' } }));
+  await failed;
+  for (const path of retired) assert.ok(await files.match(path), 'A failed replacement must preserve old weights');
+  const success = inference.downloadModel(large);
+  await turn(); await instances.at(-1).finish(); await success;
+  for (const path of retired) assert.equal(await files.match(path), undefined);
+  for (const path of retained) assert.ok(await files.match(path), 'Turbo and shared speaker models must remain available');
 });

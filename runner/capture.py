@@ -9,6 +9,9 @@ def browser_options(sink: str, headless: bool) -> dict:
     container = os.environ.get("ECHO_RUNNER_CONTAINER") == "1"
     return {
         "headless": headless or container,
+        # Use the full Chromium binary checked by readiness, including its
+        # current headless WebRTC implementation, rather than headless shell.
+        "channel": "chromium",
         "env": dict(os.environ, PULSE_SINK=sink),
         "ignore_default_args": ["--mute-audio"] + (["--disable-dev-shm-usage"] if container else []),
         # Chromium rejects permission requests without opening a device.
