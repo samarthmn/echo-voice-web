@@ -42,3 +42,7 @@ Only the approved test identity may be used. Camera permission is never granted.
 - [Live processing initial review](extension-reviews/live-task-review.md) and [fix re-review with final integration disposition](extension-reviews/live-rereview.md)
 
 These notes preserve findings and their disposition. Automated tests reviewed the integrated working tree before the local implementation commit; no executable changes were made afterward.
+
+## Local checkpoint and cleanup
+
+Implementation commit: `08b3fae35422dd3626729d7eeb5c0d09e0d99467` on `codex/large-v3-speakers-dark-mode`. No push or CodeRabbit review was started. Independent review notes and sanitized screenshots are preserved in this documentation. Session-owned scratch reports, logs and failed browser-test profiles were removed after consolidation. The isolated human-test library at `tmp/extension-human-review/library` and its local server on port 3000 remain available for pending live qualification; its private Calendar credential stays outside Git. Existing user libraries and old private runner profiles remain untouched.
