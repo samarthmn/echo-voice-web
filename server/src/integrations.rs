@@ -713,6 +713,11 @@ fn auth_matches(auth: &Value, email: Option<&str>) -> bool {
 
 fn auth_view(auth: Value, email: Option<&str>) -> Value {
     let mut public = json!({"state": auth["state"], "accountMatches":auth_matches(&auth, email)});
+    public["mode"] = json!(if auth["mode"] == "native_window" {
+        "native_window"
+    } else {
+        "remote_viewer"
+    });
     // Never forward profile paths, cookies, browser storage or unexpected fields.
     for key in ["email", "expectedEmail", "detail", "sessionId", "hostname"] {
         if let Some(value) = auth[key].as_str().filter(|value| value.len() <= 1024) {
@@ -1025,6 +1030,9 @@ async fn status() -> Result<Json<Value>, ApiError> {
                 Ok(health) => {
                     runner["reachable"] = json!(true);
                     runner["ready"] = health["ready"].clone();
+                    runner["authReady"] = health["authReady"]
+                        .as_bool()
+                        .map_or_else(|| health["ready"].clone(), |ready| json!(ready));
                     runner["detail"] = health["detail"].clone();
                     match auth_json(Method::GET, "/auth", None, 2).await {
                         Ok(auth) => {
@@ -1340,7 +1348,15 @@ mod tests {
         );
         assert_eq!(
             public,
-            json!({"state":"signed_in","email":TEST_EMAIL,"accountMatches":true})
+            json!({"state":"signed_in","email":TEST_EMAIL,"accountMatches":true,"mode":"remote_viewer"})
+        );
+        assert_eq!(
+            auth_view(json!({"state":"signed_out","mode":"native_window"}), None)["mode"],
+            "native_window"
+        );
+        assert_eq!(
+            auth_view(json!({"state":"signed_out","mode":"untrusted"}), None)["mode"],
+            "remote_viewer"
         );
         let session = Uuid::new_v4().to_string();
         let text = auth_input(&json!({"sessionId":session,"type":"text","text":"manual secret input","email":"attacker@example.com","url":"file:///etc/passwd"})).unwrap();

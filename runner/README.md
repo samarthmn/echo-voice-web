@@ -1,92 +1,82 @@
-# Echo Voice local Google Meet runner
+# Echo Voice native Google Meet runner
 
-This optional Python service joins Google Meet as a signed-in participant using the connected Calendar account and records meeting playback to local WAV. The host must admit it. Run it in **Docker on macOS, Windows, or Linux**, or directly on Linux with PulseAudio. Zoom and Teams are not supported. Google account, organization and host policies still apply.
+The optional local runner joins Google Meet using a saved browser session for the connected Calendar account and records meeting playback to WAV. It runs directly on macOS or Linux. Docker is not part of the runtime or installation. The runner still uses a dedicated Google Chrome process; host admission and Google account policies apply. Zoom, Teams and Windows runner support are not implemented.
 
-Full setup, Google Calendar OAuth configuration, privacy details and troubleshooting are in [docs/integrations.md](../docs/integrations.md).
+## Native macOS setup
 
-## Docker setup (macOS, Windows and Linux)
+Install Google Chrome, Python 3.10 or later, and Xcode Command Line Tools. macOS 13 or later is required for audio capture. From the repository root:
 
-Install Docker Desktop on macOS/Windows, or Docker Engine with Compose on Linux. Start Docker, then run from the repository root. Keep the Echo Voice server running on the host. The container contains its own Chromium, PulseAudio and FFmpeg; it needs no host microphone, screen recording permission or audio device. Its dedicated browser uses a saved Google session created through Echo’s runner sign-in dialog. The participant appears under that Google account’s identity; camera and microphone remain denied.
-
-On macOS/Linux, match the host user's file ownership before building:
-
-```bash
-export ECHO_RUNNER_UID="$(id -u)"
-export ECHO_RUNNER_GID="$(id -g)"
-mkdir -p .echo-data
-docker compose -f compose.runner.yaml up --build -d
-docker compose -f compose.runner.yaml ps
+```sh
+python3 -m venv runner/.venv
+runner/.venv/bin/pip install -r runner/requirements.txt
+sh runner/macos/build.sh
+sh scripts/start-runner.sh --doctor
+sh scripts/start-runner.sh
 ```
 
-On Windows PowerShell with Docker Desktop's Linux containers:
-
-```powershell
-New-Item -ItemType Directory -Force .echo-data | Out-Null
-docker compose -f compose.runner.yaml up --build -d
-docker compose -f compose.runner.yaml ps
-```
-
-The default mounts `./.echo-data` at `/data` and `./echo.config.json` read-only in the container. **Mount the same library and config used by the host server.** For a custom `dataDir`, `ECHO_DATA_DIR`, or `ECHO_CONFIG_FILE`, set `ECHO_RUNNER_DATA_DIR` and `ECHO_RUNNER_CONFIG_FILE` to those host paths before running Compose (PowerShell: `$env:ECHO_RUNNER_DATA_DIR = "C:\path\to\library"`). Create the data directory first. Relative mount paths resolve from this repository's Compose file; absolute paths work too. If `runner.url` uses a different loopback port, set `ECHO_RUNNER_PORT` to that same host port; the internal port stays 8765.
-
-Both processes read or atomically create the same private `<dataDir>/credentials/runner-token`. The server downloads finalized WAV over authenticated HTTP, so `/data` need not equal the host's absolute path. Sharing storage also lets meeting deletion remove both recording copies. Do not mount a different library just to bypass a permission error; check host UID/GID and Docker Desktop file sharing, then rebuild with the matching UID/GID. On Windows, keep the library in a Docker Desktop shared folder with access restricted to your account.
-
-The only published port is `127.0.0.1:8765`. All audio routing stays in the container. Startup first verifies actual audible Chromium playback through a temporary private sink and PCM WAV. It starts the recording service only when that test passes. The health check also verifies Python, Chromium and PulseAudio prerequisites; a running process alone does not mean capture is ready. Inspect or stop it with:
-
-```bash
-docker compose -f compose.runner.yaml logs meeting-runner
-docker compose -f compose.runner.yaml exec meeting-runner python3 /app/meet_runner.py --doctor
-docker compose -f compose.runner.yaml exec meeting-runner python3 /app/audio_smoke.py
-docker compose -f compose.runner.yaml down
-```
-
-The smoke test records a generated tone from its own temporary Chromium process, verifies denied camera/microphone permissions and audible PCM WAV samples, then removes its test files and private sink. It does not join a meeting. Stop a real recording in Echo and wait for completion before shutting down Docker; container shutdown also requests graceful finalization. Recreating the container preserves the bind-mounted library, credentials and WAVs. The image download requires internet and several GB of disk space. Google Meet admission and playback still require a live host test on each target setup; Docker does not bypass guest or organization policies.
+Recording requires explicit Screen & System Audio Recording permission for the helper's launching application in System Settings. Sign-in can work before capture permission is granted. The [audio helper](macos/README.md) selects the owned Chrome process and saves only audio. Camera and microphone remain blocked. Application-audio isolation still requires the live qualification described below.
 
 ## Native Linux setup
 
-From the repository root, after installing Python 3.10+, FFmpeg, PulseAudio tools and the browser's Linux dependencies:
+Use a normal, non-root desktop account with Google Chrome installed, Python 3.10+, FFmpeg and PulseAudio tools. A graphical desktop session is required for direct Google sign-in. On Debian/Ubuntu, install `python3-venv`, `ffmpeg` and `pulseaudio-utils` using the system package manager. Use the desktop's existing PulseAudio service or PipeWire with its PulseAudio compatibility service; do not replace a working PipeWire installation with another audio server. `pactl info` must succeed as your desktop user.
 
-```bash
+From the repository root:
+
+```sh
 python3 -m venv runner/.venv
 runner/.venv/bin/pip install -r runner/requirements.txt
-runner/.venv/bin/python -m playwright install --with-deps chromium
-pulseaudio --start
+sh scripts/start-runner.sh --doctor
+sh scripts/start-runner.sh
 ```
 
-Run both processes from the repository root using the same `echo.config.json`. Its `dataDir` and `runner.url` initialize shared storage and the runner's loopback port. Both processes automatically generate or read the private credential in `<dataDir>/credentials/runner-token`; no token or URL environment variable is needed.
+Playback from the owned meeting browser is routed to a private audio sink. FFmpeg records that sink's monitor rather than the microphone or the desktop's default output. The native browser uses the same desktop login and credential storage during sign-in and subsequent meetings. A bare SSH shell without the desktop display and session environment cannot perform interactive sign-in.
 
-```bash
-runner/.venv/bin/python runner/meet_runner.py --doctor
-runner/.venv/bin/python runner/meet_runner.py
-```
+## Connect the meeting account
 
-The runner does not need `.env`. That file holds only optional Google Calendar credentials for the Rust server. When isolating development tests, use the same `ECHO_CONFIG_FILE` and `ECHO_DATA_DIR` overrides for both processes. Shared storage lets deletion remove imported audio and runner source files.
+Run the Echo server and runner with the same `echo.config.json` and library directory. Both read or create the same private `<dataDir>/credentials/runner-token`. For an isolated development library, pass the same `ECHO_CONFIG_FILE` and `ECHO_DATA_DIR` overrides to both processes.
 
-The service binds `127.0.0.1:8765`, requires the token for every request, and rejects browser-origin access. Keep it private on loopback. In Echo Voice, connect Calendar, choose **Sign in to runner**, sign into the same Google account yourself, and choose **Save session**. Then select a Google Meet event and confirm participant consent. Login uses a headed Chromium window (Docker supplies a private virtual display); native Linux needs a working display. The private profile is stored with the library credentials and survives container recreation. Sign out through Echo to remove it. The runner rechecks the active account before joining and fails closed on mismatch or expiration. The app distinguishes joining, waiting for admission and actual recording. Stop the guest in the app and wait for its WAV to finalize before importing and transcribing. Ctrl+C or SIGTERM requests a graceful shutdown.
+1. Connect Google Calendar in Echo.
+2. Select **Sign in to runner**. A separate, normal Chrome window opens with the runner's private profile.
+3. Sign into the connected Calendar account directly in Google. Return to Echo and select **Save session**.
+4. Echo closes only its owned browser window and verifies that the saved session matches Calendar.
+5. Choose an event and confirm participant consent before joining. Stop the guest and wait for the WAV to finalize, then select **Save recording**.
+
+The profile is stored in `<dataDir>/credentials/meet-native-profile`, excluded from backups and Git. It stays on that computer and is reused across meetings. Do not copy an everyday browser profile or share it across operating systems. Login and recording acquire an exclusive lock; only one can use the profile at a time. **Sign out of runner** removes this dedicated session while idle. Calendar authorization is separate. Google may require sign-in again after expiry or a security check.
+
+The native flow has no embedded credential form or remote login viewer. Passwords, passkeys and verification codes are entered directly into Google Chrome. Chrome sync and password saving are disabled in this profile. The runner checks the active account before every join and rejects mismatch or expiration.
+
+## Runtime and controls
+
+The runner listens only on `127.0.0.1`, requires its secret for requests and rejects browser-origin callers. No bot token or runner URL is needed in `.env`. Keep the helper running for the duration of the meeting. Closing Echo's browser tab does not stop the separate runner. Ctrl+C or SIGTERM requests graceful recording finalization.
 
 A start carries a unique request ID. Retrying that ID returns its session; cancellation persists a fence so a delayed request cannot restart it. Echo saves pending start intent before requesting entry and cancels an ambiguous acceptance. If cancellation is offline, the intent survives a restart, deletion is blocked, and Stop bot remains available. Echo retries cancellation every five seconds while the runner returns.
 
 A single guest runs at a time. The browser UI and runner must remain available to control the recording. Closing Echo Voice's browser tab does not stop the separate runner. An interrupted import can be retried safely: Echo Voice verifies deterministic 64 MB chunks, preserving earlier chunks without duplicating them. The overall WAV import limit is 512 MB.
 
-Run offline checks without joining a meeting:
+## Verification
 
-```bash
-python3 tests/integrations_runner_test.py
+For the full Ubuntu checklist and results template, use [Ubuntu native runner qualification](../docs/ubuntu-native-runner-test.md).
+
+Offline lifecycle tests do not contact Google:
+
+```sh
+python3 -B tests/integrations_runner_test.py
+python3 -B tests/native_auth_test.py
 python3 -B tests/runner_auth_test.py
 cargo test -p echo-server integrations::tests
 ```
 
-To verify the real Chromium login transport and profile persistence against synthetic pages inside a running container:
+After installing native prerequisites, run the synthetic audio check as your desktop user:
 
-```bash
-docker compose -f compose.runner.yaml exec -T meeting-runner python3 - < tests/runner_auth_browser_smoke.py
+```sh
+runner/.venv/bin/python -B tests/native_auth_browser_smoke.py --run
+runner/.venv/bin/python -B runner/audio_smoke.py
 ```
 
-This isolated check blocks external requests and removes its own temporary profile. It verifies input, screenshots, persistent cookies, account mismatch rejection, cancellation, profile locking and denied capture permissions. It does not authenticate with Google or qualify live meeting admission.
+The browser check validates synthetic cookie persistence and account mismatch rejection without Google login. The audio check launches an owned native browser with an isolated scratch profile, plays a generated tone, verifies denied camera/microphone permissions and checks audible PCM samples. It removes its own temporary files and audio sink. It does not authenticate Google. On macOS it requires already-granted recording permission and never opens a permission prompt.
 
-Real OAuth, Meet admission and audible recording require your Google project and meeting host. Meet UI changes can require runner maintenance. The receive-only prejoin flow handles explicit Continue/Use/Join without microphone/camera prompts and stops if denied camera/microphone permissions cannot be verified. Each guest stores private `join-diagnostics.json` with its last prejoin/admission phase, sanitized visible button names, known status phrases and visible error messages. It never reads or saves browser cookies, credentials or page URLs in that diagnostic. Review it when a guest cannot request entry; links, meeting codes and email addresses in control labels are redacted.
+Each target system still needs a real sign-in → Save session → restart → meeting admission → audio capture → import test. macOS additionally needs a two-source test proving unrelated browser playback is excluded. Automated lifecycle tests and synthetic tones do not establish live Google compatibility. Current native live qualification is pending; historical tests of the removed container are not evidence for these native paths.
 
-## Live meeting qualification
+When Meet rejects entry, the runner stores a private `join-diagnostics.json` with the last phase, sanitized visible controls and known errors. It excludes browser cookies, credentials and page URLs. Meet UI changes can require runner maintenance. Use local microphone recording or upload when a meeting cannot be joined.
 
-The Docker runner has passed receive-only browser playback and WAV capture checks on macOS with an ARM64 Docker container: camera and microphone permission remain denied while an isolated generated tone reaches the recording. This verifies the local capture pipeline.
-
-A real Google Meet test returned “You can't join this video call” before guest-name entry or an admission request, including with the test meeting temporarily allowing Open access. Google did not expose a more specific reason. Successful live Meet recording is therefore not qualified on that setup; Docker portability does not guarantee that Google accepts the dedicated anonymous browser. The saved-session flow now allows manual sign-in through Echo’s local UI and retains that dedicated profile. It never copies the user’s everyday browser cookies, signs in automatically, or enables camera/microphone capture. Signed-in admission still requires a real qualification test. Use local recording or upload an existing recording when Meet declines the guest.
+See [Google Calendar setup and API details](../docs/integrations.md).

@@ -25,40 +25,23 @@ The OAuth flow checks a ten-minute, HttpOnly, SameSite=Lax state cookie and uses
 
 A Google OAuth project in testing may issue refresh tokens that expire after seven days. Reconnect when prompted. A declined grant, invalid redirect, disabled Calendar API, quota response, and offline connection surface as errors; they never produce pretend calendar results.
 
-## Optional local Google Meet runner (Docker or native Linux)
+## Optional local Google Meet runner
 
-The runner supports **Docker Linux containers on macOS, Windows and Linux**, plus native Linux with PulseAudio, for Google Meet meetings accessible to the connected account. The container keeps Chromium playback and capture in its own private audio environment. Zoom, Teams and unattended scheduled joining are not implemented. Google account and organization policies still apply. The runner joins only after you choose an event and confirm participant consent. It joins through a separate saved browser session using the connected Calendar account. Meet displays that Google account’s identity; it does not necessarily display an Echo-specific participant name. The host must admit it when Meet requires admission.
+The runner runs directly on **macOS and Linux** with installed Google Chrome and a private saved browser profile. Docker is not included. Follow [native setup](../runner/README.md) for prerequisites and startup.
 
-For Docker installation, shared-volume configuration, loopback publishing and the real audio smoke test, follow [runner/README.md](../runner/README.md#docker-setup-macos-windows-and-linux). Docker Desktop runs the Linux container on macOS/Windows; native ScreenCaptureKit or Windows audio drivers are unnecessary. Live meeting admission and playback still need qualification on each setup.
+On macOS, playback capture uses the application-specific ScreenCaptureKit helper and requires explicit Screen & System Audio Recording permission. Linux uses a private PulseAudio sink, also available through PipeWire's PulseAudio compatibility service, and FFmpeg. Both platforms require a desktop session for direct Google sign-in. Camera and microphone remain denied.
 
-For native Linux, use a normal, non-root desktop account. Install Python 3.10+, FFmpeg, PulseAudio tools, and Playwright's Chromium dependencies. On Debian/Ubuntu, an administrator can install prerequisites with:
+The runner joins only after you choose an event and confirm participant consent. Meet displays the signed-in Google account's identity. Host admission and Google organization policies still apply. Zoom, Teams, unattended scheduled joining and a native Windows runner are not implemented.
 
-```bash
-sudo apt-get install python3 python3-venv ffmpeg pulseaudio pulseaudio-utils
-python3 -m venv runner/.venv
-runner/.venv/bin/pip install -r runner/requirements.txt
-runner/.venv/bin/python -m playwright install --with-deps chromium
-pulseaudio --start
-```
-
-The `--with-deps` installation may request administrator access for operating-system packages. Run the recorder itself as your normal user. PipeWire systems need the PulseAudio compatibility service and working `pactl info`.
-
-Run from the project root with the same `echo.config.json` as the Rust server:
-
-```bash
-runner/.venv/bin/python runner/meet_runner.py --doctor
-runner/.venv/bin/python runner/meet_runner.py
-```
-
-The config initializes `dataDir`, `runner.url`, headless mode, and admission timeout. The runner and server automatically share a random secret in `<dataDir>/credentials/runner-token` with private Unix permissions. No bot token or runner URL is needed in `.env`. The native runner binds the configured `127.0.0.1` port; Docker publishes that same host loopback port while listening inside its isolated container and rejects browser-origin callers; the Rust server sends authenticated requests directly without proxies or redirects.
+Run the server and helper with the same config and library. The config initializes `dataDir`, `runner.url` and admission timeout. Native sign-in and meetings use a visible dedicated browser regardless of the legacy headless setting. Both processes share a random secret in `<dataDir>/credentials/runner-token` with private Unix permissions. The runner binds only the configured `127.0.0.1` port and rejects browser-origin callers. The Rust server sends authenticated requests directly without proxies or redirects.
 
 ## Runner browser sign-in
 
-After connecting Calendar and starting the runner, use **Sign in to runner** on the Calendar page. Echo shows the dedicated browser in a local dialog. Sign in to Google yourself using the displayed Calendar account, complete any Google verification, then choose **Save session**. Echo accepts the session only when it can verify the active Meet account matches Calendar. The runner also rechecks that identity immediately before each join.
+After connecting Calendar and starting the runner, use **Sign in to runner** on the Calendar page. Echo opens a dedicated native Chrome window. Sign in to Google yourself using the displayed Calendar account, complete any Google verification, then choose **Save session**. Echo accepts the session only when it can verify the active Meet account matches Calendar. The runner also rechecks that identity immediately before each join.
 
-The session lives in the library’s private credentials directory, survives container recreation with the same data mount, and is excluded from library backups. **Sign out of runner** removes this dedicated saved session; Calendar access is managed separately. Reconnect after Google expires the session. Switching Calendar accounts does not grant the old runner session access to the new account.
+The session lives in the library’s private credentials directory, survives runner restarts on that computer, and is excluded from library backups. **Sign out of runner** removes this dedicated saved session; Calendar access is managed separately. Reconnect after Google expires the session. Switching Calendar accounts does not grant the old runner session access to the new account.
 
-The login browser and recording cannot run simultaneously. Login controls and temporary screenshots use the existing authenticated loopback API through Echo’s same-origin server. There is no separately published remote-desktop port. Typed login input and screenshots are not logged or saved as review evidence. Camera and microphone remain denied. The user completes passwords, passkeys, two-factor verification and CAPTCHAs; Google can refuse automated browsers, and Echo does not bypass those restrictions.
+The login browser and recording cannot run simultaneously. Echo exposes Save and Cancel controls through its authenticated loopback API. Native Google login happens directly in the browser window; credentials and login screenshots are not sent through the Echo interface. Camera and microphone remain denied. The user completes passwords, passkeys, two-factor verification and CAPTCHAs; Google can refuse automated browsers, and Echo does not bypass those restrictions.
 
 ## Recording behavior
 
@@ -92,8 +75,6 @@ All routes below are on the local Rust server. The server's loopback Host and sa
 | `POST /api/integrations/runner/auth/finish` | Verify and save the current runner session |
 | `POST /api/integrations/runner/auth/cancel` | Close the matching interactive login session |
 | `DELETE /api/integrations/runner/auth` | Remove the dedicated saved runner profile while idle |
-| `GET /api/integrations/runner/auth/screen` | Current login screenshot for its session ID; never cached |
-| `POST /api/integrations/runner/auth/input` | Bounded click, key, text or scroll input for that login session |
 | `POST /api/integrations/bot` | Start a guest with `{meetingId,url,consent:true}` |
 | `GET /api/integrations/bot?meetingId=...` | Read real joining/waiting/recording/completed/failed state |
 | `DELETE /api/integrations/bot?meetingId=...` | Request the guest stop and finalize its audio |
@@ -115,6 +96,8 @@ A real Google OAuth authorization, Google Meet admission, and audible capture mu
 
 ## Live meeting qualification
 
-The Docker runner has passed receive-only browser playback and WAV capture checks on macOS with an ARM64 Docker container: camera and microphone permission remain denied while an isolated generated tone reaches the recording. This verifies the local capture pipeline.
+The [Ubuntu qualification guide](ubuntu-native-runner-test.md) provides installation commands, an isolated test library, live checks and cleanup steps.
 
-A real Google Meet test returned “You can't join this video call” before guest-name entry or an admission request, including with the test meeting temporarily allowing Open access. Google did not expose a more specific reason. Successful live Meet recording is therefore not qualified on that setup; Docker portability does not guarantee that Google accepts the dedicated anonymous browser. The new saved-session flow requires the user to sign in manually in the dedicated runner browser. It never copies another browser profile or enables camera/microphone capture. Signed-in admission remains unqualified until a real test succeeds. Use local recording or upload an existing recording when Meet declines the guest.
+Native macOS and Linux need separate live qualification: saved Google session verification and reuse, meeting admission, audible playback capture, stop/finalization, import and transcription. macOS also needs a two-source audio test to prove exclusion of unrelated browser playback. These checks remain pending; offline lifecycle tests and earlier results from the removed container do not qualify native capture.
+
+Google may reject a browser or meeting entry even with a saved session. The runner fails closed on unverifiable identity, permission or capture state. It does not bypass Google security checks. Use local recording or upload when Meet declines entry.

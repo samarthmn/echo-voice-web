@@ -5,6 +5,7 @@ import json
 import tempfile
 import threading
 import unittest
+import wave
 import sys
 from types import SimpleNamespace
 from pathlib import Path
@@ -118,22 +119,6 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "failed before PCM"):
                 runner.wait_for_pcm(process, audio, timeout=0.1)
 
-    def test_container_browser_never_uses_muted_playback_or_disk_shared_memory(self):
-        """Playwright's default audio mute is explicitly excluded on both capture paths."""
-        for container in (False, True):
-            with self.subTest(container=container), patch.dict(runner.os.environ, {"ECHO_RUNNER_CONTAINER": "1" if container else ""}):
-                options = runner.browser_options("private-fixture", False)
-                self.assertEqual(options["channel"], "chromium")
-                self.assertIn("--mute-audio", options["ignore_default_args"])
-                self.assertEqual(options["env"]["PULSE_SINK"], "private-fixture")
-                self.assertFalse(options["headless"], "Dedicated account recordings use headed Chromium even inside Docker")
-                self.assertNotIn("--use-fake-device-for-media-stream", options["args"])
-                self.assertNotIn("--use-fake-ui-for-media-stream", options["args"])
-                self.assertIn("--deny-permission-prompts", options["args"])
-                if container:
-                    self.assertIn("--disable-dev-shm-usage", options["ignore_default_args"])
-                    self.assertNotIn("--disable-dev-shm-usage", options["args"])
-
     def test_receive_only_context_denies_both_devices_before_join_and_fails_closed(self):
         """Apply denials to the exact guest context and stop if enforcement cannot be verified."""
         context, page, cdp, browser_cdp = Mock(), Mock(), Mock(), Mock()
@@ -162,67 +147,120 @@ class RunnerTests(unittest.TestCase):
         browser_cdp.send.assert_not_called()
         cdp.detach.assert_called_once()
 
-    def test_readiness_requires_an_installed_chromium_not_only_python(self):
-        """A live PulseAudio server and installed Python package cannot imply browser readiness."""
-        with tempfile.TemporaryDirectory(dir=SCRATCH) as root:
-            executable = Path(root) / "chromium"
-            context = Mock()
-            context.__enter__ = Mock(return_value=SimpleNamespace(chromium=SimpleNamespace(executable_path=str(executable))))
-            context.__exit__ = Mock(return_value=False)
-            factory = Mock(return_value=context)
-            module = SimpleNamespace(sync_playwright=factory)
-            with patch.dict(sys.modules, {"playwright.sync_api": module}), patch.object(runner, "CHROMIUM_EXECUTABLE", None), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner.shutil, "which", return_value="fixture"), patch.object(runner.Path, "exists", return_value=True), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
-                ready, detail = runner.readiness()
-                self.assertFalse(ready)
-                self.assertIn("install chromium", detail)
-                executable.write_text("fixture")
-                executable.chmod(0o600)
-                self.assertFalse(runner.readiness()[0])
-                executable.chmod(0o700)
-                self.assertTrue(runner.readiness()[0])
-                self.assertEqual(factory.call_count, 3, "Missing or non-executable paths must not be cached")
-                self.assertTrue(runner.readiness()[0])
-                self.assertEqual(factory.call_count, 3, "Health/start checks should reuse the verified browser path")
-                executable.chmod(0o600)
-                self.assertFalse(runner.readiness()[0])
-                self.assertIsNone(runner.CHROMIUM_EXECUTABLE)
-                executable.chmod(0o700)
-                self.assertTrue(runner.readiness()[0])
-                self.assertEqual(factory.call_count, 4, "A restored installation can be verified again")
-                executable.unlink()
-                self.assertFalse(runner.readiness()[0], "Removing a cached browser must invalidate readiness")
-                self.assertIsNone(runner.CHROMIUM_EXECUTABLE)
+    def test_linux_auth_uses_native_profile_and_does_not_require_audio_tools(self):
+        import native_auth
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root, patch.object(runner, "AUTH", None), patch.object(runner, "DATA_ROOT", Path(root)), patch.object(runner.sys, "platform", "linux"), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner, "chrome_executable", return_value="/fixture/chrome"), patch.object(runner.shutil, "which", return_value=None):
+            self.assertTrue(runner.auth_readiness()[0])
+            self.assertIsInstance(runner.auth_manager(), native_auth.NativeAuthManager)
+            self.assertEqual(runner.auth_manager().status()["mode"], "native_window")
+            ready, detail = runner.readiness()
+            self.assertFalse(ready)
+            self.assertIn("ffmpeg, pactl", detail)
 
-    def test_failed_browser_discovery_is_retried(self):
-        """A temporary Playwright inspection failure cannot poison future health checks."""
-        with tempfile.TemporaryDirectory(dir=SCRATCH) as root:
-            executable = Path(root) / "chromium"
-            executable.write_text("fixture")
-            executable.chmod(0o700)
-            context = Mock()
-            context.__enter__ = Mock(side_effect=[RuntimeError("fixture failure"), SimpleNamespace(chromium=SimpleNamespace(executable_path=str(executable)))])
-            context.__exit__ = Mock(return_value=False)
-            factory = Mock(return_value=context)
-            with patch.dict(sys.modules, {"playwright.sync_api": SimpleNamespace(sync_playwright=factory)}), patch.object(runner, "CHROMIUM_EXECUTABLE", None), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner.shutil, "which", return_value="fixture"), patch.object(runner.Path, "exists", return_value=True), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
-                ready, detail = runner.readiness()
-                self.assertFalse(ready)
-                self.assertIn("could not be checked", detail)
-                self.assertIsNone(runner.CHROMIUM_EXECUTABLE)
-                self.assertTrue(runner.readiness()[0])
-                self.assertEqual(factory.call_count, 2)
+    def test_linux_session_reopens_native_profile_with_owned_sink_and_cleans_up(self):
+        """Exercise production session routing while every browser/audio call is mocked."""
+        playwright, context, page, lease = Mock(), Mock(), Mock(), Mock()
+        context.pages = [page]
+        module = SimpleNamespace(sync_playwright=lambda: SimpleNamespace(start=lambda: playwright))
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root, patch.object(runner, "DATA", Path(root)), patch.object(runner.sys, "platform", "linux"), patch.dict(sys.modules, {"playwright.sync_api": module}), patch.object(runner, "native_persistent_context", return_value=context) as launch, patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="42\n")) as audio, patch.object(runner, "deny_capture"), patch.object(runner, "verify_receive_only"), patch.object(runner, "require_account"), patch.object(runner, "prepare_guest", return_value=None), patch.object(runner, "close_context") as close:
+            session = runner.Session("fixture-native", "https://meet.google.com/abc-defg-hij", "fixture-request", "fixture@example.com", lease)
+            session.run()
+            sink = launch.call_args.kwargs["sink"]
+            self.assertTrue(sink.startswith("echo_"))
+            self.assertEqual(launch.call_args.args, (playwright, lease.profile))
+            self.assertIn("sink_name=" + sink, audio.call_args_list[0].args[0])
+            self.assertEqual(audio.call_args_list[-1].args[0], ["pactl", "unload-module", "42"])
+            close.assert_called_once_with(context)
+            playwright.stop.assert_called_once()
+            lease.close.assert_called_once()
+            self.assertEqual(session.status, "completed")
+            self.assertFalse(session.audio_available())
 
-    def test_container_bind_is_explicit_and_keeps_native_loopback(self):
-        """The broader container listener cannot be selected by ordinary native CLI invocation."""
-        with patch.object(runner.sys, "argv", ["meet_runner.py", "--container-bind"]), patch.dict(runner.os.environ, {"ECHO_RUNNER_CONTAINER": ""}), patch("sys.stderr", io.StringIO()):
+    def test_stop_during_account_proof_never_clicks_join_or_republishes_waiting(self):
+        """Stop arriving inside a slow identity check fences the later UI action."""
+        for stop_phase in ("first-proof", "prejoin-proof", "join-click"):
+            with self.subTest(stop_phase=stop_phase):
+                playwright, context, page, lease, join = Mock(), Mock(), Mock(), Mock(), Mock()
+                context.pages = [page]
+                module = SimpleNamespace(sync_playwright=lambda: SimpleNamespace(start=lambda: playwright))
+                with tempfile.TemporaryDirectory(dir=SCRATCH) as root, patch.object(runner, "DATA", Path(root)), patch.object(runner.sys, "platform", "linux"), patch.dict(sys.modules, {"playwright.sync_api": module}), patch.object(runner, "native_persistent_context", return_value=context), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="42\n")), patch.object(runner, "deny_capture"), patch.object(runner, "verify_receive_only"), patch.object(runner, "require_account") as proof, patch.object(runner, "prepare_guest", return_value=join), patch.object(runner, "close_context"), patch.object(runner, "join_diagnostics"):
+                    session = runner.Session("fixture-stop", "https://meet.google.com/abc-defg-hij", "fixture-request", "fixture@example.com", lease)
+                    persisted = []
+                    checks = []
+                    def account(*args):
+                        checks.append(True)
+                        if (stop_phase == "first-proof" and len(checks) == 1) or (stop_phase == "prejoin-proof" and len(checks) == 2):
+                            session.stop()
+                    proof.side_effect = account
+                    if stop_phase == "join-click":
+                        join.click.side_effect = lambda **kwargs: session.stop()
+                    with patch.object(session, "persist", side_effect=lambda: persisted.append(session.status)):
+                        session.run()
+                    if stop_phase == "join-click":
+                        join.click.assert_called_once()
+                    else:
+                        join.click.assert_not_called()
+                    self.assertEqual(persisted, ["stopping", "completed"])
+                    self.assertIsNone(session.recording_process)
+                    lease.close.assert_called_once()
+
+    def test_stop_fences_late_waiting_and_recording_state_updates(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root, patch.object(runner, "DATA", Path(root)):
+            session = runner.Session("fixture-stop-state", "https://meet.google.com/abc-defg-hij", "fixture-request", "fixture@example.com", Mock())
+            session.stop()
+            for status in ("joining", "waiting", "recording"):
+                session.set_state(status, "late async result")
+                self.assertEqual(session.status, "stopping")
+                self.assertEqual(json.loads((session.folder / "session.json").read_text())["status"], "stopping")
+
+    def test_linux_readiness_checks_desktop_audio_server_and_ffmpeg_input(self):
+        with patch.object(runner.sys, "platform", "linux"), patch.object(runner, "auth_readiness", return_value=(True, "ready")), patch.object(runner.shutil, "which", return_value="/fixture/tool"), patch.object(runner.subprocess, "run") as run:
+            run.side_effect = [SimpleNamespace(returncode=0), SimpleNamespace(returncode=0, stdout=" DE pulse Pulse audio output\n", stderr="")]
+            self.assertTrue(runner.readiness()[0])
+            self.assertEqual(run.call_args_list[0].args[0], ["pactl", "info"])
+            self.assertEqual(run.call_args_list[1].args[0], ["ffmpeg", "-hide_banner", "-devices"])
+            run.side_effect = [SimpleNamespace(returncode=1)]
+            self.assertIn("PipeWire-Pulse", runner.readiness()[1])
+            for devices in (" E pulse output only\n", " D alsa ALSA input\n", ""):
+                run.side_effect = [SimpleNamespace(returncode=0), SimpleNamespace(returncode=0, stdout=devices, stderr="")]
+                self.assertIn("PulseAudio input support", runner.readiness()[1])
+            run.side_effect = runner.subprocess.TimeoutExpired("fixture", 5)
+            self.assertIn("could not be checked", runner.readiness()[1])
+
+    def test_readiness_propagates_missing_desktop_or_browser_and_retries(self):
+        with patch.object(runner.sys, "platform", "linux"), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner, "chrome_executable", side_effect=[runner.AuthError("Desktop unavailable"), "/fixture/chrome"]):
+            self.assertEqual(runner.readiness(), (False, "Desktop unavailable"))
+            self.assertTrue(runner.auth_readiness()[0])
+        with patch.object(runner.sys, "platform", "win32"):
+            self.assertFalse(runner.auth_readiness()[0])
+
+    def test_native_sign_in_does_not_require_audio_capture_permission(self):
+        import native_auth
+        helper = Mock()
+        with patch.object(runner.sys, "platform", "darwin"), patch.object(runner.importlib.util, "find_spec", return_value=Mock()), patch.object(runner, "chrome_executable", return_value="/fixture/Chrome"), patch.object(runner, "mac_capture_helper", return_value=helper), patch.object(runner.os, "access", return_value=True), patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='{"ready":false,"state":"permission_required"}')):
+            self.assertTrue(runner.auth_readiness()[0])
+            self.assertFalse(runner.readiness()[0])
+            self.assertIn("Screen & System Audio", runner.readiness()[1])
+
+    def test_native_capture_refuses_a_missing_or_unresponsive_helper(self):
+        helper = Mock()
+        helper.is_file.return_value = False
+        with patch.object(runner.sys, "platform", "darwin"), patch.object(runner, "auth_readiness", return_value=(True, "ready")), patch.object(runner, "mac_capture_helper", return_value=helper):
+            self.assertFalse(runner.readiness()[0])
+            helper.is_file.return_value = True
+            with patch.object(runner.os, "access", return_value=True), patch.object(runner.subprocess, "run", side_effect=runner.subprocess.TimeoutExpired("fixture", 1)):
+                self.assertFalse(runner.readiness()[0])
+
+    def test_native_runner_only_binds_loopback_and_rejects_container_flag(self):
+        with patch.object(runner.sys, "argv", ["meet_runner.py", "--container-bind"]), patch("sys.stderr", io.StringIO()):
             with self.assertRaises(SystemExit) as error:
                 runner.main()
             self.assertEqual(error.exception.code, 2)
         server = Mock()
         server.serve_forever.side_effect = KeyboardInterrupt
-        for container in (False, True):
-            with self.subTest(container=container), patch.object(runner.sys, "argv", ["meet_runner.py", "--port", "18765"] + (["--container-bind"] if container else [])), patch.object(runner.sys, "platform", "linux"), patch.dict(runner.os.environ, {"ECHO_RUNNER_CONTAINER": "1"}), patch.object(runner, "runner_token", return_value="fixture-token"), patch.object(runner, "recover_sessions"), patch.object(runner, "SESSIONS", {}), patch.object(runner.Path, "mkdir"), patch.object(runner.signal, "signal"), patch.object(runner, "ThreadingHTTPServer", return_value=server) as factory, patch("sys.stdout", io.StringIO()):
-                self.assertEqual(runner.main(), 0)
-                factory.assert_called_once_with(("0.0.0.0" if container else "127.0.0.1", 18765), runner.Handler)
+        with patch.object(runner.sys, "argv", ["meet_runner.py", "--port", "18765"]), patch.object(runner, "AUTH", None), patch.object(runner, "runner_token", return_value="fixture-token"), patch.object(runner, "recover_sessions"), patch.object(runner, "SESSIONS", {}), patch.object(runner.Path, "mkdir"), patch.object(runner.signal, "signal"), patch.object(runner, "ThreadingHTTPServer", return_value=server) as factory, patch("sys.stdout", io.StringIO()):
+            self.assertEqual(runner.main(), 0)
+            factory.assert_called_once_with(("127.0.0.1", 18765), runner.Handler)
 
     def test_doctor_inspects_existing_credentials_without_writing_them(self):
         """Doctor reports real credential validity and keeps a missing library untouched."""
@@ -281,6 +319,64 @@ class RunnerTests(unittest.TestCase):
             runner.recover_sessions()
             persisted = json.loads((directory / "session.json").read_text())
             self.assertEqual(persisted["status"], "failed")
+
+    def test_audio_availability_requires_finalized_and_complete_wav(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as root, patch.object(runner, "DATA", Path(root)):
+            directory = Path(root) / "meeting-1"
+            directory.mkdir()
+            path = directory / "meeting.wav"
+            (directory / "session.json").write_text(json.dumps({"meetingId": "meeting-1", "status": "completed"}))
+            session = runner.Session.__new__(runner.Session)
+            session.audio, session.status = path, "completed"
+            # Reproduce an interrupted native helper: zero data length in its
+            # initial header, despite physical sample bytes appended afterward.
+            with wave.open(str(path), "wb") as audio:
+                audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+            with path.open("ab") as audio:
+                audio.write(b"\0" * 6400)
+            self.assertFalse(session.audio_available())
+            self.assertFalse(runner.previous_session("meeting-1")["audioAvailable"])
+            with wave.open(str(path), "wb") as audio:
+                audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+                audio.writeframes(b"\0" * 6400)
+            self.assertEqual(runner.finalized_audio_duration(path), 0.2)
+            self.assertTrue(session.audio_available())
+            self.assertTrue(runner.previous_session("meeting-1")["audioAvailable"])
+            session.status = "recording"
+            self.assertFalse(session.audio_available())
+            session.status = "completed"
+            with path.open("r+b") as audio:
+                audio.truncate(path.stat().st_size - 2)
+            self.assertFalse(session.audio_available())
+            self.assertFalse(runner.previous_session("meeting-1")["audioAvailable"])
+
+    def test_native_shutdown_retains_nonzero_or_forced_failure(self):
+        for mode in ("graceful", "nonzero", "timeout", "already_exited"):
+            with self.subTest(mode=mode), patch.object(runner.sys, "platform", "darwin"):
+                session = runner.Session.__new__(runner.Session)
+                session.capture_failure = None
+                process = Mock()
+                process.poll.side_effect = [1, 1] if mode == "already_exited" else [None, 1 if mode == "nonzero" else 0]
+                if mode == "timeout":
+                    process.communicate.side_effect = runner.subprocess.TimeoutExpired("fixture", 10)
+                session.recording_process = process
+                session.finish_audio()
+                self.assertEqual(session.capture_failure is None, mode == "graceful")
+                if mode == "already_exited":
+                    process.terminate.assert_not_called()
+                else:
+                    process.terminate.assert_called()
+
+    def test_linux_shutdown_keeps_ffmpeg_graceful_input(self):
+        session = runner.Session.__new__(runner.Session)
+        session.capture_failure = None
+        session.recording_process = Mock()
+        session.recording_process.poll.return_value = None
+        with patch.object(runner.sys, "platform", "linux"):
+            session.finish_audio()
+        session.recording_process.communicate.assert_called_once_with(input=b"q\n", timeout=10)
+        session.recording_process.terminate.assert_not_called()
+        self.assertIsNone(session.capture_failure)
 
     def test_http_requires_token_and_rejects_browser_origins_and_missing_consent(self):
         with patch.object(runner, "TOKEN", "test-token"):

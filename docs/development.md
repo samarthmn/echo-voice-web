@@ -27,7 +27,7 @@ Install Apple's command-line tools:
 xcode-select --install
 ```
 
-Complete the installation window, then install stable Rust and Node.js as above. Build on the Mac itself; the Linux package won't run there. The source app has been exercised on macOS. The optional Meet recording runner uses a Linux Docker container on macOS; see its separate live-admission limits in the [integration guide](integrations.md).
+Complete the installation window, then install stable Rust and Node.js as above. Build on the Mac itself; the Linux package won't run there. The source app has been exercised on macOS. The optional Meet recording runner runs natively on macOS and Linux; see setup and live qualification limits in the [integration guide](integrations.md).
 
 ### Windows with WSL
 

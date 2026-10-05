@@ -28,7 +28,7 @@ def load_config():
 def runner_token(data):
     """Publish a private random secret atomically under a lock shared with Rust."""
     if fcntl is None:
-        raise ValueError("Runner credentials require a Unix file lock; capture supports Linux only.")
+        raise ValueError("Runner credentials require a Unix file lock; capture supports macOS and Linux.")
     folder = data / "credentials"
     folder.mkdir(parents=True, mode=0o700, exist_ok=True)
     if folder.is_symlink():

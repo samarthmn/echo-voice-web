@@ -1,7 +1,8 @@
 """Synthetic real-Chromium transport/profile test. NO real Google authentication.
 
-Run inside the built runner container with its DISPLAY set, e.g.
-docker exec -i <container> python3 - < tests/runner_auth_browser_smoke.py
+Legacy remote-viewer transport regression test; not native-runner qualification.
+Run from the project root with a working graphical display:
+runner/.venv/bin/python -B tests/runner_auth_browser_smoke.py
 All network requests are fulfilled/aborted locally before browser navigation.
 This opt-in test needs the runner's installed Chromium and a working display.
 It is intentionally outside unittest discovery; it never authenticates Google.

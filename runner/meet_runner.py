@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local, consent-gated Google Meet guest recorder. Linux + PulseAudio (native or Docker).
+"""Local, consent-gated Google Meet recorder. Native macOS or Linux/PulseAudio.
 
 No meeting audio is sent to a recording service. Google Meet itself remains an
 external communications service. Run only on loopback; requests require a token.
@@ -26,9 +26,10 @@ import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import load_config, runner_token
-from capture import browser_options, capture_command, deny_capture, verify_receive_only, wait_for_pcm
+from capture import capture_command, deny_capture, verify_receive_only, wait_for_pcm
 from meet_ui import capture_join_failure, prepare_guest, diagnostics as join_diagnostics
-from meet_auth import AuthManager, AuthError, email_address, session_id as auth_session_id, input_command, persistent_context, require_account, START_URL, close_context
+from meet_auth import AuthError, email_address, input_command, require_account, START_URL, close_context
+from native_auth import NativeAuthManager, native_persistent_context, native_browser_pid, chrome_executable
 
 os.umask(0o077)
 CONFIG, DATA_ROOT, RUNNER_PORT = load_config()
@@ -36,8 +37,7 @@ DATA = DATA_ROOT / "bot"
 TOKEN = ""  # Initialized only when the runner is started, not when tests import it.
 SESSIONS: dict[str, "Session"] = {}
 LOCK = threading.RLock()
-CHROMIUM_EXECUTABLE: Path | None = None
-AUTH: AuthManager | None = None
+AUTH: NativeAuthManager | None = None
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
 MEET_PATTERN = re.compile(r"^/[a-z]{3}-[a-z]{4}-[a-z]{3}/?$")
 ACTIVE = {"joining", "waiting", "recording", "stopping"}
@@ -48,7 +48,7 @@ def auth_manager():
     global AUTH
     with LOCK:
         if AUTH is None:
-            AUTH = AuthManager(DATA_ROOT)
+            AUTH = NativeAuthManager(DATA_ROOT)
         return AUTH
 
 
@@ -67,38 +67,73 @@ def validate_url(raw: str) -> str:
     return "https://meet.google.com" + p.path.rstrip("/")
 
 
-def readiness() -> tuple[bool, str]:
-    """Check Linux, PulseAudio, FFmpeg, and Playwright prerequisites without joining a meeting."""
-    global CHROMIUM_EXECUTABLE
-    missing = [x for x in ("ffmpeg", "pactl") if not shutil.which(x)]
+def auth_readiness() -> tuple[bool, str]:
+    """Allow account setup before audio capture prerequisites are configured."""
+    if sys.platform not in {"darwin", "linux"}:
+        return False, "The native meeting runner supports macOS and Linux desktop sessions."
     if importlib.util.find_spec("playwright") is None:
-        missing.append("Python playwright")
+        return False, "Install the native meeting helper dependencies with runner/requirements.txt."
+    try:
+        chrome_executable()
+    except AuthError as error:
+        return False, str(error)
+    return True, "The dedicated desktop browser is ready for Google sign-in."
+
+
+def mac_capture_helper() -> Path:
+    return Path(__file__).resolve().parents[1] / "target" / "native-runner" / "echo-audio-capture"
+
+
+def readiness() -> tuple[bool, str]:
+    """Check native desktop/browser and platform audio prerequisites without joining."""
+    ready, detail = auth_readiness()
+    if not ready:
+        return ready, detail
+    if sys.platform == "darwin":
+        helper = mac_capture_helper()
+        if not helper.is_file() or not os.access(helper, os.X_OK):
+            return False, "Build the Mac audio helper with sh runner/macos/build.sh. You can connect your meeting account first."
+        try:
+            result = subprocess.run([str(helper), "--check"], capture_output=True, text=True, timeout=1.5)
+            check = json.loads(result.stdout)
+            if result.returncode != 0 or check.get("ready") is not True:
+                return False, "Allow the Mac helper in System Settings → Privacy & Security → Screen & System Audio Recording before recording."
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return False, "The Mac audio helper could not be checked. Rebuild it and retry."
+        return True, "The native Mac meeting runner is ready."
+    missing = [x for x in ("ffmpeg", "pactl") if not shutil.which(x)]
     if missing:
-        return False, "Install local runner prerequisites: " + ", ".join(missing)
-    if os.name != "posix" or not Path("/proc").exists():
-        return False, "The recording runner currently supports Linux with PulseAudio."
+        return False, "Install native Linux runner prerequisites: " + ", ".join(missing)
     try:
         probe = subprocess.run(["pactl", "info"], capture_output=True, timeout=5)
         if probe.returncode:
-            return False, "PulseAudio is not running. Start pulseaudio --start as your normal user."
+            return False, "Connect to your desktop PulseAudio or PipeWire-Pulse server. Run the runner as the same logged-in user."
+        probe = subprocess.run(["ffmpeg", "-hide_banner", "-devices"], capture_output=True, text=True, timeout=5)
+        if probe.returncode or not re.search(r"^\s*D\S*\s+pulse\s", probe.stdout + probe.stderr, re.M):
+            return False, "Install an FFmpeg build with PulseAudio input support (ffmpeg -devices must list pulse)."
     except (OSError, subprocess.TimeoutExpired):
-        return False, "PulseAudio could not be reached."
+        return False, "The native Linux audio tools could not be checked. Verify pactl info and ffmpeg -devices in this desktop session."
+    return True, "Native Linux runner prerequisites are ready. Audio capture is checked when recording starts."
+
+
+def finalized_audio_duration(path: Path) -> float | None:
+    """Require a finalized PCM header and the complete declared sample payload.
+
+    The Mac helper initially writes a zero-length header. File size alone can
+    mistake its interrupted, unfinalized output for an importable recording.
+    Reading the last frame checks completeness without loading long recordings.
+    """
     try:
-        with LOCK:
-            executable = CHROMIUM_EXECUTABLE
-            if executable is None:
-                from playwright.sync_api import sync_playwright
-                with sync_playwright() as playwright:
-                    executable = Path(playwright.chromium.executable_path)
-            if not executable.is_file() or not os.access(executable, os.X_OK):
-                CHROMIUM_EXECUTABLE = None
-                return False, "Install the runner's Chromium browser with python -m playwright install chromium."
-            CHROMIUM_EXECUTABLE = executable
-    except Exception:
-        return False, "Playwright's Chromium installation could not be checked. Reinstall the runner browser."
-    if os.environ.get("ECHO_RUNNER_CONTAINER") == "1" and not (Path(os.environ["XDG_RUNTIME_DIR"]) / "audio-qualified").is_file():
-        return False, "The container has not verified audible Chromium playback yet. Check its startup audio test and logs."
-    return True, "Local Google Meet runner is ready. Sign in to its dedicated recording browser before joining."
+        with wave.open(str(path), "rb") as audio:
+            frames, rate = audio.getnframes(), audio.getframerate()
+            if frames <= 0 or rate <= 0 or audio.getcomptype() != "NONE":
+                return None
+            audio.setpos(frames - 1)
+            if len(audio.readframes(1)) != audio.getnchannels() * audio.getsampwidth():
+                return None
+            return frames / rate
+    except (OSError, wave.Error, EOFError, ValueError, OverflowError):
+        return None
 
 
 class Session:
@@ -116,13 +151,14 @@ class Session:
         self.duration = 0.0
         self.stop_event = threading.Event()
         self.recording_process = None
+        self.capture_failure = None
         self.sink_module = None
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.persist()
 
     def audio_available(self) -> bool:
         """Expose audio only after capture has stopped and the WAV contains sample data."""
-        return self.audio.exists() and self.audio.stat().st_size > 44 and self.status not in ACTIVE
+        return self.status not in ACTIVE and finalized_audio_duration(self.audio) is not None
 
     def public(self) -> dict:
         """Return a lock-consistent session snapshot without URLs or bearer credentials."""
@@ -140,6 +176,8 @@ class Session:
     def set_state(self, status: str, detail: str):
         """Update and persist a lifecycle transition under the session lock."""
         with LOCK:
+            if self.stop_event.is_set() and status in {"joining", "waiting", "recording"}:
+                return
             self.status, self.detail = status, detail
             self.persist()
 
@@ -156,13 +194,15 @@ class Session:
         failure = None
         try:
             from playwright.sync_api import sync_playwright
-            sink_result = subprocess.run(["pactl", "load-module", "module-null-sink", "sink_name=" + sink,
-                                          "sink_properties=device.description=EchoVoice"], capture_output=True, text=True, timeout=10)
-            if sink_result.returncode:
-                raise RuntimeError("A private audio sink could not be created. Check PulseAudio.")
-            self.sink_module = sink_result.stdout.strip()
+            if sys.platform != "darwin":
+                sink_result = subprocess.run(["pactl", "load-module", "module-null-sink", "sink_name=" + sink,
+                                              "sink_properties=device.description=EchoVoice"], capture_output=True, text=True, timeout=10)
+                if sink_result.returncode:
+                    raise RuntimeError("A private audio sink could not be created. Check PulseAudio.")
+                self.sink_module = sink_result.stdout.strip()
             playwright = sync_playwright().start()
-            context = persistent_context(playwright, self.profile_lease.profile, sink)
+            context = native_persistent_context(playwright, self.profile_lease.profile,
+                                                sink=sink if sys.platform == "linux" else None)
             browser = context
             page = context.pages[0] if context.pages else context.new_page()
             with capture_join_failure(page, self.folder):
@@ -174,6 +214,8 @@ class Session:
                 except Exception:
                     auth_manager().expired()
                     raise
+                if self.stop_event.is_set():
+                    return
                 try:
                     page.goto(self.url + "?hl=en", wait_until="domcontentloaded", timeout=60_000)
                 except Exception:
@@ -188,7 +230,11 @@ class Session:
                 except Exception:
                     auth_manager().expired()
                     raise
+                if self.stop_event.is_set():
+                    return
                 join.click(timeout=15_000)
+                if self.stop_event.is_set():
+                    return
                 join_diagnostics(page, self.folder, "entry-requested")
                 self.set_state("waiting", "Waiting for the host to admit the connected recording account. No meeting audio is being recorded yet.")
                 admission_timeout = CONFIG["runner"]["admissionTimeoutSeconds"]
@@ -208,8 +254,10 @@ class Session:
                     join_diagnostics(page, self.folder, "admitted")
                     log = open(self.folder / "capture.log", "wb")
                     try:
-                        self.recording_process = subprocess.Popen(capture_command(sink, self.audio),
-                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log)
+                        command = ([str(mac_capture_helper()), "--pid", str(native_browser_pid(context)), "--output", str(self.audio.resolve())]
+                                   if sys.platform == "darwin" else capture_command(sink, self.audio))
+                        self.recording_process = subprocess.Popen(command,
+                            stdin=subprocess.PIPE, stdout=log if sys.platform == "darwin" else subprocess.DEVNULL, stderr=log)
                         wait_for_pcm(self.recording_process, self.audio)
                         self.started_at = utc_now()
                         self.set_state("recording", "Recording this Google Meet locally. Microphone and camera remain off.")
@@ -235,11 +283,12 @@ class Session:
             # Playwright errors may contain remote page internals. Keep API messages concise.
             failure = str(error).split("\n")[0][:350]
             if "Executable doesn't exist" in failure:
-                failure = "Install the runner's Chromium browser with python -m playwright install chromium."
+                failure = "Install Google Chrome (or Chromium on Linux), then reconnect the dedicated meeting browser."
             elif "Target page, context or browser has been closed" in failure:
                 failure = "The meeting browser closed. Any completed recording has been preserved."
         finally:
             self.finish_audio()
+            failure = failure or self.capture_failure
             if browser:
                 try:
                     close_context(browser)
@@ -255,10 +304,10 @@ class Session:
                     pass
             self.ended_at = utc_now()
             if self.audio.exists():
-                try:
-                    with wave.open(str(self.audio), "rb") as audio:
-                        self.duration = audio.getnframes() / audio.getframerate()
-                except (wave.Error, EOFError):
+                duration = finalized_audio_duration(self.audio)
+                if duration is not None:
+                    self.duration = duration
+                elif self.audio.stat().st_size > 44:
                     failure = failure or "The audio file was interrupted and could not be finalized. The file remains on disk for recovery."
             try:
                 self.set_state("failed" if failure else "completed", failure or ("Local recording saved. Import it into your meeting to transcribe." if self.duration else "The bot left before recording any meeting audio."))
@@ -266,17 +315,26 @@ class Session:
                 self.profile_lease.close()
 
     def finish_audio(self):
-        """Ask FFmpeg to finalize its WAV, escalating termination if graceful shutdown stalls."""
+        """Finalize audio before publishing it; retain native shutdown failures."""
+        forced = False
         if self.recording_process and self.recording_process.poll() is None:
             try:
-                self.recording_process.communicate(input=b"q\n", timeout=10)
+                if sys.platform == "darwin":
+                    self.recording_process.terminate()
+                    self.recording_process.communicate(timeout=10)
+                else:
+                    self.recording_process.communicate(input=b"q\n", timeout=10)
             except (subprocess.TimeoutExpired, BrokenPipeError):
+                forced = True
                 self.recording_process.terminate()
                 try:
                     self.recording_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     self.recording_process.kill()
                     self.recording_process.wait()
+        if sys.platform == "darwin" and self.recording_process:
+            if forced or self.recording_process.poll() not in (None, 0):
+                self.capture_failure = "Mac audio capture did not stop cleanly. Any finalized audio remains available; partial audio is retained on disk for recovery."
 
 
 def previous_session(meeting_id: str) -> dict | None:
@@ -289,7 +347,7 @@ def previous_session(meeting_id: str) -> dict | None:
         if data.get("status") in ACTIVE:
             data.update(status="failed", detail="The runner restarted during this session. Review any saved audio before trying again.")
         audio = DATA / meeting_id / "meeting.wav"
-        data["audioAvailable"] = audio.exists() and audio.stat().st_size > 44
+        data["audioAvailable"] = finalized_audio_duration(audio) is not None
         return data
     except (OSError, json.JSONDecodeError):
         return None
@@ -388,7 +446,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/health":
             ready, detail = readiness()
-            self.reply(200, {"ready": ready, "detail": detail, "provider": "google-meet", "platform": "linux"})
+            auth_ready = auth_readiness()[0]
+            self.reply(200, {"ready": ready, "authReady": auth_ready, "detail": detail, "provider": "google-meet", "platform": sys.platform})
             return
         meeting_id = self.session_id()
         if not meeting_id:
@@ -428,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/auth":
                     if set(body) not in ({"email"}, {"email", "sessionId"}):
                         raise ValueError("Provide the connected Calendar account and optional sign-in ID.")
-                    ready, detail = readiness()
+                    ready, detail = auth_readiness()
                     if not ready:
                         self.reply(503, {"error": detail})
                         return
@@ -552,10 +611,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=RUNNER_PORT)
     parser.add_argument("--doctor", action="store_true")
-    parser.add_argument("--container-bind", action="store_true", help="Listen inside the isolated runner container; publish only on host loopback.")
     args = parser.parse_args()
-    if args.container_bind and (sys.platform != "linux" or os.environ.get("ECHO_RUNNER_CONTAINER") != "1"):
-        parser.error("--container-bind requires the Linux runner container. Native runners always bind loopback.")
     if args.doctor:
         ready, detail = readiness()
         folder = DATA_ROOT / "credentials"
@@ -574,7 +630,7 @@ def main():
         """Route process termination through the runner's normal cleanup path."""
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
-    bind = "0.0.0.0" if args.container_bind else "127.0.0.1"
+    bind = "127.0.0.1"
     server = ThreadingHTTPServer((bind, args.port), Handler)
     server.daemon_threads = True
     recover_sessions()

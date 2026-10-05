@@ -1,4 +1,4 @@
-"""Shared low-latency Chromium/PulseAudio capture settings and PCM readiness."""
+"""Shared receive-only browser controls, Linux audio capture, and PCM readiness."""
 import os
 from pathlib import Path
 import time
@@ -6,18 +6,16 @@ import time
 
 def browser_options(sink: str, headless: bool) -> dict:
     """Keep playback enabled and route only this launched browser to its sink."""
-    container = os.environ.get("ECHO_RUNNER_CONTAINER") == "1"
     return {
         "headless": headless,
         # Use the full Chromium binary checked by readiness, including its
         # current headless WebRTC implementation, rather than headless shell.
         "channel": "chromium",
         "env": dict(os.environ, PULSE_SINK=sink),
-        "ignore_default_args": ["--mute-audio"] + (["--disable-dev-shm-usage"] if container else []),
+        "ignore_default_args": ["--mute-audio"],
         # Chromium rejects permission requests without opening a device.
         # No real or fake camera/microphone capture is enabled in this browser.
-        "args": ["--autoplay-policy=no-user-gesture-required", "--deny-permission-prompts"]
-                + ([] if container else ["--disable-dev-shm-usage"]),
+        "args": ["--autoplay-policy=no-user-gesture-required", "--deny-permission-prompts"],
     }
 
 
@@ -73,8 +71,8 @@ def wait_for_pcm(process, audio: Path, timeout: float = 10):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError("Audio capture failed before PCM samples arrived. Check capture.log and PulseAudio.")
+            raise RuntimeError("Audio capture failed before PCM samples arrived. Check capture.log and the native audio capture permissions or service.")
         if audio.is_file() and audio.stat().st_size >= 44 + 3200:
             return
         time.sleep(0.05)
-    raise RuntimeError("Audio capture produced no PCM samples. Check the private PulseAudio sink and capture.log, then retry.")
+    raise RuntimeError("Audio capture produced no PCM samples. Check capture.log and the native audio capture permissions or service, then retry.")

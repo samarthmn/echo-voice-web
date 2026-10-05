@@ -8,7 +8,7 @@ await mkdir(path.join(root,'artifacts'),{recursive:true});
 await rm(stage,{recursive:true,force:true});await mkdir(stage,{recursive:true});
 const files=execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);
 // Keep optional local runtimes available from both source and app bundles.
-for(const required of ['compose.runner.yaml','runner/Dockerfile','runner/.dockerignore','runner/container-entrypoint.sh','runner/audio_smoke.py','runner/capture.py','runner/meet_ui.py','runner/meet_auth.py','runner/README.md','scripts/native-speech.mjs','web/speech-errors.js','web/whisper-alignment.js']){
+for(const required of ['runner/audio_smoke.py','runner/capture.py','runner/meet_ui.py','runner/meet_auth.py','runner/native_auth.py','runner/macos/AudioCapture.swift','runner/macos/build.sh','scripts/start-runner.sh','scripts/start-runner-macos.sh','runner/README.md','scripts/native-speech.mjs','web/speech-errors.js','web/whisper-alignment.js']){
   if(!files.includes(required))throw new Error(`Release is missing tracked runtime file: ${required}`);
 }
 for(const file of files){if(file.startsWith('artifacts/')&&!/\.(png|json)$/.test(file))continue;await mkdir(path.dirname(path.join(stage,'echo-voice-web',file)),{recursive:true});await cp(file,path.join(stage,'echo-voice-web',file));}

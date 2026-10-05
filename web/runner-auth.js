@@ -90,17 +90,65 @@ export function createRunnerSession(sessionId, { fetchImpl = globalThis.fetch, t
   };
 }
 
-let activeModal;
-const announce = () => window.dispatchEvent(new CustomEvent('echo-runner-auth-changed'));
+let activeModal, nativeAuth;
+const announce = () => window.dispatchEvent(new CustomEvent('echo-runner-auth-changed', { detail: nativeAuth?.getState() || { busy: false, error: '' } }));
+
+/** Native-window sign-in never creates credential fields or requests screenshots/input. */
+export function createNativeRunnerAuth({ start = body => authRequest('POST', body), session = id => createRunnerSession(id), uuid = () => crypto.randomUUID(), onChange = () => {} } = {}) {
+  let state = { busy: false, operation: '', error: '' }, owned, pending, generation = 0;
+  const publish = value => { state = { ...state, ...value }; onChange({ ...state }); };
+  function action(operation, task) {
+    if (pending) return pending;
+    publish({ busy: true, operation, error: '' });
+    pending = Promise.resolve().then(task).catch(failure => { publish({ error: failure.message || 'The meeting runner is unavailable.' }); throw failure; }).finally(() => { pending = null; publish({ busy: false, operation: '' }); });
+    return pending;
+  }
+  function own(id) {
+    if (owned && owned.id !== id) throw new Error('A different runner sign-in session is already open.');
+    if (!owned) owned = { id, transport: session(id) };
+    return owned.transport;
+  }
+  const clear = () => { owned?.transport.dispose(); owned = null; };
+  return {
+    getState: () => ({ ...state }),
+    start() {
+      return action('start', async () => {
+        const currentGeneration = generation;
+        if (owned) { await owned.transport.cancel(); clear(); }
+        if (currentGeneration !== generation) throw new Error('Sign-in was cancelled when this page closed.');
+        const id = uuid(), transport = own(id);
+        try {
+          const value = await start({ sessionId: id });
+          if (value?.mode !== 'native_window' || value.sessionId !== id || value.state !== 'signing_in') throw new Error(value?.detail || 'The separate sign-in browser did not open. Check the local runner and try again.');
+          return value;
+        } catch (failure) {
+          try { await transport.cancel(); clear(); } catch { /* Keep the owned identity for pagehide cleanup. */ }
+          throw failure;
+        }
+      });
+    },
+    finish(id) {
+      return action('finish', async () => {
+        const value = await own(id).finish();
+        if (value?.state !== 'signed_in' || value.accountMatches === false) throw new Error(value?.detail || 'Sign in with the connected Calendar account, then save again.');
+        clear(); return value;
+      });
+    },
+    cancel(id) {
+      return action('cancel', async () => { const value = await own(id).cancel(); clear(); return value; });
+    },
+    pagehide() { generation++; owned?.transport.pagehide(); clear(); },
+  };
+}
 
 async function authRequest(method, body = {}) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 30_000);
   try {
     const response = await fetch(BASE, { method, cache: 'no-store', signal: controller.signal, ...(method === 'POST' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     const value = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(value?.error || 'The meeting runner is unavailable. Check Docker and try again.');
+    if (!response.ok) throw new Error(value?.error || 'The meeting runner is unavailable. Start the local runner and try again.');
     return value;
-  } catch (error) { if (error.name === 'AbortError') throw new Error('The runner took too long to respond. Check Docker and try again.'); throw error; }
+  } catch (error) { if (error.name === 'AbortError') throw new Error('The runner took too long to respond. Check the local runner and try again.'); throw error; }
   finally { clearTimeout(timer); }
 }
 
@@ -116,6 +164,7 @@ function button(label, kind = 'secondary') {
 
 /** Open the user-operated remote browser; the host page never inspects Google field contents. */
 async function openRunnerSignIn(event) {
+  if (event?.detail?.mode === 'native_window') { if (!activeModal) void nativeAuth.start().catch(() => {}); return; }
   if (activeModal) return;
   const backdrop = node('div', 'dialog-backdrop runner-auth-backdrop');
   const dialog = node('div', 'dialog runner-auth-dialog');
@@ -258,8 +307,10 @@ function confirmSignOut() {
 }
 
 if (typeof window !== 'undefined') {
+  nativeAuth = createNativeRunnerAuth({ onChange: announce });
   const subscribers = new Map();
   window.echoRunnerAuth = {
+    getState: nativeAuth.getState,
     subscribe(id, callback) {
       if (subscribers.has(id)) window.removeEventListener('echo-runner-auth-changed', subscribers.get(id));
       subscribers.set(id, callback); window.addEventListener('echo-runner-auth-changed', callback);
@@ -272,4 +323,7 @@ if (typeof window !== 'undefined') {
   };
   window.addEventListener('echo-runner-sign-in', openRunnerSignIn);
   window.addEventListener('echo-runner-sign-out', confirmSignOut);
+  window.addEventListener('echo-runner-save-session', event => { void nativeAuth.finish(event.detail?.sessionId).catch(() => {}); });
+  window.addEventListener('echo-runner-cancel-sign-in', event => { void nativeAuth.cancel(event.detail?.sessionId).catch(() => {}); });
+  window.addEventListener('pagehide', () => nativeAuth.pagehide());
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRunnerSession, runnerInput, screenPoint } from '../web/runner-auth.js';
+import { createNativeRunnerAuth, createRunnerSession, runnerInput, screenPoint } from '../web/runner-auth.js';
 
 const id = '7c82d010-8656-4e85-a58a-b74622f5d6a9';
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
@@ -126,4 +126,72 @@ test('cancel and pagehide wait beyond ordinary requests but remain bounded at fo
   context.mock.timers.tick(4_999);
   assert.equal(signals[1].aborted, true);
   await new Promise(resolve => setImmediate(resolve));
+});
+
+test('native sign-in reserves an exact ID and saves without credential or screenshot requests', async () => {
+  const calls = [], states = [];
+  const client = createNativeRunnerAuth({ uuid: () => id, onChange: value => states.push(value),
+    start: async body => { calls.push(['start', body]); return { state: 'signing_in', mode: 'native_window', sessionId: id }; },
+    session: actual => { assert.equal(actual, id); return { finish: async () => { calls.push(['finish']); return { state: 'signed_in', accountMatches: true }; }, dispose: () => calls.push(['dispose']), pagehide: () => calls.push(['pagehide']) }; },
+  });
+  await client.start(); await client.finish(id); client.pagehide();
+  assert.deepEqual(calls, [['start', { sessionId: id }], ['finish'], ['dispose']]);
+  assert.equal(states[0].busy, true); assert.equal(states.at(-1).busy, false);
+});
+
+test('native repeated clicks share one operation and a rejected account remains cancellable', async () => {
+  const pending = deferred(), calls = [];
+  const client = createNativeRunnerAuth({ uuid: () => id,
+    start: async () => { await pending.promise; return { state: 'signing_in', mode: 'native_window', sessionId: id }; },
+    session: () => ({ finish: async () => { throw new Error('Use the connected account.'); }, cancel: async () => calls.push('cancel'), dispose: () => calls.push('dispose') }),
+  });
+  const first = client.start(), second = client.start(); assert.equal(first, second);
+  pending.resolve(); await first;
+  await assert.rejects(client.finish(id), /connected account/); assert.equal(client.getState().busy, false); assert.match(client.getState().error, /connected account/);
+  await client.cancel(id); assert.deepEqual(calls, ['cancel', 'dispose']); assert.equal(client.getState().error, '');
+});
+
+test('native failed startup and pagehide clean only the owned session', async () => {
+  const calls = [], pending = deferred();
+  const client = createNativeRunnerAuth({ uuid: () => id,
+    start: async () => { await pending.promise; throw new Error('Runner offline.'); },
+    session: actual => ({ cancel: async () => calls.push(['cancel', actual]), pagehide: () => calls.push(['pagehide', actual]), dispose: () => calls.push(['dispose', actual]) }),
+  });
+  const start = client.start(); await Promise.resolve(); client.pagehide(); pending.resolve();
+  await assert.rejects(start, /offline/);
+  assert.deepEqual(calls, [['pagehide', id], ['dispose', id], ['cancel', id]]);
+});
+
+test('native new sign-in cancels the previous failed verification before starting a new identity', async () => {
+  const nextId = 'a93fbf1e-f754-4ae6-aa96-35ef19e4b67b', calls = [], ids = [id, nextId];
+  const client = createNativeRunnerAuth({ uuid: () => ids.shift(),
+    start: async body => { calls.push(['start', body.sessionId]); return { state: 'signing_in', mode: 'native_window', sessionId: body.sessionId }; },
+    session: actual => ({ finish: async () => { throw new Error('Account could not be verified.'); }, cancel: async () => calls.push(['cancel', actual]), dispose: () => calls.push(['dispose', actual]), pagehide() {} }),
+  });
+  await client.start(); await assert.rejects(client.finish(id), /verified/); await client.start();
+  assert.deepEqual(calls, [['start', id], ['cancel', id], ['dispose', id], ['start', nextId]]);
+  await client.cancel(nextId);
+});
+
+test('native failed recovery cancellation preserves the old identity and prevents another browser', async () => {
+  const calls = []; let uuidCalls = 0, offline = true;
+  const client = createNativeRunnerAuth({ uuid: () => { uuidCalls++; return id; },
+    start: async body => { calls.push('start'); return { state: 'signing_in', mode: 'native_window', sessionId: body.sessionId }; },
+    session: actual => ({ finish: async () => { throw new Error('Verification failed.'); }, cancel: async () => { calls.push(['cancel', actual]); if (offline) throw new Error('Runner unavailable.'); }, dispose: () => calls.push('dispose'), pagehide() {} }),
+  });
+  await client.start(); await assert.rejects(client.finish(id));
+  await assert.rejects(client.start(), /unavailable/);
+  assert.equal(uuidCalls, 1); assert.deepEqual(calls, ['start', ['cancel', id]]);
+  offline = false; await client.cancel(id);
+  assert.deepEqual(calls.at(-2), ['cancel', id]); assert.equal(calls.at(-1), 'dispose');
+});
+
+test('pagehide during native recovery cannot start a replacement browser after cancellation acknowledgement', async () => {
+  const acknowledgement = deferred(); let starts = 0;
+  const client = createNativeRunnerAuth({ uuid: () => id,
+    start: async body => { starts++; return { state: 'signing_in', mode: 'native_window', sessionId: body.sessionId }; },
+    session: () => ({ cancel: () => acknowledgement.promise, dispose() {}, pagehide() {} }),
+  });
+  await client.start(); const retry = client.start(); await Promise.resolve(); client.pagehide(); acknowledgement.resolve();
+  await assert.rejects(retry, /page closed/); assert.equal(starts, 1);
 });
