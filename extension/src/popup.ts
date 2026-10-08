@@ -16,9 +16,9 @@ async function refresh() {
       selector.value = prefs.micDeviceId || 'default'; if(!selector.value) selector.value = 'default';
     }
     element('mic-device-field').hidden = !mic.checked;
-    const meeting = meetingFor(tab?.url ?? '');
-    element('meeting').textContent = meeting ? `${{meet:'Google Meet',zoom:'Zoom Web',teams:'Teams Web'}[meeting.provider]} · ${prefs.enabledProviders.includes(meeting.provider) ? 'This tab is ready.' : 'Enable this provider in setup.'}` : 'Open your Google Meet, Zoom Web or Teams Web meeting, then click Echo again.';
   }
+  const meeting = meetingFor(tab?.url ?? '');
+  element('meeting').textContent = meeting ? `${{meet:'Google Meet',zoom:'Zoom Web',teams:'Teams Web'}[meeting.provider]} · ${prefs.enabledProviders.includes(meeting.provider) ? 'Enabled. Ready to record.' : 'Not enabled. Open Setup to enable.'}` : 'Open your Google Meet, Zoom Web or Teams Web meeting, then click Echo again.';
   element('connection').textContent = prefs.activeLibraryId ? 'Connected to Echo' : 'Not connected';
   element('start-panel').hidden = !!active; element('active-panel').hidden = !active;
   if(active) {

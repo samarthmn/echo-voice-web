@@ -18,8 +18,8 @@ async function refresh() {
   element('mic-status').textContent = prefs.micGranted ? 'Permission granted. Choose whether to include it when starting.' : 'Not granted. Tab audio only is available.';
   const list = element('providers'); list.replaceChildren();
   for(const provider of providers) {
-    const row = document.createElement('div'); row.className = 'provider'; const label = document.createElement('span'); label.textContent = provider.name;
-    const button = document.createElement('button'); button.className = 'secondary'; const enabled = prefs.enabledProviders.includes(provider.id); button.textContent = enabled ? 'Enabled · disable':'Enable';
+    const row = document.createElement('div'); row.className = 'provider'; const label = document.createElement('span'); const enabled = prefs.enabledProviders.includes(provider.id); label.textContent = `${provider.name} · ${enabled ? 'Enabled':'Not enabled'}`;
+    const button = document.createElement('button'); button.className = 'secondary'; button.textContent = enabled ? 'Disable':'Enable';
     button.addEventListener('click',() => {
       // Request the provider grant directly within the user's click before any asynchronous work.
       const permission = enabled ? chrome.permissions.remove({origins:provider.origins}) : chrome.permissions.request({origins:provider.origins});

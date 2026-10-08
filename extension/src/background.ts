@@ -93,7 +93,8 @@ async function claimPair(confirmLibrary = false) {
     await chrome.storage.session.set({pendingPair:pair}); return {status:'confirm-library',pendingCount:pending.length};
   }
   // Retain old library credentials while their audio is pending. Recordings keep their original ownership.
-  await saveSettings({activeLibraryId:pair.libraryId,endpoint:pair.endpoint,pairs:{...prefs.pairs,[pair.libraryId]:pair}});
+  const approvedPair = pair;
+  await saveSettings(current => ({activeLibraryId:approvedPair.libraryId,endpoint:approvedPair.endpoint,pairs:{...current.pairs,[approvedPair.libraryId]:approvedPair}}));
   await chrome.storage.session.remove(['pairRequest','pendingPair']); void send({type:'SYNC'}); return {status:'approved',libraryId:pair.libraryId};
 }
 async function state() {
@@ -141,8 +142,11 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
     if(message.type === 'SAVE_ENDPOINT') return saveSettings({endpoint:message.endpoint}).then(() => ({}));
     if(message.type === 'MIC_GRANTED') return saveSettings({micGranted:message.granted === true}).then(() => ({}));
     if(message.type === 'PROVIDER_ENABLED' && ['meet','zoom','teams'].includes(message.provider)) {
-      const prefs = await settings(); const providers = prefs.enabledProviders.filter(p => p !== message.provider);
-      if(message.enabled === true) providers.push(message.provider as Provider); await saveSettings({enabledProviders:providers}); return {};
+      await saveSettings(current => {
+        const providers = current.enabledProviders.filter(p => p !== message.provider);
+        if(message.enabled === true) providers.push(message.provider as Provider);
+        return {enabledProviders:providers};
+      }); return {};
     }
     if(message.type === 'SYNC') {void send({type:'SYNC'}); return {};}
     throw new Error('Unsupported extension action.');
