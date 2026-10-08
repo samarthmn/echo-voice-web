@@ -2,13 +2,22 @@ import {meetingFor} from './core';
 import {observeDocument} from './adapters';
 declare const chrome: any;
 // This script is a one-way observer. It never receives endpoint settings, tokens or capture audio.
-const marker = '__echoMuteObserverV1';
-if(!(globalThis as any)[marker]) {
-  (globalThis as any)[marker] = true; let seq = 0;
+const marker = '__echoMuteObserverV2';
+{
+  const previous = (globalThis as any)[marker];
+  previous?.dispose?.();
+  let seq = Number.isSafeInteger(previous?.nextSequence) ? previous.nextSequence : 0;
+  const transmit = (message: any) => {try {chrome.runtime.sendMessage(message).catch(() => {});} catch { /* Extension reload invalidated this observer's runtime. */ }};
   const send = () => {
     const meeting = meetingFor(location.href);
-    chrome.runtime.sendMessage({type:'MUTE_OBSERVATION',seq:seq++,observedAt:Date.now(),url:location.href,state:meeting ? observeDocument(meeting.provider,document) : 'unknown'}).catch(() => {});
+    transmit({type:'MUTE_OBSERVATION',seq:seq++,observedAt:Date.now(),url:location.href,state:meeting ? observeDocument(meeting.provider,document) : 'unknown'});
   };
   const observer = new MutationObserver(send); observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['aria-label','title','aria-pressed','class','style']});
-  setInterval(send,500); window.addEventListener('pagehide',() => chrome.runtime.sendMessage({type:'MUTE_OBSERVATION',seq:seq++,observedAt:Date.now(),url:location.href,state:'unknown'}).catch(() => {})); send();
+  const timer = setInterval(send,500);
+  const pagehide = (event: PageTransitionEvent) => {
+    if(event.isTrusted) transmit({type:'MEETING_PAGEHIDE',seq:seq++,observedAt:Date.now(),url:location.href,state:'unknown'});
+  };
+  window.addEventListener('pagehide',pagehide);
+  (globalThis as any)[marker] = {get nextSequence() {return seq;},dispose() {observer.disconnect(); clearInterval(timer); window.removeEventListener('pagehide',pagehide);}};
+  send();
 }

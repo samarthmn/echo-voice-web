@@ -11,6 +11,7 @@ export type TransferState = 'saved-local' | 'transferring' | 'saved-echo' | 'att
 export const INTERRUPTION_DESCRIPTIONS = {
   'tab-loading':'The meeting tab began loading.', 'tab-closed':'The meeting tab closed.',
   'document-changed':'The meeting document changed.', 'meeting-changed':'The meeting identity changed.',
+  'document-unavailable':'The original meeting document could not be verified.',
   'meeting-ended':'The provider reported that the meeting ended.', 'tab-track-ended':'The captured tab audio track ended.',
   'audio-suspended':'The audio capture context was suspended.', 'save-backlog':'Local audio saving fell behind.',
   'local-storage':'Local storage stopped accepting audio.', 'flush-failed':'The recorder could not finish saving audio.',

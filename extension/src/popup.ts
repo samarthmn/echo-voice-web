@@ -2,9 +2,14 @@ import {meetingFor, Recording, MAX_FRAMES} from './core';
 import {action, duration, element, renderRecordings, request, showError} from './ui';
 declare const chrome: any;
 let tab: any; let active: any; let prefs: any; let busy = false; let initialized = false;
+let refreshing: Promise<void> | undefined;
 const startButton = element<HTMLButtonElement>('start'); const mic = element<HTMLInputElement>('mic'); const consent = element<HTMLInputElement>('consent');
 function enableStart() {const meeting = meetingFor(tab?.url ?? ''); startButton.textContent = mic.checked ? 'Start recording':'Record call audio only'; startButton.disabled = busy || !consent.checked || !meeting || !prefs?.enabledProviders.includes(meeting.provider) || mic.checked && !prefs?.micGranted;}
-async function refresh() {
+function refresh(): Promise<void> {
+  if(!refreshing) refreshing = refreshState().finally(() => {refreshing = undefined;});
+  return refreshing;
+}
+async function refreshState() {
   const state = await request({type:'STATE'}); prefs = state.settings; active = state.active;
   if(state.recoveryError) showError(new Error(state.recoveryError));
   if(!initialized) {

@@ -3,7 +3,7 @@ import {allRecordings} from './storage';
 import {jsonRequest} from './protocol';
 import {settings, saveSettings} from './settings';
 declare const chrome: any;
-type Owner = {tabId: number; identity: string; recordingId: string; documentId?: string; gateRevision: number};
+type Owner = {tabId: number; identity: string; recordingId: string; documentId?: string; gateRevision: number; departing?: boolean};
 let owner: Owner | undefined; let starting = false; let makingOffscreen: Promise<void> | undefined;
 let gateQueue: Promise<void> = Promise.resolve();
 const observations = new Map<number,Observation>();
@@ -33,7 +33,7 @@ async function gate() {
     const revision = capturedOwner.gateRevision; await chrome.storage.session.set({captureOwner:capturedOwner});
     // A newer mute report may arrive while session persistence is pending. Never send its predecessor.
     if(owner !== capturedOwner || observations.get(capturedOwner.tabId) !== observation) return;
-    const allowed = microphoneAllowed(observation,capturedOwner.identity,capturedOwner.documentId);
+    const allowed = !capturedOwner.departing && microphoneAllowed(observation,capturedOwner.identity,capturedOwner.documentId);
     const age = observation ? Date.now() - observation.receivedAt : Infinity;
     const response = await chrome.runtime.sendMessage({target:'offscreen',type:'GATE',recordingId:capturedOwner.recordingId,gateRevision:revision,allowed,expiresAt:observation ? observation.receivedAt + 2000:0,ttlMs:allowed ? Math.max(0,2000 - age):0,state:age >= 2000 ? 'stale meeting controls':observation?.state ?? 'unknown mute state'});
     if(!response?.ok) throw new Error('Microphone gate did not respond.');
@@ -42,7 +42,21 @@ async function gate() {
 }
 async function stopOwner(reason: InterruptionReason) {
   await restoreOwner(); if(!owner) return;
-  const id = owner.recordingId; await send({type:'CONTROL',recordingId:id,action:'stop',interrupted:true,interruptionReason:reason}); await clearOwner();
+  const capturedOwner = owner; capturedOwner.departing = true; await gate().catch(() => {});
+  if(owner !== capturedOwner) return;
+  const id = capturedOwner.recordingId; await send({type:'CONTROL',recordingId:id,action:'stop',interrupted:true,interruptionReason:reason}); await clearOwner();
+}
+async function verifyOwnerDocument(tabId: number) {
+  await restoreOwner(); const capturedOwner = owner; if(capturedOwner?.tabId !== tabId) return;
+  // InjectionResult.documentId comes from Chrome, without reading meeting content.
+  // Loading may belong to a subframe or same-document navigation; it is not proof
+  // that the original meeting document was replaced.
+  let frames: any[];
+  try {frames = await chrome.scripting.executeScript({target:{tabId,frameIds:[0]},func:() => undefined});} catch {if(owner === capturedOwner) await stopOwner('document-unavailable'); return;}
+  if(owner !== capturedOwner) return;
+  const documentId = frames.find(frame => frame.frameId === 0)?.documentId;
+  if(typeof documentId !== 'string') {await stopOwner('document-unavailable'); return;}
+  if(capturedOwner.documentId && capturedOwner.documentId !== documentId) await stopOwner('document-changed');
 }
 async function start(message: any) {
   if(starting) throw new Error('A recording is already starting.'); starting = true;
@@ -55,10 +69,12 @@ async function start(message: any) {
     if(!(await chrome.permissions.contains({origins:[meeting.originPattern]}))) throw new Error('This meeting provider needs permission in setup.');
     const title = String(message.title ?? tab.title ?? 'Meeting').trim().slice(0,200) || 'Meeting';
     await offscreen();
-    await chrome.scripting.executeScript({target:{tabId:tab.id},files:['content.js']});
+    const injected = await chrome.scripting.executeScript({target:{tabId:tab.id},files:['content.js']});
+    const documentId = injected.find((frame: any) => frame.frameId === 0)?.documentId;
+    if(typeof documentId !== 'string') throw new Error('The meeting document could not be verified. Retry from your meeting tab.');
     const streamId = await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
-    const recordingId = crypto.randomUUID(); const observation = observations.get(tab.id);
-    owner = {tabId:tab.id,identity:meeting.identity,recordingId,documentId:observation?.documentId,gateRevision:0};
+    const recordingId = crypto.randomUUID();
+    owner = {tabId:tab.id,identity:meeting.identity,recordingId,documentId,gateRevision:0};
     await chrome.storage.session.set({captureOwner:owner});
     try {
       const micDeviceId = typeof message.micDeviceId === 'string' && message.micDeviceId.length < 512 ? message.micDeviceId : 'default';
@@ -107,14 +123,18 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
   const documentURL = typeof sender.url === 'string' ? sender.url.split(/[?#]/)[0] : '';
   const trustedPage = [chrome.runtime.getURL('popup.html'),chrome.runtime.getURL('setup.html')].includes(documentURL);
   if(sender.tab && !trustedPage) {
-    if(message.type !== 'MUTE_OBSERVATION' || sender.frameId !== 0 || !sender.documentId || !validObservation(message) || sender.url !== message.url) return false;
+    if(!['MUTE_OBSERVATION','MEETING_PAGEHIDE'].includes(message.type) || sender.frameId !== 0 || !sender.documentId || !validObservation(message) || sender.url !== message.url) return false;
     const previous = observations.get(sender.tab.id);
     if(previous?.documentId === sender.documentId && message.seq <= previous.seq) return false;
     const now = Date.now(); const fresh = Number.isFinite(message.observedAt) && message.observedAt <= now + 100 && now - message.observedAt < 2000;
-    const received: Observation = {...message,state:fresh ? message.state:'unknown',documentId:sender.documentId,receivedAt:fresh ? message.observedAt:now};
+    const received: Observation = {...message,state:fresh && message.type !== 'MEETING_PAGEHIDE' ? message.state:'unknown',documentId:sender.documentId,receivedAt:fresh ? message.observedAt:now};
     observations.set(sender.tab.id,received);
     const run = async () => {
       await restoreOwner();
+      if(message.type === 'MEETING_PAGEHIDE') {
+        if(owner?.tabId === sender.tab.id && owner.documentId === sender.documentId) await stopOwner('document-changed');
+        return;
+      }
       if(observations.get(sender.tab.id) !== received) return;
       if(owner?.tabId === sender.tab.id) {
         if(owner.documentId && owner.documentId !== sender.documentId) {await stopOwner('document-changed'); return;}
@@ -156,7 +176,12 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
   run().then(value => respond({ok:true,value}),error => respond({ok:false,error:(error as Error).message})); return true;
 });
 chrome.tabs.onRemoved.addListener((tabId: number) => {void restoreOwner().then(() => {if(owner?.tabId === tabId) void stopOwner('tab-closed').catch(() => {});}); observations.delete(tabId);});
-chrome.tabs.onUpdated.addListener((tabId: number,change: any,tab: any) => {void restoreOwner().then(() => {if(owner?.tabId === tabId) {if(change.url && meetingFor(tab.url ?? change.url)?.identity !== owner.identity) void stopOwner('meeting-changed').catch(() => {}); else if(change.status === 'loading') void stopOwner('tab-loading').catch(() => {});}});});
+chrome.tabs.onUpdated.addListener((tabId: number,change: any,tab: any) => {void restoreOwner().then(() => {
+  if(owner?.tabId !== tabId) return;
+  if(change.url && meetingFor(tab.url ?? change.url)?.identity !== owner.identity) {void stopOwner('meeting-changed').catch(() => {}); return;}
+  if(change.status === 'loading') {observations.delete(tabId); void gate().catch(() => {});}
+  if(change.status === 'loading' || change.status === 'complete') void verifyOwnerDocument(tabId).catch(() => {});
+});});
 chrome.alarms.onAlarm.addListener((alarm: any) => {if(alarm.name === 'echo-transfer') void allRecordings().then(rows => {if(rows.some(row => !row.receipt && row.chunkCount)) void send({type:'SYNC'});});});
 chrome.runtime.onInstalled.addListener(() => {void settings(); void chrome.alarms.create('echo-transfer',{periodInMinutes:0.5});});
 chrome.runtime.onStartup.addListener(() => {void clearOwner(); void send({type:'SYNC'});});

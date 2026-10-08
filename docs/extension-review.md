@@ -1,6 +1,6 @@
 # Browser extension implementation review
 
-Status: implementation, automated review/fix loops and independent code review complete. Live release qualification remains pending. Commits remain local; no release push or CodeRabbit round has started. Live compatibility is not yet qualified. See [qualification matrix and Ubuntu/Codex handoff](extension-qualification.md).
+Status: implementation and review/fix loops are ongoing. Live testing found capture defects, and a plan audit found missing extension library controls. Commits remain local; no release push or CodeRabbit round has started. Live compatibility is not yet qualified. See [qualification matrix and Ubuntu/Codex handoff](extension-qualification.md).
 
 ## Verified evidence
 
@@ -70,3 +70,13 @@ The test recording has been renamed to “Echo E2E — microphone and mute” to
 The follow-up diagnostic change records a bounded reason, timestamp, and committed frame for interruption paths, including tab loading/closure, document or meeting changes, provider-ended observations, tab audio track ending, suspension, local-save failures, and recorder recovery. It contains no page content or private URL. The reason remains in the local receipt after successful transfer and is shown in the extension library. This repairs missing diagnostics; the unexplained live stop is not yet fixed or qualified. Root source review, 67 extension unit checks, the extension build, production package, and whitespace checks passed. Additional real-browser receipt assertions were added but have not been run in this loop. A new user-operated capture is required to identify the trigger.
 
 The diagnostic change is committed locally as `fe8ddf8`. Local Ollama notes generation with `gemma4:e4b-mlx` also completed and persisted a version referencing the final transcript. The model returned empty summary/decisions/actions arrays for this microphone-check recording, so this verifies the generation/save workflow, not useful meeting-summary quality. No cloud notes provider was used. The next call-audio capture awaits the user's extension reload and Start action; nothing has been pushed.
+
+## Confirmed loading-event interruption and fix
+
+The next call-audio-only attempt imported 74 chunks / 1,169,493 frames (73.093 seconds), then stopped before the speaker tone. The user read its retained diagnostic: “The meeting tab began loading.” This occurred while opening Meet's audio settings with the same call still active. The generic `tabs.onUpdated` loading event was therefore too broad a stop condition.
+
+Capture now pins Chrome's top-frame document identity at Start. Loading/completion events verify that identity; unchanged documents continue, while replacement or failed verification stops capture conservatively. Browser-trusted `pagehide`, meeting identity changes, tab closure, provider-ended observations and captured-track ending still stop recording. Lifecycle departure excludes the microphone even if newer mute observations arrive. Reinjection replaces the observer/timer/listener and preserves sequence ordering. No new permissions or meeting-page content reads were added.
+
+A separate deterministic test reproduced concurrent popup initialization overriding an explicit microphone exclusion. Popup refreshes are now serialized. Microphone startup reports permission, unavailable device, device-open and startup-interruption failures separately, with no silent call-audio fallback. Neither this race nor a specific device error is claimed as the cause of the user's initial microphone error; their explicit call-audio-only retry did start successfully.
+
+Root reviewed the changes and reran all 86 extension unit tests successfully. Extension build, production packaging and whitespace checks passed. Live retesting of the same Meet settings interaction is pending. A parallel plan audit identified missing Open Echo/Open in Echo, local-delete, extension-side disconnect, live-preview and active microphone-exclusion controls; these remain implementation work, not passed acceptance checks.

@@ -7,6 +7,15 @@ let active: Capture | undefined; let transition = false; let recoveryError: stri
 let initializing: Promise<void> = markInterrupted().catch(error => {recoveryError = `Local recovery metadata could not be updated. Saved audio is retained for export. ${(error as Error).message}`;});
 const publish = (endedRecordingId?: string) => chrome.runtime.sendMessage({target:'background',type:'CAPTURE_STATUS',endedRecordingId,active:active ? {recordingId:active.id,mic:active.mic ? active.sourceState : 'tab-only',tab:true,paused:!!active.pausedAt} : null}).catch(() => {});
 async function trustedSettings(): Promise<Settings> {const response = await chrome.runtime.sendMessage({target:'background',type:'TRUSTED_SETTINGS'}); if(!response?.ok) throw new Error('Trusted recorder settings are unavailable.'); return response.value;}
+function microphoneFailure(error: unknown): string {
+  const name = (error as {name?: string} | null)?.name;
+  const retry = ' Or explicitly choose tab audio only before starting.';
+  if(name === 'NotAllowedError' || name === 'SecurityError') return 'Microphone access was denied. Check browser and system microphone permissions in setup.' + retry;
+  if(name === 'NotFoundError' || name === 'OverconstrainedError') return 'The selected microphone is unavailable. Choose System default or another microphone, then retry.' + retry;
+  if(name === 'NotReadableError') return 'The microphone could not be opened. Check other audio apps and system microphone access, then retry.' + retry;
+  if(name === 'AbortError') return 'Microphone startup was interrupted. Retry starting the recording.' + retry;
+  return 'The microphone could not be started. Check the selected microphone and system microphone access, then retry.' + retry;
+}
 async function sync() {await transferPending(await trustedSettings(),control,() => publish());}
 function cleanup(capture: Capture) {capture.worklet.disconnect(); capture.tab.getTracks().forEach(track => track.stop()); capture.mic?.getTracks().forEach(track => track.stop()); void capture.context.close();}
 async function fail(capture: Capture, message: string, reason: InterruptionReason = 'capture-failed') {
@@ -30,7 +39,7 @@ async function start(message: any) {
     tab = await navigator.mediaDevices.getUserMedia({audio:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:message.streamId}} as any,video:false});
     if(message.micEnabled) {
       try {mic = await navigator.mediaDevices.getUserMedia({audio:{deviceId:message.micDeviceId ? {exact:message.micDeviceId}:undefined,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});}
-      catch {throw new Error('Microphone permission is unavailable. Enable it in setup, or explicitly choose tab audio only before starting.');}
+      catch(error) {throw new Error(microphoneFailure(error));}
     }
     context = new AudioContext(); await context.audioWorklet.addModule(chrome.runtime.getURL('worklet.js'));
     const worklet = new AudioWorkletNode(context,'echo-pcm',{numberOfInputs:2,numberOfOutputs:1,outputChannelCount:[1],processorOptions:{recordingId:message.recording.recordingId}});
