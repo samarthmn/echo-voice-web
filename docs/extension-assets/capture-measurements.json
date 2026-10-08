@@ -1,0 +1,576 @@
+[
+  {
+    "time": "2026-10-08T07:20:49.485555+00:00",
+    "stage": "receiving-before-mute",
+    "recordingId": "724f73d6-6053-46f6-aaf4-265fbfdeb67f",
+    "meetingId": "e4413c1a-4202-4b19-8d66-e341880aa70a",
+    "totalFrames": 1520000,
+    "nextSequence": 95
+  },
+  {
+    "time": "2026-10-08T07:21:36.441386+00:00",
+    "stage": "explicit-mute-repeat",
+    "totalFrames": 2256000,
+    "nextSequence": 141
+  },
+  {
+    "time": "2026-10-08T07:37:24.887386+00:00",
+    "stage": "before-tab-speaker-tone",
+    "recordings": [
+      {
+        "recordingId": "724f73d6-6053-46f6-aaf4-265fbfdeb67f",
+        "meetingId": "e4413c1a-4202-4b19-8d66-e341880aa70a",
+        "status": "complete",
+        "totalFrames": 2923776,
+        "nextSequence": 183
+      },
+      {
+        "recordingId": "fd170e1d-acdf-4021-bb0e-f011d62a0e3e",
+        "meetingId": "0926e821-1e5b-4208-bcbe-b784e82abef8",
+        "status": "complete",
+        "totalFrames": 1169493,
+        "nextSequence": 74
+      }
+    ]
+  },
+  {
+    "time": "2026-10-08T07:49:58.412122+00:00",
+    "stage": "pause-snapshot",
+    "recording": {
+      "status": "receiving",
+      "totalFrames": 1824085,
+      "nextSequence": 115,
+      "controls": [],
+      "controlHistory": null
+    }
+  },
+  {
+    "time": "2026-10-08T07:50:36.648856+00:00",
+    "stage": "resumed",
+    "recording": {
+      "status": "receiving",
+      "totalFrames": 1952085,
+      "nextSequence": 123,
+      "controls": []
+    }
+  },
+  {
+    "time": "2026-10-08T07:51:05.387964+00:00",
+    "stage": "server-offline",
+    "framesBeforeOutage": 2192085
+  },
+  {
+    "time": "2026-10-08T07:52:20.962098+00:00",
+    "stage": "server-returned",
+    "recording": {
+      "status": "receiving",
+      "frames": 3632085,
+      "chunks": 228,
+      "nonzeroChunks": [
+        [
+          74,
+          13011
+        ],
+        [
+          75,
+          9335
+        ],
+        [
+          76,
+          4560
+        ],
+        [
+          77,
+          53
+        ],
+        [
+          130,
+          10721
+        ],
+        [
+          131,
+          13027
+        ],
+        [
+          132,
+          9336
+        ],
+        [
+          133,
+          3011
+        ],
+        [
+          158,
+          13011
+        ],
+        [
+          159,
+          9334
+        ],
+        [
+          160,
+          3026
+        ],
+        [
+          161,
+          9
+        ]
+      ]
+    }
+  },
+  {
+    "time": "2026-10-08T07:53:41.790236+00:00",
+    "stage": "other-tab-playing",
+    "totalFrames": 4928085
+  },
+  {
+    "time": "2026-10-08T07:54:11.319879+00:00",
+    "stage": "other-tab-stopped",
+    "totalFrames": 5392085,
+    "levels": [
+      [
+        311,
+        0
+      ],
+      [
+        312,
+        0
+      ],
+      [
+        313,
+        0
+      ],
+      [
+        314,
+        0
+      ],
+      [
+        315,
+        0
+      ],
+      [
+        316,
+        0
+      ],
+      [
+        317,
+        0
+      ],
+      [
+        318,
+        0
+      ],
+      [
+        319,
+        0
+      ],
+      [
+        320,
+        0
+      ],
+      [
+        321,
+        0
+      ],
+      [
+        322,
+        0
+      ],
+      [
+        323,
+        0
+      ],
+      [
+        324,
+        0
+      ],
+      [
+        325,
+        0
+      ],
+      [
+        326,
+        0
+      ],
+      [
+        327,
+        0
+      ],
+      [
+        328,
+        0
+      ],
+      [
+        329,
+        0
+      ],
+      [
+        330,
+        0
+      ],
+      [
+        331,
+        0
+      ],
+      [
+        332,
+        0
+      ],
+      [
+        333,
+        0
+      ],
+      [
+        334,
+        0
+      ],
+      [
+        335,
+        0
+      ],
+      [
+        336,
+        0
+      ],
+      [
+        337,
+        0
+      ]
+    ]
+  },
+  {
+    "time": "2026-10-08T07:54:40.372962+00:00",
+    "stage": "stop-completed",
+    "recording": {
+      "recordingId": "1f37a7d9-921a-4d65-991b-f3b7ebce0311",
+      "meetingId": "188eddb4-f01a-453f-8719-46223c9c6de5",
+      "status": "complete",
+      "totalFrames": 5679701,
+      "nextSequence": 356,
+      "manifest": {
+        "chunkCount": 356,
+        "gaps": [
+          {
+            "atFrame": 1824085,
+            "pauseMs": 40014
+          }
+        ],
+        "interrupted": false,
+        "totalFrames": 5679701
+      }
+    }
+  },
+  {
+    "time": "2026-10-08T08:15:02.613306+00:00",
+    "stage": "before-unmuted-phrase",
+    "recordingId": "e75f7a76-b92d-4a64-817a-a9103192bfda",
+    "meetingId": "6a8371b4-fe16-4a32-9380-a24500355df1",
+    "totalFrames": 1216000,
+    "nextSequence": 76
+  },
+  {
+    "time": "2026-10-08T08:16:16.716605+00:00",
+    "stage": "meeting-muted-before-phrase",
+    "recordingId": "e75f7a76-b92d-4a64-817a-a9103192bfda",
+    "totalFrames": 2400000,
+    "nextSequence": 150,
+    "recentPeaks": [
+      [
+        142,
+        0
+      ],
+      [
+        143,
+        0
+      ],
+      [
+        144,
+        0
+      ],
+      [
+        145,
+        0
+      ],
+      [
+        146,
+        0
+      ],
+      [
+        147,
+        0
+      ],
+      [
+        148,
+        0
+      ],
+      [
+        149,
+        0
+      ]
+    ]
+  },
+  {
+    "time": "2026-10-08T08:17:10.930127+00:00",
+    "stage": "muted-phrase-done",
+    "recordingId": "e75f7a76-b92d-4a64-817a-a9103192bfda",
+    "totalFrames": 3264000,
+    "nextSequence": 204,
+    "checkedFromSequence": 150,
+    "checkedThroughSequence": 203,
+    "samples": 864000,
+    "peak": 0
+  },
+  {
+    "time": "2026-10-08T08:17:51.395397+00:00",
+    "stage": "unmuted-recovery-phrase-prompt",
+    "recordingId": "e75f7a76-b92d-4a64-817a-a9103192bfda",
+    "totalFrames": 3920000,
+    "nextSequence": 245
+  },
+  {
+    "time": "2026-10-08T08:18:03.463959+00:00",
+    "stage": "unmuted-phrase-done",
+    "levels": [
+      [
+        210,
+        0
+      ],
+      [
+        211,
+        0
+      ],
+      [
+        212,
+        0
+      ],
+      [
+        213,
+        0
+      ],
+      [
+        214,
+        0
+      ],
+      [
+        215,
+        0
+      ],
+      [
+        216,
+        0
+      ],
+      [
+        217,
+        0
+      ],
+      [
+        218,
+        0
+      ],
+      [
+        219,
+        0
+      ],
+      [
+        220,
+        352
+      ],
+      [
+        221,
+        367
+      ],
+      [
+        222,
+        250
+      ],
+      [
+        223,
+        163
+      ],
+      [
+        224,
+        1026
+      ],
+      [
+        225,
+        334
+      ],
+      [
+        226,
+        396
+      ],
+      [
+        227,
+        315
+      ],
+      [
+        228,
+        15341
+      ],
+      [
+        229,
+        786
+      ],
+      [
+        230,
+        507
+      ],
+      [
+        231,
+        692
+      ],
+      [
+        232,
+        715
+      ],
+      [
+        233,
+        1125
+      ],
+      [
+        234,
+        13936
+      ],
+      [
+        235,
+        2525
+      ],
+      [
+        236,
+        16383
+      ],
+      [
+        237,
+        9356
+      ],
+      [
+        238,
+        11388
+      ],
+      [
+        239,
+        9385
+      ],
+      [
+        240,
+        430
+      ],
+      [
+        241,
+        380
+      ],
+      [
+        242,
+        1706
+      ],
+      [
+        243,
+        1571
+      ],
+      [
+        244,
+        209
+      ],
+      [
+        245,
+        299
+      ],
+      [
+        246,
+        274
+      ],
+      [
+        247,
+        445
+      ],
+      [
+        248,
+        149
+      ],
+      [
+        249,
+        163
+      ],
+      [
+        250,
+        101
+      ],
+      [
+        251,
+        160
+      ],
+      [
+        252,
+        305
+      ],
+      [
+        253,
+        200
+      ],
+      [
+        254,
+        353
+      ],
+      [
+        255,
+        1131
+      ],
+      [
+        256,
+        1230
+      ]
+    ]
+  },
+  {
+    "time": "2026-10-08T08:19:35.397340+00:00",
+    "stage": "extension-excluded-before-phrase",
+    "totalFrames": 5584000,
+    "nextSequence": 349,
+    "recentPeaks": [
+      [
+        344,
+        0
+      ],
+      [
+        345,
+        0
+      ],
+      [
+        346,
+        0
+      ],
+      [
+        347,
+        0
+      ],
+      [
+        348,
+        0
+      ]
+    ]
+  },
+  {
+    "time": "2026-10-08T08:20:17.378660+00:00",
+    "stage": "extension-excluded-phrase-done",
+    "totalFrames": 6256000,
+    "nextSequence": 391,
+    "checkedFromSequence": 349,
+    "checkedThroughSequence": 390,
+    "samples": 672000,
+    "peak": 0
+  },
+  {
+    "time": "2026-10-08T08:20:41.533002+00:00",
+    "stage": "leave-call-imported",
+    "recordingId": "e75f7a76-b92d-4a64-817a-a9103192bfda",
+    "status": "complete",
+    "totalFrames": 6466901,
+    "nextSequence": 405,
+    "manifest": {
+      "chunkCount": 405,
+      "gaps": [],
+      "interrupted": true,
+      "totalFrames": 6466901
+    }
+  }
+]

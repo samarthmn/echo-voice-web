@@ -612,6 +612,7 @@ pub(crate) fn validate_meeting(m: &Value) -> Result<()> {
             "liveTranscription",
             "demo",
             "extensionRecording",
+            "autoTranscribeSuppressed",
         ],
     )?;
     identifier(m, "id", true)?;
@@ -623,6 +624,7 @@ pub(crate) fn validate_meeting(m: &Value) -> Result<()> {
     boolean(m, "consent", true)?;
     boolean(m, "liveTranscription", true)?;
     boolean(m, "demo", false)?;
+    boolean(m, "autoTranscribeSuppressed", false)?;
     if !matches!(m["mode"].as_str(), Some("in-person" | "online" | "import")) {
         return Err(ApiError::bad("Invalid recording mode."));
     }
@@ -898,9 +900,11 @@ pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
             "notesModel",
             "meetingUrl",
             "consent",
+            "autoTranscribeSuppressed",
         ],
     )?;
     boolean(&patch, "consent", false)?;
+    boolean(&patch, "autoTranscribeSuppressed", false)?;
     if let Some(url) = string(&patch, "meetingUrl", 2000, false)? {
         validate_meeting_url(url)?;
     }
@@ -2107,6 +2111,18 @@ mod tests {
         )
         .unwrap();
         let key = m["id"].as_str().unwrap();
+        let cancelled = update_meeting(key, json!({"autoTranscribeSuppressed":true})).unwrap();
+        assert_eq!(
+            get_meeting(key).unwrap().unwrap()["autoTranscribeSuppressed"],
+            true
+        );
+        assert!(validate_meeting(&cancelled).is_ok());
+        assert!(update_meeting(key, json!({"autoTranscribeSuppressed":"yes"})).is_err());
+        assert_eq!(
+            update_meeting(key, json!({"autoTranscribeSuppressed":false})).unwrap()
+                ["autoTranscribeSuppressed"],
+            false
+        );
         let audio = b"RIFF\x24\x00\x00\x00WAVEfmt original-audio";
         let track = add_audio(
             key,

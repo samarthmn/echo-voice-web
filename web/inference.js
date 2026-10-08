@@ -1,4 +1,5 @@
 import { resolveSpeechModel, assertModel, speechModelConfig, speechManifestMatches, DEFAULT_SPEECH_MODEL, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl, MODELS } from './models.js';
+import { TRANSCRIPTION_CANCELLED, automaticTranscriptionEligible } from './automatic-transcription.js';
 import { createProcessingHeartbeat } from './processing-heartbeat.js';
 import { getNativeSpeechStatus, runNativeSpeech, cancelNativeSpeech } from './native-speech.js';
 import { validatedWhisperWords } from './whisper-alignment.js';
@@ -13,7 +14,7 @@ let liveWorker = null, liveJob = null;
 const activeAudioFetches = new Set();
 const pendingDownloads = new Map();
 let downloadState = { status: 'idle', modelId: '', progress: 0 };
-const cancelled = () => new DOMException('Local processing was cancelled. Your saved audio is unchanged.', 'AbortError');
+const cancelled = () => new DOMException(TRANSCRIPTION_CANCELLED, 'AbortError');
 
 /** Expose download state independently of the currently mounted workspace page. */
 export function getModelDownloadState() { return { ...downloadState }; }
@@ -166,6 +167,9 @@ function callWorker(type, modelId, onProgress, audio, options) {
 
 /** Terminate the worker and reject the current job without discarding downloaded files. */
 export function cancelInference() {
+  const meetingIds=[...processingMeetings].filter(([,token])=>token===generation).map(([id])=>id);
+  void suppressAutomaticTranscription(meetingIds);
+  if(meetingIds.length) window.dispatchEvent(new CustomEvent('echo-transcription-cancelled',{detail:{meetingIds}}));
   generation++;
   cancelNativeSpeech();
   processingHeartbeat.clear();
@@ -319,6 +323,16 @@ export function transcribeAudio(blob, modelId, onProgress, options = {}) {
 }
 
 const processingMeetings = new Map();
+const cancellationSaves = new Map();
+export function suppressAutomaticTranscription(meetingIds) {
+  return Promise.all(meetingIds.map(id=>{
+    if(!cancellationSaves.has(id)) {
+      const save=requestJson(`/meetings/${encodeURIComponent(id)}`,'PATCH',{autoTranscribeSuppressed:true},undefined,{keepalive:true}).catch(()=>{}).finally(()=>{if(cancellationSaves.get(id)===save)cancellationSaves.delete(id);});
+      cancellationSaves.set(id,save);
+    }
+    return cancellationSaves.get(id);
+  }));
+}
 // A cancelled generation may still be finishing API cleanup. It no longer owns
 // computation worth protecting; warn only for pending jobs in the current one.
 window.addEventListener('beforeunload', event => {
@@ -345,8 +359,8 @@ export function applyVocabulary(text, entries) {
 }
 
 /** Call the local API and preserve actionable JSON or HTTP status errors. */
-async function requestJson(path, method = 'GET', body, signal) {
-  const response = await fetch(`/api${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, signal });
+async function requestJson(path, method = 'GET', body, signal, options = {}) {
+  const response = await fetch(`/api${path}`, { ...options, method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, signal });
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.error || `The local server returned ${response.status}.`);
   return data;
@@ -358,7 +372,7 @@ const processingHeartbeat = createProcessingHeartbeat({
 });
 
 /** Transcribe a saved audio track and append a new version with a vocabulary snapshot. */
-export async function transcribeMeeting(meetingId, modelId, trackId) {
+export async function transcribeMeeting(meetingId, modelId, trackId, options = {}) {
   modelId = resolveSpeechModel(modelId);
   if (processingMeetings.has(meetingId)) throw new Error('This meeting is already being transcribed.');
   const token = generation;
@@ -368,11 +382,13 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
   const checkCancelled = () => { if (token !== generation) throw cancelled(); };
   const controller = new AbortController();
   activeAudioFetches.add(controller);
-  window.dispatchEvent(new CustomEvent('echo-transcription-start', { detail: { meetingId, modelId } }));
+  if(!options.automatic) window.dispatchEvent(new CustomEvent('echo-transcription-start', { detail: { meetingId, modelId } }));
   let meeting;
   try {
     meeting = await requestJson(`/meetings/${encodeURIComponent(meetingId)}`);
     checkCancelled();
+    if(options.automatic && !automaticTranscriptionEligible(meeting)) return meeting;
+    if(options.automatic) window.dispatchEvent(new CustomEvent('echo-transcription-start', { detail: { meetingId, modelId } }));
     if (['recording', 'paused'].includes(meeting.status)) throw new Error('Finish recording before transcribing this meeting.');
     const tracks = trackId ? meeting.tracks.filter(track => track.id === trackId) : meeting.tracks;
     if (!tracks.length) throw new Error('This meeting has no saved audio to transcribe.');
@@ -380,8 +396,9 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
     checkCancelled();
     const vocabularyResponse = await requestJson('/vocabulary');
     const vocabulary = (vocabularyResponse.entries || []).filter(entry => entry.enabled);
+    await cancellationSaves.get(meetingId);
     checkCancelled();
-    await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: 'processing', error: '' });
+    await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: 'processing', error: '', ...(!options.automatic ? {autoTranscribeSuppressed:false} : {}) });
     checkCancelled();
     window.dispatchEvent(new Event('echo-library-changed'));
     processingHeartbeat.start(meetingId);
@@ -410,8 +427,9 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
     return saved;
   } catch (error) {
     processingHeartbeat.stop(meetingId);
+    await cancellationSaves.get(meetingId);
     if (meeting && !['recording', 'paused'].includes(meeting.status)) {
-      await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: meeting.transcripts.length ? 'ready' : 'saved', error: error.message }).catch(() => {});
+      await requestJson(`/meetings/${encodeURIComponent(meetingId)}`, 'PATCH', { status: meeting.transcripts.length ? 'ready' : 'saved', error: error.message, ...(error.name === 'AbortError' ? {autoTranscribeSuppressed:true} : {}) }).catch(() => {});
     }
     report(modelId, meetingId)({ status: error.name === 'AbortError' ? 'Cancelled' : 'Failed', progress: 0, error: error.message });
     window.dispatchEvent(new CustomEvent('echo-transcription-error', { detail: { meetingId, modelId, error: error.message } }));
@@ -427,5 +445,6 @@ export async function transcribeMeeting(meetingId, modelId, trackId) {
 window.echoInference = {
   models: MODELS, getDownloadedModels, getOutdatedModels, getModelDownloadState, getNativeSpeechStatus, removeModel, cancelInference, transcribeAudio, transcribeMeeting,
   getLiveModelStatus, transcribeLiveWindow, cancelLiveInference, releaseLiveInference, getInferenceState,
+  suppressAutomaticTranscription,
   downloadModel: (id, callback) => downloadModel(id, progress => { report(id)(progress); callback?.(progress); }),
 };

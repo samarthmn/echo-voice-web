@@ -306,7 +306,7 @@ test('reload protection follows pending transcript jobs and releases on success,
     createBufferSource() { return { connect() {}, start() {} }; }
     async startRendering() { return { getChannelData: () => new Float32Array(16000) }; }
   };
-  let processingPatched = false, refreshed = 0;
+  let processingPatched = false, refreshed = 0; const patches=[];
   const libraryRefresh = () => { assert.equal(processingPatched, true); refreshed++; };
   window.addEventListener('echo-library-changed', libraryRefresh);
   globalThis.fetch = async (url, options = {}) => {
@@ -315,8 +315,8 @@ test('reload protection follows pending transcript jobs and releases on success,
     if (path === '/api/vocabulary') return Response.json({ entries: [] });
     if (path === '/api/settings') return Response.json({ language: 'english' });
     if (path.endsWith('/transcripts')) return Response.json({ id: 'saved-transcript' });
-    if (options.method === 'PATCH' && JSON.parse(options.body).status === 'processing') processingPatched = true;
-    if (path.startsWith('/api/meetings/')) return Response.json({ status: 'saved', transcripts: [], duration: 1, tracks: [{ id: 'track', url: '/api/meetings/unload-test/audio' }] });
+    if (options.method === 'PATCH') {const patch=JSON.parse(options.body);patches.push(patch);if(patch.status==='processing') processingPatched=true;}
+    if (path.startsWith('/api/meetings/')) return Response.json({ status: 'saved', autoTranscribeSuppressed:true, transcripts: [], duration: 1, tracks: [{ id: 'track', url: '/api/meetings/unload-test/audio' }] });
     assert.fail(`Unexpected request: ${options.method || 'GET'} ${path}`);
   };
   try {
@@ -324,7 +324,7 @@ test('reload protection follows pending transcript jobs and releases on success,
     await manifests.put(key, new Response(JSON.stringify(manifestData(turbo, [fixture]))));
     assert.equal(warns(), false);
     for (const outcome of ['success', 'error', 'cancel']) {
-      processingPatched = false; refreshed = 0;
+      processingPatched = false; refreshed = 0; patches.length=0;
       const count = instances.length;
       const job = inference.transcribeMeeting(`unload-${outcome}`, turbo);
       // Covers metadata/audio loading and a job that has not reached its worker yet.
@@ -333,6 +333,7 @@ test('reload protection follows pending transcript jobs and releases on success,
       await turn();
       assert.equal(instances.length, count + 1);
       assert.equal(refreshed, 1, 'Library refresh follows the processing patch before inference');
+      assert.equal(patches.find(patch=>patch.status==='processing').autoTranscribeSuppressed,false,'explicit retry clears durable automatic suppression');
       const current = instances.at(-1);
       assert.equal(current.lastMessage.type, 'transcribe');
       assert.equal(warns(), true);
@@ -347,6 +348,8 @@ test('reload protection follows pending transcript jobs and releases on success,
         // Cancellation immediately releases protection, even before API cleanup.
         assert.equal(warns(), false);
         await rejected;
+        assert.ok(patches.some(patch=>patch.autoTranscribeSuppressed===true));
+        assert.equal(patches.at(-1).autoTranscribeSuppressed,true);
       }
       assert.equal(warns(), false);
     }

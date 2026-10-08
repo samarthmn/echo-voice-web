@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build:assets": "node scripts/build-assets.mjs",
-    "test": "node --test tests/inference.test.mjs tests/native-speech-client.test.mjs tests/native-speech.test.mjs tests/processing-heartbeat.test.mjs tests/diarization.test.mjs tests/speech-errors.test.mjs tests/whisper-alignment.test.mjs tests/runtime-options.test.mjs tests/theme.test.mjs tests/workspace.test.mjs tests/asset-manifest.test.mjs tests/recorder.test.mjs tests/rest.test.mjs tests/chatgpt-protocol.test.mjs tests/extension-workspace.test.mjs tests/extension-live.test.mjs tests/inference-live.test.mjs",
+    "test": "node --test tests/inference.test.mjs tests/automatic-transcription.test.mjs tests/native-speech-client.test.mjs tests/native-speech.test.mjs tests/processing-heartbeat.test.mjs tests/diarization.test.mjs tests/speech-errors.test.mjs tests/whisper-alignment.test.mjs tests/runtime-options.test.mjs tests/theme.test.mjs tests/workspace.test.mjs tests/asset-manifest.test.mjs tests/recorder.test.mjs tests/rest.test.mjs tests/chatgpt-protocol.test.mjs tests/extension-workspace.test.mjs tests/extension-live.test.mjs tests/inference-live.test.mjs",
     "test:e2e": "node scripts/test-browser.mjs",
     "test:speakers": "node scripts/smoke-speakers.mjs",
     "build:extension": "node scripts/build-extension.mjs",
