@@ -48,9 +48,10 @@ test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through in
       await journal.markInterrupted(); const row = await journal.recording(id); const chunk = await journal.getChunk(id,0); const parts = [];
       for await(const part of journal.exportParts(id)) {const bytes = new Uint8Array(await part.blob.arrayBuffer()); parts.push({part:part.part,frames:part.frames,startFrame:part.startFrame,header:String.fromCharCode(...bytes.slice(0,4)),length:bytes.length});}
       let mismatchedReceipt = false; try {await journal.retainReceiptAndRemovePCM(id,{libraryId:'wrong-library',meetingId:'synthetic',verifiedAt:new Date().toISOString()});} catch {mismatchedReceipt = true;}
-      return {state:row.captureState,interrupted:row.interrupted,totalFrames:row.totalFrames,hash:chunk.sha256,parts,mismatchedReceipt,retained:!!(await journal.getChunk(id,0))};
+      return {state:row.captureState,interrupted:row.interrupted,interruption:row.interruption,totalFrames:row.totalFrames,hash:chunk.sha256,parts,mismatchedReceipt,retained:!!(await journal.getChunk(id,0))};
     },saved.id);
     assert.equal(recovered.state,'interrupted'); assert.equal(recovered.interrupted,true); assert.equal(recovered.hash,saved.sha256); assert.equal(recovered.retained,true); assert.equal(recovered.mismatchedReceipt,true);
+    assert.equal(recovered.interruption.reason,'recorder-recovered'); assert.equal(recovered.interruption.atFrame,16000);
     assert.deepEqual(recovered.parts,[{part:1,frames:16000,startFrame:0,header:'RIFF',length:32044}]);
     // Bound persistence at exactly the eight-hour and 2 GiB limits without generating huge fixtures.
     const limits = await page.evaluate(async id => {
@@ -91,14 +92,15 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
       const id=crypto.randomUUID();await journal.createRecording({recordingId:id,title:'Synthetic real-wire recording',provider:'meet',meetingUrl:'https://meet.google.com/abc-defg-hij',consent:true,liveTranscription:false,sampleRate:16000,channels:1,createdAt:new Date().toISOString(),libraryId,chunkCount:0,totalFrames:0,captureState:'recording',transferState:'saved-local',gaps:[],interrupted:false});
       // 65 chunks span two fair transfer turns and exercise the server's whole-manifest completion fence.
       for(let sequence=0;sequence<65;sequence++){const pcm=new ArrayBuffer(32000);const view=new DataView(pcm);for(let frame=0;frame<16000;frame++)view.setInt16(frame*2,Math.round(Math.sin(frame/10)*1000),true);await journal.appendChunk(id,sequence,pcm)}
-      await journal.updateRecording(id,{captureState:'stopped'});await chrome.runtime.sendMessage({type:'SYNC'});return {id,totalFrames:65*16000};
+      const interruption={reason:'tab-loading',at:new Date().toISOString(),atFrame:65*16000}; await journal.updateRecording(id,{captureState:'interrupted',interrupted:true,interruption,error:'Synthetic transient capture error'});await chrome.runtime.sendMessage({type:'SYNC'});return {id,totalFrames:65*16000,interruption};
     },pairCode.libraryId);
-    let receipt;for(let attempt=0;attempt<200;attempt++){receipt=await page.evaluate(async id => {const row=await journal.recording(id);return {receipt:row.receipt,state:row.transferState,error:row.error,chunkCount:row.chunkCount,totalFrames:row.totalFrames,pcmRemoved:!(await journal.getChunk(id,0))}},saved.id);if(receipt.receipt||receipt.state==='attention')break;await delay(100)}
+    let receipt;for(let attempt=0;attempt<200;attempt++){receipt=await page.evaluate(async id => {const row=await journal.recording(id);return {receipt:row.receipt,state:row.transferState,error:row.error,interruption:row.interruption,chunkCount:row.chunkCount,totalFrames:row.totalFrames,pcmRemoved:!(await journal.getChunk(id,0))}},saved.id);if(receipt.receipt||receipt.state==='attention')break;await delay(100)}
     if(!receipt.receipt) {
       const serverRows=await api('/api/extensions/recordings');
       assert.fail(JSON.stringify({receipt,networkErrors,serverRows}));
     }
     assert.equal(receipt.receipt.libraryId,pairCode.libraryId);assert.equal(receipt.chunkCount,65);assert.equal(receipt.totalFrames,saved.totalFrames);assert.equal(receipt.pcmRemoved,true);
+    assert.equal(receipt.error,undefined);assert.deepEqual(receipt.interruption,saved.interruption); await page.reload(); await page.locator('#recordings').getByText('Interrupted at 01:05: The meeting tab began loading.',{exact:true}).waitFor();
     const recordings=await api('/api/extensions/recordings');const imported=recordings.recordings.find(row => row.recordingId===saved.id);assert.ok(imported);assert.equal(imported.status,'complete');assert.equal(imported.nextSequence,65);assert.equal(imported.totalFrames,saved.totalFrames);assert.equal(imported.meetingId,receipt.receipt.meetingId);
   } finally {if(context)await context.close();server.kill('SIGTERM');if(server.exitCode===null)await Promise.race([new Promise(resolve => server.once('exit',resolve)),delay(3000).then(() => server.kill('SIGKILL'))]);await rm(runRoot,{recursive:true,force:true,maxRetries:3});}
 });

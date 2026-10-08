@@ -1,4 +1,4 @@
-import {Chunk, Recording, MAX_FRAMES, MAX_PENDING_BYTES, PART_FRAMES, sha256, wavHeader} from './core';
+import {Chunk, Recording, MAX_FRAMES, MAX_PENDING_BYTES, PART_FRAMES, sha256, wavHeader, interruption} from './core';
 const DB = 'echo-meeting-journal';
 let opening: Promise<IDBDatabase> | undefined;
 export function database(): Promise<IDBDatabase> {
@@ -41,7 +41,7 @@ export async function appendChunk(id: string, sequence: number, pcm: ArrayBuffer
 }
 export async function getChunk(id: string, sequence: number): Promise<Chunk | undefined> {const db = await database(); return result(db.transaction('chunks').objectStore('chunks').get([id,sequence]));}
 export async function markInterrupted(): Promise<void> {
-  for (const row of await allRecordings()) if (row.captureState === 'recording' || row.captureState === 'paused') await updateRecording(row.recordingId,{captureState:'interrupted',interrupted:true,transferState:'saved-local',error:'Recording was interrupted. The committed local audio is safe; recording will not restart automatically.'});
+  for (const row of await allRecordings()) if (row.captureState === 'recording' || row.captureState === 'paused') await updateRecording(row.recordingId,{captureState:'interrupted',interrupted:true,interruption:row.interruption ?? interruption('recorder-recovered',row.totalFrames),transferState:'saved-local',error:'Recording was interrupted. The committed local audio is safe; recording will not restart automatically.'});
 }
 export async function retainReceiptAndRemovePCM(id: string, receipt: NonNullable<Recording['receipt']>): Promise<void> {
   const db = await database(); const tx = db.transaction(['recordings','chunks','meta'],'readwrite',{durability:'strict'}); const done = committed(tx);

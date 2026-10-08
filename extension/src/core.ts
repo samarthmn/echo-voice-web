@@ -8,13 +8,24 @@ export const MIC_FRESH_MS = 2000;
 export type Provider = 'meet' | 'zoom' | 'teams';
 export type CaptureState = 'idle' | 'recording' | 'paused' | 'stopped' | 'interrupted';
 export type TransferState = 'saved-local' | 'transferring' | 'saved-echo' | 'attention';
+export const INTERRUPTION_DESCRIPTIONS = {
+  'tab-loading':'The meeting tab began loading.', 'tab-closed':'The meeting tab closed.',
+  'document-changed':'The meeting document changed.', 'meeting-changed':'The meeting identity changed.',
+  'meeting-ended':'The provider reported that the meeting ended.', 'tab-track-ended':'The captured tab audio track ended.',
+  'audio-suspended':'The audio capture context was suspended.', 'save-backlog':'Local audio saving fell behind.',
+  'local-storage':'Local storage stopped accepting audio.', 'flush-failed':'The recorder could not finish saving audio.',
+  'recorder-recovered':'The recorder restarted with unfinished audio.', 'start-failed':'Audio capture could not finish starting.',
+  'capture-failed':'Audio capture was interrupted.',
+} as const;
+export type InterruptionReason = keyof typeof INTERRUPTION_DESCRIPTIONS;
+export function interruption(reason: InterruptionReason, atFrame: number) {return {reason,at:new Date().toISOString(),atFrame};}
 export type Observation = {state: 'unmuted' | 'muted' | 'prejoin' | 'ended' | 'unknown'; seq: number; url: string; documentId: string; receivedAt: number};
 export type Recording = {
   recordingId: string; title: string; provider: Provider; meetingUrl: string; consent: true;
   liveTranscription: boolean; sampleRate: 16000; channels: 1; createdAt: string;
   libraryId: string | null; chunkCount: number; totalFrames: number; captureState: CaptureState;
   transferState: TransferState; gaps: {atFrame: number; pauseMs: number}[]; interrupted: boolean;
-  error?: string; receipt?: {libraryId: string; meetingId: string; verifiedAt: string};
+  error?: string; interruption?: ReturnType<typeof interruption>; receipt?: {libraryId: string; meetingId: string; verifiedAt: string};
 };
 export type Chunk = {recordingId: string; sequence: number; frames: number; sha256: string; pcm: ArrayBuffer};
 export type Pair = {libraryId: string; credential: string; endpoint: string};

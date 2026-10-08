@@ -53,7 +53,7 @@ async function beginExport(row: Recording) {
   if(exportIterator) await exportIterator.return(undefined);
   exportRow = row; exportIterator = exportParts(row.recordingId); element('exports').hidden = false; element('export-title').textContent = row.title;
   if(timelineURL) URL.revokeObjectURL(timelineURL);
-  timelineURL = URL.createObjectURL(new Blob([JSON.stringify({recordingId:row.recordingId,title:row.title,sampleRate:row.sampleRate,channels:row.channels,totalFrames:row.totalFrames,gaps:row.gaps,interrupted:row.interrupted,partsAreSequential:true},null,2)],{type:'application/json'}));
+  timelineURL = URL.createObjectURL(new Blob([JSON.stringify({recordingId:row.recordingId,title:row.title,sampleRate:row.sampleRate,channels:row.channels,totalFrames:row.totalFrames,gaps:row.gaps,interrupted:row.interrupted,interruption:row.interruption,partsAreSequential:true},null,2)],{type:'application/json'}));
   const timeline = element<HTMLAnchorElement>('download-timeline'); timeline.href = timelineURL; timeline.download = `echo-${row.recordingId}-timeline.json`; timeline.hidden = false;
   await nextPart(); element('exports').scrollIntoView({behavior:'smooth',block:'nearest'});
 }

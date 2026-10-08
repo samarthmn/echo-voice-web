@@ -11,7 +11,7 @@
     "build:extension": "node scripts/build-extension.mjs",
     "package:extension": "node scripts/package-extension.mjs",
     "test:extension": "node --test tests/extension*.test.mjs",
-    "test:extension:unit": "node --test tests/extension-runtime.test.mjs tests/extension-capture.test.mjs tests/extension-live.test.mjs tests/extension-workspace.test.mjs tests/inference-live.test.mjs tests/extension-settings.test.mjs",
+    "test:extension:unit": "node --test tests/extension-runtime.test.mjs tests/extension-capture.test.mjs tests/extension-live.test.mjs tests/extension-workspace.test.mjs tests/inference-live.test.mjs tests/extension-settings.test.mjs tests/extension-interruption.test.mjs",
     "test:extension:integration": "node --test tests/extension-browser.test.mjs"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import {Recording, Settings, MAX_BACKLOG_FRAMES, MAX_FRAMES, MAX_PENDING_BYTES} from './core';
+import {Recording, Settings, MAX_BACKLOG_FRAMES, MAX_FRAMES, MAX_PENDING_BYTES, InterruptionReason, interruption, INTERRUPTION_DESCRIPTIONS} from './core';
 import {allRecordings, appendChunk, createRecording, markInterrupted, recording, updateRecording} from './storage';
 import {transferPending} from './protocol';
 declare const chrome: any;
@@ -9,10 +9,10 @@ const publish = (endedRecordingId?: string) => chrome.runtime.sendMessage({targe
 async function trustedSettings(): Promise<Settings> {const response = await chrome.runtime.sendMessage({target:'background',type:'TRUSTED_SETTINGS'}); if(!response?.ok) throw new Error('Trusted recorder settings are unavailable.'); return response.value;}
 async function sync() {await transferPending(await trustedSettings(),control,() => publish());}
 function cleanup(capture: Capture) {capture.worklet.disconnect(); capture.tab.getTracks().forEach(track => track.stop()); capture.mic?.getTracks().forEach(track => track.stop()); void capture.context.close();}
-async function fail(capture: Capture, message: string) {
+async function fail(capture: Capture, message: string, reason: InterruptionReason = 'capture-failed') {
   if(capture.failed) return; capture.failed = true; cleanup(capture); if(active === capture) active = undefined;
   await capture.queue.catch(() => {});
-  await updateRecording(capture.id,{captureState:'interrupted',interrupted:true,transferState:'attention',error:message}).catch(() => {recoveryError = message;}); publish(capture.id); void sync().catch(() => {});
+  await updateRecording(capture.id,{captureState:'interrupted',interrupted:true,interruption:interruption(reason,capture.persistedFrames),transferState:'attention',error:message}).catch(() => {recoveryError = message;}); publish(capture.id); void sync().catch(() => {});
 }
 async function flush(capture: Capture, type: string) {
   const requestId = crypto.randomUUID();
@@ -39,10 +39,10 @@ async function start(message: any) {
     const capture: Capture = {id:row.recordingId,context,worklet,tab,mic,lastGateRevision:-1,sequence:0,queuedFrames:0,persistedFrames:0,queue:Promise.resolve(),failed:false,waiters:new Map(),sourceState:'Excluded · unknown mute state'}; active = capture;
     worklet.port.onmessage = ({data}) => {
       if(data.type === 'flushed') {capture.waiters.get(data.requestId)?.(); capture.waiters.delete(data.requestId); return;}
-      if(data.type === 'failed') {void fail(capture,'Local saving fell five seconds behind. Recording stopped; the committed audio prefix is retained.'); return;}
+      if(data.type === 'failed') {void fail(capture,'Local saving fell five seconds behind. Recording stopped; the committed audio prefix is retained.','save-backlog'); return;}
       if(data.type !== 'pcm' || capture.failed) return;
       capture.queuedFrames += data.frames;
-      if(capture.queuedFrames > MAX_BACKLOG_FRAMES) {void fail(capture,'Local saving fell more than five seconds behind. Recording stopped; the committed audio prefix is retained.'); return;}
+      if(capture.queuedFrames > MAX_BACKLOG_FRAMES) {void fail(capture,'Local saving fell more than five seconds behind. Recording stopped; the committed audio prefix is retained.','save-backlog'); return;}
       const sequence = capture.sequence++;
       capture.queue = capture.queue.then(async () => {
         if(capture.failed) return;
@@ -51,24 +51,24 @@ async function start(message: any) {
         const row = await recording(capture.id);
         if(row && row.totalFrames >= MAX_FRAMES) void control(capture.id,'stop');
       });
-      capture.queue.catch(error => {void fail(capture,`Local storage stopped accepting audio. Recording stopped; the committed audio prefix is retained. ${(error as Error).name === 'QuotaExceededError' ? 'Storage quota was reached.' : (error as Error).message}`);});
+      capture.queue.catch(error => {void fail(capture,`Local storage stopped accepting audio. Recording stopped; the committed audio prefix is retained. ${(error as Error).name === 'QuotaExceededError' ? 'Storage quota was reached.' : (error as Error).message}`,'local-storage');});
     };
     const tabSource = context.createMediaStreamSource(tab); tabSource.connect(worklet,0,0);
     // tabCapture removes playback from the tab. Restore it separately, never feeding microphone playback.
     tabSource.connect(context.destination);
     if(mic) context.createMediaStreamSource(mic).connect(worklet,0,1);
     worklet.connect(context.destination); await context.resume();
-    for(const track of tab.getTracks()) track.addEventListener('ended',() => {if(!capture.failed && active === capture) void control(capture.id,'stop',true).catch(() => {});});
+    for(const track of tab.getTracks()) track.addEventListener('ended',() => {if(!capture.failed && active === capture) void control(capture.id,'stop',true,'tab-track-ended').catch(() => {});});
     for(const track of mic?.getTracks() ?? []) track.addEventListener('ended',() => {
       if(capture.failed || active !== capture) return;
       capture.micDisconnected = true; capture.sourceState = 'Excluded · microphone disconnected; tab audio continues'; capture.worklet.port.postMessage({type:'revoke-mic'}); publish();
     });
-    context.addEventListener('statechange',() => {if(context?.state === 'suspended' && active === capture) void fail(capture,'Audio capture was suspended. Recording stopped and its committed audio is retained.');});
+    context.addEventListener('statechange',() => {if(context?.state === 'suspended' && active === capture) void fail(capture,'Audio capture was suspended. Recording stopped and its committed audio is retained.','audio-suspended');});
     publish(); return {recordingId:row.recordingId};
-  } catch(error) {tab?.getTracks().forEach(track => track.stop()); mic?.getTracks().forEach(track => track.stop()); if(context) void context.close(); if(active) {await updateRecording(active.id,{captureState:'interrupted',interrupted:true,transferState:'attention',error:(error as Error).message}); active = undefined;} throw error;}
+  } catch(error) {tab?.getTracks().forEach(track => track.stop()); mic?.getTracks().forEach(track => track.stop()); if(context) void context.close(); if(active) {await updateRecording(active.id,{captureState:'interrupted',interrupted:true,interruption:interruption('start-failed',active.persistedFrames),transferState:'attention',error:(error as Error).message}); active = undefined;} throw error;}
   finally {transition = false;}
 }
-async function control(id: string, action: string, interrupted = false) {
+async function control(id: string, action: string, interrupted = false, reason: InterruptionReason = 'capture-failed') {
   const capture = active; if(!capture || capture.id !== id) return; if(transition) throw new Error('Recording is changing state. Retry the control.'); transition = true;
   try {
     if(action === 'pause' && !capture.pausedAt) {await flush(capture,'pause'); capture.pausedAt = Date.now(); capture.sourceState = 'excluded: paused'; await updateRecording(id,{captureState:'paused'});}
@@ -80,10 +80,10 @@ async function control(id: string, action: string, interrupted = false) {
     if(action === 'stop') {
       await flush(capture,'stop'); const row = await recording(id);
       const gaps = row?.gaps ?? []; if(capture.pausedAt && row) gaps.push({atFrame:row.totalFrames,pauseMs:Math.max(0,Date.now() - capture.pausedAt)});
-      active = undefined; cleanup(capture); await updateRecording(id,{captureState:interrupted ? 'interrupted':'stopped',interrupted,gaps});
+      active = undefined; cleanup(capture); await updateRecording(id,{captureState:interrupted ? 'interrupted':'stopped',interrupted,gaps,...(interrupted ? {interruption:interruption(reason,row?.totalFrames ?? capture.persistedFrames)} : {})});
     }
     publish(action === 'stop' ? id : undefined);
-  } catch(error) {await fail(capture,(error as Error).message); throw error;} finally {transition = false;}
+  } catch(error) {await fail(capture,(error as Error).message,'flush-failed'); throw error;} finally {transition = false;}
   if(action === 'stop') void sync().catch(() => {});
 }
 chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => {
@@ -91,7 +91,7 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
   const run = async () => {
     await initializing;
     if(message.type === 'START') return start(message);
-    if(message.type === 'CONTROL') return control(message.recordingId,message.action,message.interrupted);
+    if(message.type === 'CONTROL') return control(message.recordingId,message.action,message.interrupted,Object.hasOwn(INTERRUPTION_DESCRIPTIONS,message.interruptionReason) ? message.interruptionReason : 'capture-failed');
     if(message.type === 'GATE' && active && message.recordingId === active.id && Number.isSafeInteger(message.gateRevision) && message.gateRevision > active.lastGateRevision) {active.lastGateRevision = message.gateRevision; const ttlMs = Math.max(0,Math.min(message.ttlMs ?? 0,(message.expiresAt ?? 0) - Date.now())); const allowed = message.allowed && ttlMs > 0 && !active.pausedAt && !active.micDisconnected && !!active.mic; active.sourceState = active.micDisconnected ? 'Excluded · microphone disconnected; tab audio continues' : active.pausedAt ? 'Excluded · paused' : allowed ? 'Included · meeting microphone on' : `Excluded · ${message.state ?? 'unknown mute state'}`; active.worklet.port.postMessage({type:'gate',recordingId:active.id,gateRevision:message.gateRevision,allowed,ttlMs,expiresAt:message.expiresAt}); publish();}
     if(message.type === 'SYNC') await sync();
     if(message.type === 'STATUS') return {active:active ? {recordingId:active.id,paused:!!active.pausedAt,mic:active.mic ? active.sourceState:'tab-only'} : null,error:recoveryError};

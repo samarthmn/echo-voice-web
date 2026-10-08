@@ -1,4 +1,4 @@
-import {endpointURL, meetingFor, microphoneAllowed, Observation, Provider, validObservation, unixSecondsToMilliseconds} from './core';
+import {endpointURL, meetingFor, microphoneAllowed, Observation, Provider, validObservation, unixSecondsToMilliseconds, InterruptionReason} from './core';
 import {allRecordings} from './storage';
 import {jsonRequest} from './protocol';
 import {settings, saveSettings} from './settings';
@@ -40,9 +40,9 @@ async function gate() {
   });
   await gateQueue;
 }
-async function stopOwner(interrupted = true) {
+async function stopOwner(reason: InterruptionReason) {
   await restoreOwner(); if(!owner) return;
-  const id = owner.recordingId; await send({type:'CONTROL',recordingId:id,action:'stop',interrupted}); await clearOwner();
+  const id = owner.recordingId; await send({type:'CONTROL',recordingId:id,action:'stop',interrupted:true,interruptionReason:reason}); await clearOwner();
 }
 async function start(message: any) {
   if(starting) throw new Error('A recording is already starting.'); starting = true;
@@ -63,7 +63,7 @@ async function start(message: any) {
     try {
       const micDeviceId = typeof message.micDeviceId === 'string' && message.micDeviceId.length < 512 ? message.micDeviceId : 'default';
       const value = await send({type:'START',streamId,micEnabled:message.micEnabled === true,micDeviceId,recording:{recordingId,title,provider:meeting.provider,meetingUrl:tab.url,consent:true,liveTranscription:message.liveTranscription === true,sampleRate:16000,channels:1,createdAt:new Date().toISOString(),libraryId:prefs.activeLibraryId}});
-      if(!owner || owner.recordingId !== recordingId || meetingFor((await chrome.tabs.get(tab.id)).url ?? '')?.identity !== meeting.identity) {await send({type:'CONTROL',recordingId,action:'stop',interrupted:true}); throw new Error('The meeting tab changed while recording started. Its committed audio is retained. Start again from the intended meeting.');}
+      if(!owner || owner.recordingId !== recordingId || meetingFor((await chrome.tabs.get(tab.id)).url ?? '')?.identity !== meeting.identity) {await send({type:'CONTROL',recordingId,action:'stop',interrupted:true,interruptionReason:'meeting-changed'}); throw new Error('The meeting tab changed while recording started. Its committed audio is retained. Start again from the intended meeting.');}
       await saveSettings({micDeviceId});
       await gate(); return value;
     } catch(error) {await clearOwner(); throw error;}
@@ -117,7 +117,9 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
       await restoreOwner();
       if(observations.get(sender.tab.id) !== received) return;
       if(owner?.tabId === sender.tab.id) {
-        if(owner.documentId && owner.documentId !== sender.documentId || meetingFor(message.url)?.identity !== owner.identity || message.state === 'ended') {await stopOwner(); return;}
+        if(owner.documentId && owner.documentId !== sender.documentId) {await stopOwner('document-changed'); return;}
+        if(meetingFor(message.url)?.identity !== owner.identity) {await stopOwner('meeting-changed'); return;}
+        if(message.state === 'ended') {await stopOwner('meeting-ended'); return;}
         if(!owner.documentId) {owner.documentId = sender.documentId; await chrome.storage.session.set({captureOwner:owner});}
       }
       if(observations.get(sender.tab.id) !== received) return; await gate();
@@ -153,8 +155,8 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
   };
   run().then(value => respond({ok:true,value}),error => respond({ok:false,error:(error as Error).message})); return true;
 });
-chrome.tabs.onRemoved.addListener((tabId: number) => {void restoreOwner().then(() => {if(owner?.tabId === tabId) void stopOwner().catch(() => {});}); observations.delete(tabId);});
-chrome.tabs.onUpdated.addListener((tabId: number,change: any,tab: any) => {void restoreOwner().then(() => {if(owner?.tabId === tabId && (change.status === 'loading' || change.url && meetingFor(tab.url ?? change.url)?.identity !== owner.identity)) void stopOwner().catch(() => {});});});
+chrome.tabs.onRemoved.addListener((tabId: number) => {void restoreOwner().then(() => {if(owner?.tabId === tabId) void stopOwner('tab-closed').catch(() => {});}); observations.delete(tabId);});
+chrome.tabs.onUpdated.addListener((tabId: number,change: any,tab: any) => {void restoreOwner().then(() => {if(owner?.tabId === tabId) {if(change.url && meetingFor(tab.url ?? change.url)?.identity !== owner.identity) void stopOwner('meeting-changed').catch(() => {}); else if(change.status === 'loading') void stopOwner('tab-loading').catch(() => {});}});});
 chrome.alarms.onAlarm.addListener((alarm: any) => {if(alarm.name === 'echo-transfer') void allRecordings().then(rows => {if(rows.some(row => !row.receipt && row.chunkCount)) void send({type:'SYNC'});});});
 chrome.runtime.onInstalled.addListener(() => {void settings(); void chrome.alarms.create('echo-transfer',{periodInMinutes:0.5});});
 chrome.runtime.onStartup.addListener(() => {void clearOwner(); void send({type:'SYNC'});});
