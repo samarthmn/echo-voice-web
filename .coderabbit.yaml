@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Keep automated review focused on executable code and tests. Documentation and
+# human-test evidence receive a separate review recorded in docs/pr-review-2026-10-08.md.
+reviews:
+  path_filters:
+    - "!docs/**"
+    - "!artifacts/**"

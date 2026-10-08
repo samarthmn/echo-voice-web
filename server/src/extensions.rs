@@ -1461,10 +1461,8 @@ pub(crate) fn backup_receipts(db: &Connection) -> Result<Vec<Value>> {
             return Err(ApiError::new(409,"Synchronize pending extension recordings before a browser backup, or stop Echo and copy the entire data folder."));
         }
         let mut receipt = json!({"recordingId":r["recordingId"],"installationId":r["installationId"],"meetingId":r["meetingId"],"status":r["status"],"totalFrames":r["totalFrames"],"nextSequence":r["nextSequence"],"liveTranscription":r["liveTranscription"]});
-        for key in ["manifest"] {
-            if let Some(v) = r.get(key) {
-                receipt[key] = v.clone();
-            }
+        if let Some(manifest) = r.get("manifest") {
+            receipt["manifest"] = manifest.clone();
         }
         receipts.push(receipt);
     }
