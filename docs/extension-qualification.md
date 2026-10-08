@@ -6,7 +6,7 @@ A successful build or mock test is not a live compatibility pass. Record exact O
 
 | Browser / OS | Google Meet | Zoom Web | Teams Web |
 |---|---|---|---|
-| Brave / macOS | Pending live qualification | Pending | Pending |
+| Brave / macOS | Partial: call audio, pause/resume, server outage recovery, other-tab exclusion and import passed; microphone/live/lifecycle qualification pending | Pending | Pending |
 | Chrome / macOS | Pending live qualification | Pending | Pending |
 | Brave / Ubuntu | Pending user desktop qualification | Pending | Pending |
 | Chrome / Ubuntu | Pending user desktop qualification | Pending | Pending |

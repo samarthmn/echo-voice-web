@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 globalThis.window = new EventTarget();
 globalThis.location = { origin: 'http://localhost:3111' };
-const { createExtensionLiveController, createExtensionLiveApi, mergeLiveWindow, validateLiveDraft, LIVE_SAMPLE_RATE: RATE } = await import('../web/extension-live.js');
+const { createExtensionLiveController, createExtensionLiveApi, mergeLiveWindow, validateLiveDraft, liveStatusReport, LIVE_SAMPLE_RATE: RATE } = await import('../web/extension-live.js');
 const { validatedWhisperWords } = await import('../web/whisper-alignment.js');
 const empty = () => ({ throughFrame: 0, committedThroughFrame: 0, words: [], language: 'auto', modelRevision: '' });
 const word = (text, start, end) => ({ text, timestamp: [start, end] });
@@ -371,4 +371,32 @@ test('actual live worker stays warm, loads no speaker models, and validates word
   assert.equal(messages.at(-1).type, 'error');
   assert.match(messages.at(-1).error, /invalid word timestamps/);
   assert.equal(operations.filter(value => value.operation === 'dispose').length, 1);
+});
+
+
+test('live status adapter reports only eligible state with monotonic fencing generation', () => {
+  const record = { status: 'receiving', liveTranscription: true, generation: 3 };
+  assert.deepEqual(liveStatusReport({ status: 'model-missing' }, record, 'tab', 2), { ownerId: 'tab', generation: 3, status: 'model-missing' });
+  assert.equal(liveStatusReport({ status: 'lease-held' }, record, 'tab', 3), null);
+  assert.equal(liveStatusReport({ status: 'live' }, { ...record, status: 'complete' }, 'tab', 3), null);
+  assert.equal(liveStatusReport({ status: 'live' }, { ...record, liveTranscription: false }, 'tab', 3), null);
+});
+
+test('workspace publishes best-effort heartbeats through long inference and missing model', async () => {
+  const f = fixture(); const reports = [];
+  f.api.status = async (id, body) => { reports.push({ id, ...body }); throw new Error('status unavailable'); };
+  const c = f.make('tab'); await c.start(); await flush();
+  assert.equal(f.jobs.length, 1);
+  f.advance(6000); await c.poll(); await flush();
+  assert.ok(reports.some(report => report.status === 'live' || report.status === 'catching-up'));
+  assert.equal(f.cancelled.length, 0);
+  assert.equal(c.getWorkState().active, f.jobs[0].options.jobId);
+  c.stop(); await flush();
+  const missing = fixture(); const missingReports = [];
+  missing.setModel(false); missing.api.status = async (id, body) => { missingReports.push(body); };
+  const d = missing.make('missing'); await d.start(); await flush();
+  missing.advance(6000); await d.poll(); await flush();
+  assert.equal(missingReports.length, 2);
+  assert.equal(missingReports[1].status, 'model-missing');
+  d.stop(); await flush();
 });

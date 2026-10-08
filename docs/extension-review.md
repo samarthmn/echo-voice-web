@@ -20,9 +20,9 @@ Controller review resolved historical import notifications replaying navigation 
 
 Runtime review found actual wire mismatches in pairing expiry and final import verification, delayed mute-message ordering, disk-full metadata failure hiding the committed prefix, transfer scheduling fairness, and compatibility of the offscreen-document lookup API with the declared Chromium floor. All six fixes passed independent re-review. Actual Brave/server pairing, approval, authenticated transfer of 65 chunks (1,040,000 frames), complete-import verification and redundant local PCM removal passed. Browser tests use synthetic PCM committed to IndexedDB; they do not exercise a real toolbar Start or meeting tabCapture stream.
 
-Independent controller review also approved conservative Calendar association: only fresh authorized account/library events with one matching provider identity and time range can be associated. Ambiguous, stale or unmatched recordings remain ordinary online meetings. No outstanding concrete defect remains in the reviewed implementation.
+Independent controller review also approved conservative Calendar association: only fresh authorized account/library events with one matching provider identity and time range can be associated. Ambiguous, stale or unmatched recordings remain ordinary online meetings. That bounded review was complete; subsequent human testing and plan auditing identified the additional defects and missing controls documented below.
 
-Active microphone exclusion during an ongoing recording is deferred; pre-start microphone selection and an explicit call-audio-only choice are available. This is a product limitation, not a tested active control.
+Active microphone exclusion, connection revocation, live preview and local recording controls are being completed in the current review loop. Their source checks are recorded separately from live qualification.
 
 Sanitized application overview images are provided in extension-assets. Recording/source-state store screenshots remain pending live qualification.
 
@@ -80,3 +80,31 @@ Capture now pins Chrome's top-frame document identity at Start. Loading/completi
 A separate deterministic test reproduced concurrent popup initialization overriding an explicit microphone exclusion. Popup refreshes are now serialized. Microphone startup reports permission, unavailable device, device-open and startup-interruption failures separately, with no silent call-audio fallback. Neither this race nor a specific device error is claimed as the cause of the user's initial microphone error; their explicit call-audio-only retry did start successfully.
 
 Root reviewed the changes and reran all 86 extension unit tests successfully. Extension build, production packaging and whitespace checks passed. Live retesting of the same Meet settings interaction is pending. A parallel plan audit identified missing Open Echo/Open in Echo, local-delete, extension-side disconnect, live-preview and active microphone-exclusion controls; these remain implementation work, not passed acceptance checks.
+
+## October 8 loading-fix retest — passed bounded capture scenarios
+
+Tested local commit `a49884f` in Brave 154.1.96.61 on macOS 27.0.1. The approved account joined Google Meet normally, with camera blocked and the meeting microphone muted. The user explicitly started **Record call audio only**, live text off, titled “Echo E2E — settings retest”.
+
+- Opening Meet audio settings did not interrupt capture. Meet's speaker-test tone appeared in PCM chunks 74–77 and again after resume in chunks 130–133.
+- Echo's Pause command held the committed prefix at 1,824,085 frames / 115 chunks, including another speaker test. Resume continued the same recording. The final manifest retained a 40,014 ms gap at that frame.
+- Echo was stopped during recording, with its listener confirmed unavailable. A speaker-test tone played during the outage appeared in chunks 158–161 after restarting the same isolated library. Transfer resumed automatically from acknowledged progress.
+- Playing the earlier voice recording in a different Echo tab contributed no audio to the captured Meet tab: every sample in chunks 311–337 was zero during that playback interval.
+- Echo's Stop command completed durable import with **356 chunks, 5,679,701 mono 16 kHz frames (354.981 seconds), and `interrupted: false`**. Final transcription of this tone-only recording was deliberately cancelled; the saved audio remained available. This is retention/cancellation evidence, not an ASR accuracy test.
+
+[Saved recording screenshot](extension-assets/capture-retest-saved.jpg). The microphone capture's [final transcript screenshot](extension-assets/microphone-transcript-review.jpg) is retained separately; its mute-phrase result remains inconclusive as explained above. No camera access was requested or granted. The test call was left and both review-owned browser tabs were closed after the loop.
+
+The loading-event interruption is fixed for this reproduced scenario. Microphone phrase exclusion, active microphone exclusion, live inference, actual cross-document departure, and the other provider/browser/OS combinations still require qualification. The loop also found delayed library-row/duration refresh and misleading persistent command-pending feedback; those fixes are under source review before another build. All commits remain local.
+
+## Muted-phrase investigation
+
+The user explicitly reported that the microphone/mute test transcript contained speech they intended to exclude. Inspection confirms that text is present. The saved passage has identical start/end timestamps of 142.98 seconds and is marked uncertain. Raw PCM is exactly zero from second 136 through the saved end; the earlier 115–135 second interval contains audio, including speech-sized peaks at 123–131 seconds. Consequently, the passage timestamp cannot establish a microphone leak during the later confirmed mute interval. A fresh, uniquely worded before/muted/after test is required before clearing this gate. No transcript-accuracy change is claimed or used to hide the result.
+
+## Recording controls and status completion
+
+The next local build adds active microphone exclusion, Open Echo and saved-recording links, confirmed local deletion, scoped live previews, and extension-side disconnect. Microphone exclusion has an independent recording-scoped worklet latch: clearing it still requires a new positive provider gate and cannot add a stream to call-audio-only capture. Disconnect retains local audio, requires confirmed server revocation, and retains pairing when offline. Preview/status responses are recording/installation/library scoped, bounded to 600 Unicode characters, and exclude credentials/full drafts. Saved audio awaiting manual final processing is distinct from actual finalization.
+
+Independent review checked link authorization, shared delete/transfer locking, atomic local storage accounting and command acknowledgement. A small deletion/status race was fixed so deletion of one pending row does not abort other transfers. Echo now receives newly recording library rows and increasing duration without overwriting title/transcript edits or starting processing early. Local control feedback advances from pending to an exact command acknowledgement; it does not infer a global paused state from an old acknowledgement.
+
+Root integration checks: **149 core JavaScript tests, 110 extension unit tests and 45 server tests passed**. Seven Rust app tests passed in the implementation agent. Strict all-target server/app Clippy, release WASM compilation, app assets, debug server, extension build and ZIP packaging passed. An initial core-suite invocation hit the known macOS `/var` versus `/private/var` temp-path assertion; rerunning with the required project-local TMPDIR passed all 149. New isolated-browser wire assertions were added but not run in this loop; current browser control restrictions are not bypassed. The updated server is running against the same isolated test library. Human verification of these new controls remains pending.
+
+The independent mute audit checked adapter semantics, startup exclusion, stale/unknown states, ordering, document identity, offscreen revisions and actual worklet output at 16/44.1/48 kHz. It found no utterance-sized leakage; at most one resampler carry sample (62.5 microseconds at 16 kHz) can follow closure. This does not clear the original user-reported phrase failure: the fresh human retest remains necessary.

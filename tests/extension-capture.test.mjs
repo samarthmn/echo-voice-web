@@ -90,3 +90,12 @@ test('only fixed interruption reasons are accepted from control messages',async 
   const h = harness(); await h.start(false); await h.message({type:'CONTROL',recordingId:'synthetic-recording',action:'stop',interrupted:true,interruptionReason:'https://private.invalid/meeting-title'});
   assert.equal(h.journal.rows.get('synthetic-recording').interruption.reason,'capture-failed');
 });
+test('active microphone exclusion only narrows the provider gate and never adds a missing stream',async()=> {
+  const h=harness();await h.start();const id='synthetic-recording';let revision=0;
+  const gate=allowed=>h.message({type:'GATE',recordingId:id,gateRevision:++revision,allowed,ttlMs:2000,expiresAt:Date.now()+2000,state:allowed?'unmuted':'muted'});
+  await gate(true);await h.message({type:'MIC_EXCLUSION',recordingId:id,excluded:true});await gate(true);
+  assert.equal(h.worklet().messages.at(-1).allowed,false);assert.equal((await h.message({type:'STATUS'})).value.active.micExcluded,true);assert.match((await h.message({type:'STATUS'})).value.active.mic,/by you/);
+  await h.message({type:'MIC_EXCLUSION',recordingId:id,excluded:false});await gate(false);assert.equal(h.worklet().messages.at(-1).allowed,false);
+  await gate(true);assert.equal(h.worklet().messages.at(-1).allowed,true);assert.equal(h.calls.length,2);await h.message({type:'CONTROL',recordingId:id,action:'stop'});
+  const tabOnly=harness();await tabOnly.start(false);const denied=await tabOnly.message({type:'MIC_EXCLUSION',recordingId:id,excluded:false});assert.equal(denied.ok,false);assert.match(denied.error,/no available microphone/);assert.equal(tabOnly.calls.length,1);await tabOnly.message({type:'CONTROL',recordingId:id,action:'stop'});
+});

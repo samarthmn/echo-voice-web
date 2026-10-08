@@ -75,7 +75,7 @@ test('AudioWorklet keeps stale microphone out even when delayed gates arrive',as
 });
 async function protocolHarness() {
   const fakeStorage = `export async function allRecordings(){return [...globalThis.records.values()]}; export async function recording(id){return globalThis.records.get(id)}; export async function updateRecording(id,patch){const next={...globalThis.records.get(id),...patch};globalThis.records.set(id,next);return next};export async function getChunk(id,sequence){return globalThis.chunks.get(id+':'+sequence)};export async function retainReceiptAndRemovePCM(id,receipt){const row=globalThis.records.get(id);globalThis.records.set(id,{...row,receipt,transferState:'saved-echo'});globalThis.chunks.delete(id+':0')}`;
-  const outfile = path.join(scratch,'protocol.mjs'); await build({entryPoints:[path.join(project,'extension/src/protocol.ts')],bundle:true,format:'esm',platform:'node',outfile,plugins:[{name:'fake-journal',setup(builder){builder.onResolve({filter:/^\.\/storage$/},() => ({path:'storage',namespace:'fake'}));builder.onLoad({filter:/.*/,namespace:'fake'},() => ({contents:fakeStorage,loader:'js'}));}}]});
+  const outfile = path.join(scratch,'protocol.mjs'); await build({entryPoints:[path.join(project,'extension/src/protocol.ts')],bundle:true,format:'esm',platform:'node',outfile,plugins:[{name:'fake-journal',setup(builder){builder.onResolve({filter:/^\.\/(storage|recording-lock)$/},args => ({path:args.path,namespace:'fake'}));builder.onLoad({filter:/.*/,namespace:'fake'},args => ({contents:args.path.endsWith('recording-lock') ? 'export const withRecordingLock=(_id,work)=>work();' : fakeStorage,loader:'js'}));}}]});
   return import(pathToFileURL(outfile).href);
 }
 const protocol = await protocolHarness();

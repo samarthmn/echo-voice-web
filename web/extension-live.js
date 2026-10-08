@@ -61,6 +61,7 @@ export function createExtensionLiveApi(fetcher = globalThis.fetch.bind(globalThi
     recordings: signal => json('/recordings', undefined, signal),
     lease: (id, ownerId, signal) => json(`${path(id)}/lease`, { ownerId }, signal),
     draft: (id, body, signal) => json(`${path(id)}/draft`, body, signal),
+    status: (id, body, signal) => json(`${path(id)}/live-status`, body, signal),
     async pcm(id, startFrame, frameCount, signal) {
       if (!Number.isSafeInteger(startFrame) || startFrame < 0 || !Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount > LIVE_WINDOW_FRAMES) throw new Error('Invalid live PCM range.');
       const response = await fetcher(`/api/extensions${path(id)}/pcm?startFrame=${startFrame}&frameCount=${frameCount}`, { credentials: 'same-origin', redirect: 'error', signal });
@@ -72,6 +73,12 @@ export function createExtensionLiveApi(fetcher = globalThis.fetch.bind(globalThi
       return samples;
     },
   };
+}
+
+/** Status reports carry no text; the existing draft lease remains the sole text authority. */
+export function liveStatusReport(state, record, ownerId, generation) {
+  if (!record?.liveTranscription || record.status !== 'receiving' || !['live', 'catching-up', 'waiting-audio', 'model-missing', 'processing-busy', 'paused-open-echo'].includes(state.status)) return null;
+  return { ownerId, generation: Math.max(record.generation || 0, generation || 0), status: state.status };
 }
 
 /** One global active ASR job and one bounded, prepared PCM window per Echo tab. */
@@ -87,8 +94,23 @@ export function createExtensionLiveController({
   let records = [], states = [], session = null, active = null, prepared = null;
   const fetches = new Set();
   const leaseBackoff = new Map();
+  const knownGenerations = new Map(), statusReports = new Map();
   const snapshot = () => states.map(state => ({ ...state, draft: state.draft ? { ...state.draft, words: state.draft.words.map(word => ({ ...word })) } : undefined }));
-  const publish = () => onState(snapshot());
+  const reportStatuses = () => {
+    if (!api.status) return;
+    for (const state of states) {
+      const body = liveStatusReport(state, records.find(record => record.recordingId === state.recordingId), ownerId, knownGenerations.get(state.recordingId));
+      if (!body) continue;
+      const prior = statusReports.get(state.recordingId);
+      const signature = JSON.stringify(body);
+      if (prior?.pending || (prior?.signature === signature && now() - prior.at < 5000)) continue;
+      const report = { signature, at: now(), pending: true };
+      statusReports.set(state.recordingId, report);
+      // Best effort: status outages must never cancel inference or draft persistence.
+      void request(signal => api.status(state.recordingId, body, signal)).catch(() => {}).finally(() => { report.pending = false; });
+    }
+  };
+  const publish = () => { onState(snapshot()); reportStatuses(); };
   const mark = (id, status, extra = {}) => {
     states = states.map(state => state.recordingId === id ? { ...state, status, message: statusText[status], ...extra } : state);
     publish();
@@ -242,6 +264,7 @@ export function createExtensionLiveController({
             const draft = validateLiveDraft(grant.draft, grant.totalFrames);
             record.totalFrames = grant.totalFrames; record.draft = draft;
             session = { recordingId: record.recordingId, ...lease, draft };
+            knownGenerations.set(record.recordingId, lease.generation);
             leaseBackoff.delete(record.recordingId); armExpiry();
             mark(record.recordingId, 'waiting-audio', { draft });
             break;

@@ -16,7 +16,7 @@ The Manifest V3 API floor is Chromium 120. Current Brave/Chrome must still be qu
 
 Open the Echo toolbar popup while the meeting is active. Set a title, microphone choice and device, and optional **Live transcript**. Confirm participant permission and choose **Start recording**. Live text is off by default. If microphone permission is denied, explicitly choose call-audio-only recording.
 
-Call audio keeps playing normally. The extension never plays your microphone through your speakers. Your microphone is recorded only when the provider adapter sees an active call and a fresh, positively unmuted state. Meeting mute, an unknown interface, a missing control, a disconnected device, or a stale observation excludes your microphone. A warning means call audio can continue but your voice may be missing. Clear **Include my microphone** before starting for call audio only. Changing that choice during recording is not available yet; Echo never unmutes the meeting.
+Call audio keeps playing normally. The extension never plays your microphone through your speakers. Your microphone is recorded only when the provider adapter sees an active call and a fresh, positively unmuted state. Meeting mute, an unknown interface, a missing control, a disconnected device, or a stale observation excludes your microphone. A warning means call audio can continue but your voice may be missing. Clear **Include my microphone** before starting for call audio only. During recording, **Exclude my microphone** further mutes a microphone stream acquired at Start. Clearing it still requires a fresh unmuted meeting state. It cannot add a microphone to a call-audio-only recording or unmute the meeting.
 
 **Pause** stops adding both audio sources; call playback continues. **Resume** continues the same recording. Saved duration excludes paused time and the recording records timeline gaps. Switching tabs or closing the popup does not switch the audio source. Closing the captured tab, leaving the call, cross-document navigation, or choosing **Stop** finalizes recording. Closing the entire browser interrupts capture. A new call requires a new Start action and consent.
 
@@ -30,7 +30,7 @@ The extension library distinguishes **Saved in this browser**, **Transferring to
 
 Pending recordings can be exported without Echo. Exports are sequential WAV parts of at most 30 minutes, representing one continuous timeline. Delete unsynchronized audio only after checking the warning and making your own backup. **Uninstalling the extension or deleting its browser profile can remove pending audio. Export or synchronize it first.** Browser disk space is finite despite the unlimitedStorage permission.
 
-After complete import, redundant local PCM is removed and a receipt links to Echo. Ambiguous or missing acknowledgements retain local audio. Pairing to another library requires explicit confirmation before transferring pending recordings there; verify the destination carefully.
+After complete import, redundant local PCM is removed and **Open in Echo** opens the saved recording in its original library. **Remove receipt** removes only the browser receipt; the imported Echo recording remains. **Delete local audio** requires confirmation and is unavailable for an active recording. Ambiguous or missing acknowledgements retain local audio. Pairing to another library requires explicit confirmation before transferring pending recordings there; verify the destination carefully.
 
 ## Live and final transcription
 
@@ -38,7 +38,7 @@ Live processing runs in an open Echo workspace using its existing local Turbo mo
 
 If Echo or the model is unavailable, recording continues. Live text reports paused, model needed, processing busy, catching up, or live. Processing lag depends on the computer. Closing the processing tab pauses live text; reopening Echo resumes from saved progress. Two Echo tabs use a fenced processing lease so only one writes the draft.
 
-Live text is provisional. Final transcription takes priority after import and uses the recording's selected speech model and normal speaker-recognition workflow. Generate notes from the final transcript. The draft is retained until final processing succeeds. Speaker grouping does not guarantee verified identities or accurate overlap separation.
+The popup shows a short live preview and processing status while recording. **Open Echo** opens the recording’s paired workspace. Live text is provisional. Final transcription takes priority after import and uses the recording's selected speech model and normal speaker-recognition workflow. Generate notes from the final transcript. The draft is retained until final processing succeeds. Speaker grouping does not guarantee verified identities or accurate overlap separation.
 
 ## Permissions and privacy
 
@@ -50,7 +50,7 @@ Live text is provisional. Final transcription takes priority after import and us
 - **Loopback host access:** transfer to the configured Echo installation on this computer. A revocable scoped credential authorizes only this extension's recording ingest, status, controls and live drafts.
 - **Microphone:** runtime permission only when you enable your voice; video is always disabled.
 
-No cookies, browsing history, debugger, native messaging, desktop capture, camera, or all-site access is requested. Code is bundled locally. The extension cannot list existing Echo meetings, delete them, change settings, or retrieve Calendar credentials. Disconnect it in Echo to revoke future access. Audio remains local unless you explicitly choose an existing cloud notes workflow in Echo after final transcription.
+No cookies, browsing history, debugger, native messaging, desktop capture, camera, or all-site access is requested. Code is bundled locally. The extension cannot list existing Echo meetings, delete them, change settings, or retrieve Calendar credentials. Use **Disconnect** in extension Setup or revoke the installation in Echo to stop future access. Setup confirms server revocation before removing the local connection; if Echo is unavailable, it retains the connection and asks you to retry. Pending local audio is retained. Audio remains local unless you explicitly choose an existing cloud notes workflow in Echo after final transcription.
 
 ## Preparing a store package
 

@@ -1,6 +1,7 @@
 import {Provider, Recording} from './core';
 import {allRecordings, exportParts, recording} from './storage';
 import {action, element, renderRecordings, request, showError} from './ui';
+import {connectionLabel} from './status-labels';
 declare const chrome: any;
 const providers: {id:Provider;name:string;origins:string[]}[] = [
   {id:'meet',name:'Google Meet',origins:['https://meet.google.com/*']},
@@ -8,13 +9,21 @@ const providers: {id:Provider;name:string;origins:string[]}[] = [
   {id:'teams',name:'Microsoft Teams Web',origins:['https://teams.microsoft.com/*','https://teams.live.com/*','https://teams.cloud.microsoft/*']},
 ];
 let prefs: any; let initialized = false; let claimTimer: ReturnType<typeof setInterval> | undefined;
+let connection = 'checking'; let checkingConnection = false; let pendingCount = 0; let capturing = false;
+async function refreshConnection() {
+  if(checkingConnection) return; checkingConnection = true;
+  try {connection = (await request({type:'CONNECTION_STATUS'})).status; element('connection-status').textContent = connectionLabel(connection);} finally {checkingConnection = false;}
+}
 let exportIterator: AsyncGenerator<any> | undefined; let exportURL: string | undefined; let timelineURL: string | undefined; let exportRow: Recording | undefined;
 function status(text: string) {element('status').textContent = text; element('status').hidden = false;}
 async function refresh() {
   const state = await request({type:'STATE'}); prefs = state.settings;
   if(state.recoveryError) showError(new Error(state.recoveryError));
   if(!initialized) {element<HTMLInputElement>('endpoint').value = prefs.endpoint; initialized = true;}
-  element('paired').textContent = prefs.activeLibraryId ? `Connected to library ${prefs.activeLibraryId}. New recordings will use this library.` : 'Not paired. You can record and export locally.';
+  element('paired').textContent = prefs.activeLibraryId ? `Paired with library ${prefs.activeLibraryId}. New recordings will use this library.` : 'Not paired. You can record and export locally.';
+  if(!prefs.activeLibraryId) connection = 'not-connected'; else if(connection === 'not-connected') connection = 'checking';
+  element('connection-status').textContent = connectionLabel(connection); element('disconnect').hidden = !prefs.activeLibraryId;
+  pendingCount = state.recordings.filter((row: Recording) => !row.receipt && (row.libraryId === prefs.activeLibraryId || !row.libraryId) && row.chunkCount).length; capturing = !!state.active;
   element('mic-status').textContent = prefs.micGranted ? 'Permission granted. Choose whether to include it when starting.' : 'Not granted. Tab audio only is available.';
   const list = element('providers'); list.replaceChildren();
   for(const provider of providers) {
@@ -33,6 +42,10 @@ element('microphone').addEventListener('click',() => {void action(async () => {
   catch {await request({type:'MIC_GRANTED',granted:false}); status('Microphone access was denied. Explicitly leave “Include my microphone” unchecked in the popup to record tab audio only.');}
   await refresh();
 },element<HTMLButtonElement>('microphone'));});
+element('disconnect').addEventListener('click',() => {
+  if(!window.confirm(`Disconnect this browser from Echo? ${pendingCount} recording${pendingCount === 1 ? '':'s'} still need transfer to this library. ${capturing ? 'The active recording will continue locally. ':''}Local audio will be retained. Reconnect this library to transfer it later.`)) return;
+  void action(async () => {await request({type:'DISCONNECT',confirmed:true}); status('Disconnected from Echo. Local audio is retained.'); await refresh(); await refreshConnection();},element<HTMLButtonElement>('disconnect'));
+});
 element('request').addEventListener('click',() => {void action(async () => {
   const result = await request({type:'PAIR_REQUEST',endpoint:element<HTMLInputElement>('endpoint').value,code:element<HTMLInputElement>('code').value,name:element<HTMLInputElement>('name').value});
   status(`Pairing request sent. Approve this browser in Echo before ${new Date(result.expiresAtMs).toLocaleTimeString()}.`);
@@ -44,7 +57,7 @@ async function claim(confirmLibrary = false) {
   if(result.status === 'pending') {status('Waiting for you to approve this browser in Echo.'); return;}
   if(claimTimer) {clearInterval(claimTimer); claimTimer = undefined;}
   if(result.status === 'confirm-library') {element('library-confirm').hidden = false; status(`${result.pendingCount} recordings are still saved locally. Confirm the new library below.`); return;}
-  element('library-confirm').hidden = true; element<HTMLInputElement>('code').value = ''; status('Paired. Saved audio will transfer when Echo is available.'); await refresh();
+  element('library-confirm').hidden = true; element<HTMLInputElement>('code').value = ''; status('Paired. Saved audio will transfer when Echo is available.'); await refresh(); await refreshConnection();
 }
 element('claim').addEventListener('click',() => {void action(() => claim(),element<HTMLButtonElement>('claim'));});
 element('confirm-library').addEventListener('click',() => {void action(() => claim(true),element<HTMLButtonElement>('confirm-library'));});
@@ -70,4 +83,5 @@ async function nextPart() {
 element('next-part').addEventListener('click',() => {void action(nextPart,element<HTMLButtonElement>('next-part'));});
 window.addEventListener('pagehide',() => {if(exportURL) URL.revokeObjectURL(exportURL); if(timelineURL) URL.revokeObjectURL(timelineURL); if(claimTimer) clearInterval(claimTimer);});
 void refresh().then(async () => {const params = new URLSearchParams(location.hash.slice(1)); const id = params.get('recording'); if(id) {const row = await recording(id); if(row) await beginExport(row);}}).catch(showError);
+void refreshConnection().catch(showError); setInterval(() => {void refreshConnection().catch(showError);},5000);
 setInterval(() => {void refresh().catch(showError);},3000);

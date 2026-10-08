@@ -2,6 +2,8 @@ import {endpointURL, meetingFor, microphoneAllowed, Observation, Provider, valid
 import {allRecordings} from './storage';
 import {jsonRequest} from './protocol';
 import {settings, saveSettings} from './settings';
+import {openEcho, deleteLocalRecording} from './library-actions';
+import {connectionAction, connectionStatus, disconnect, livePreview} from './connection';
 declare const chrome: any;
 type Owner = {tabId: number; identity: string; recordingId: string; documentId?: string; gateRevision: number; departing?: boolean};
 let owner: Owner | undefined; let starting = false; let makingOffscreen: Promise<void> | undefined;
@@ -93,7 +95,8 @@ async function pairRequest(message: any) {
   const expiresAtMs = unixSecondsToMilliseconds(request.expiresAt);
   await chrome.storage.session.set({pairRequest:{...request,code,endpoint}}); return {requestId:request.requestId,expiresAtMs};
 }
-async function claimPair(confirmLibrary = false) {
+function claimPair(confirmLibrary = false) {return connectionAction(() => claimPairLocked(confirmLibrary));}
+async function claimPairLocked(confirmLibrary = false) {
   const prefs = await settings(); const stored = await chrome.storage.session.get(['pairRequest','pendingPair']);
   let pair = stored.pendingPair;
   if(!pair) {
@@ -154,6 +157,19 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
   if(!trustedPage) return false;
   const run = async () => {
     if(message.type === 'STATE') return state();
+    if(message.type === 'CONNECTION_STATUS') return connectionStatus();
+    if(message.type === 'DISCONNECT') return disconnect(message.confirmed === true);
+    if(message.type === 'LIVE_PREVIEW') return livePreview(message.recordingId);
+    if(message.type === 'MIC_EXCLUSION') {
+      await restoreOwner(); if(!owner || owner.recordingId !== message.recordingId) throw new Error('That recording is no longer active.');
+      const response = await send({type:'MIC_EXCLUSION',recordingId:owner.recordingId,excluded:message.excluded === true}); await gate(); return response;
+    }
+    if(message.type === 'OPEN_ECHO') return openEcho(typeof message.recordingId === 'string' ? message.recordingId : undefined);
+    if(message.type === 'DELETE_RECORDING') {
+      await restoreOwner();
+      await deleteLocalRecording(message.recordingId,message.confirmed === true,owner?.recordingId);
+      await setBadge((await state()).active); return {};
+    }
     if(message.type === 'START') return start(message);
     if(message.type === 'CONTROL' && ['pause','resume','stop'].includes(message.action)) {
       await restoreOwner(); if(!owner || owner.recordingId !== message.recordingId) throw new Error('That recording is no longer active.');

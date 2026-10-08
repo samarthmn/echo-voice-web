@@ -52,6 +52,17 @@ export async function retainReceiptAndRemovePCM(id: string, receipt: NonNullable
   meta.put({key:'pendingBytes',value:Math.max(0,(pending?.value ?? 0) - row.totalFrames * 2)});
   store.put({...row,transferState:'saved-echo',receipt,error:undefined}); await done;
 }
+// Call under the shared recording lock so transfer cannot race local deletion.
+export async function deleteRecording(id: string): Promise<void> {
+  const db = await database(); const tx = db.transaction(['recordings','chunks','meta'],'readwrite',{durability:'strict'}); const done = committed(tx);
+  const store = tx.objectStore('recordings'); const chunks = tx.objectStore('chunks'); const meta = tx.objectStore('meta');
+  const [row,pending] = await Promise.all([result<Recording | undefined>(store.get(id)),result<any>(meta.get('pendingBytes'))]);
+  if(!row) {await done; return;}
+  if(!['stopped','interrupted'].includes(row.captureState)) {tx.abort(); await done.catch(() => {}); throw new Error('Stop this recording before deleting its local audio.');}
+  chunks.index('recording').openCursor(IDBKeyRange.only(id)).onsuccess = event => {const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result; if(cursor) {cursor.delete(); cursor.continue();}};
+  if(!row.receipt) meta.put({key:'pendingBytes',value:Math.max(0,(pending?.value ?? 0) - row.totalFrames * 2)});
+  store.delete(id); await done;
+}
 export async function* exportParts(id: string): AsyncGenerator<{blob: Blob; part: number; startFrame: number; frames: number}> {
   const row = await recording(id); if(!row) throw new Error('Recording not found.');
   if(row.transferState === 'saved-echo') throw new Error('This recording is saved in Echo. Export its audio there.');

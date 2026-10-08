@@ -6,6 +6,52 @@ use crate::{
 use dioxus::prelude::*;
 use serde_json::{json, Value};
 
+fn acknowledged_action(before_poll: &Value, pending: &Value, snapshot: &Value) -> Option<String> {
+    if pending.is_null()
+        || before_poll != pending
+        || pending["recordingId"] != snapshot["recordingId"]
+        || !["receiving", "complete"].contains(&text(snapshot, "status").as_str())
+    {
+        return None;
+    }
+    let controls = snapshot["controls"].as_array()?;
+    if controls
+        .iter()
+        .any(|control| control["commandId"] == pending["commandId"])
+    {
+        return None;
+    }
+    match text(pending, "action").as_str() {
+        "pause" => Some("Pause acknowledged.".into()),
+        "resume" => Some("Resume acknowledged.".into()),
+        "stop" => Some("Stop acknowledged. Finishing transfer to Echo.".into()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn acknowledgement_requires_a_later_poll_for_the_exact_submitted_command() {
+        let pending = json!({"recordingId":"r","commandId":"c","action":"pause"});
+        let mut snapshot = json!({"recordingId":"r","status":"receiving","controls":[]});
+        assert_eq!(
+            acknowledged_action(&pending, &pending, &snapshot).as_deref(),
+            Some("Pause acknowledged.")
+        );
+        assert_eq!(acknowledged_action(&Value::Null, &pending, &snapshot), None);
+        snapshot["controls"] = json!([{"commandId":"c","action":"pause"}]);
+        assert_eq!(acknowledged_action(&pending, &pending, &snapshot), None);
+        snapshot["controls"] = json!([]);
+        snapshot["recordingId"] = json!("other");
+        assert_eq!(acknowledged_action(&pending, &pending, &snapshot), None);
+        snapshot["recordingId"] = json!("r");
+        snapshot["status"] = json!("deleted");
+        assert_eq!(acknowledged_action(&pending, &pending, &snapshot), None);
+    }
+}
+
 #[component]
 pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
     let mut connections = use_signal(|| Value::Null);
@@ -75,6 +121,8 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
     let mut busy = use_signal(|| false);
     let mut live = use_signal(|| Value::Null);
     let mut legacy = use_signal(|| Value::Null);
+    let mut pending_control = use_signal(|| Value::Null);
+    let mut acknowledgement = use_signal(|| Value::Null);
     let listener_id = use_hook(|| format!("extension-live-{}", js_sys::Math::random()));
     let cleanup_id = listener_id.clone();
     use_drop(move || {
@@ -110,16 +158,26 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
     use_future(move || async move {
         loop {
             let id = text(&meeting(), "id");
+            let pending_before_poll = pending_control();
             match get("/extensions/recordings").await {
                 Ok(v) => {
-                    recording.set(
-                        v["recordings"]
-                            .as_array()
-                            .and_then(|items| items.iter().find(|r| r["meetingId"] == id))
-                            .cloned()
-                            .unwrap_or(Value::Null),
-                    );
-                    error.set(String::new());
+                    let snapshot = v["recordings"]
+                        .as_array()
+                        .and_then(|items| items.iter().find(|r| r["meetingId"] == id))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    if text(&meeting(), "id") == id {
+                        if let Some(message) =
+                            acknowledged_action(&pending_before_poll, &pending_control(), &snapshot)
+                        {
+                            acknowledgement.set(
+                                json!({"recordingId":snapshot["recordingId"],"message":message}),
+                            );
+                            pending_control.set(Value::Null);
+                        }
+                        recording.set(snapshot);
+                        error.set(String::new());
+                    }
                 }
                 Err(e) => error.set(e),
             }
@@ -138,6 +196,8 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
     let id = text(&value, "recordingId");
     let receiving = text(&value, "status") == "receiving";
     let commands = value["controls"].as_array().cloned().unwrap_or_default();
+    let pending_here = !pending_control().is_null() && pending_control()["recordingId"] == id;
+    let acknowledged_here = acknowledgement()["recordingId"] == id;
     let draft = value["draft"]["words"]
         .as_array()
         .map(|words| {
@@ -161,10 +221,14 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
         });},"Recover old recording"}}
         if !live().is_null(){p {role:"status",{text(&live(),"message")}}}
         if !value.is_null() {p {class:"small-muted",if receiving {"Recording saved in the browser; transfer is in progress."}else{"Recording saved in Echo."}}
-            if receiving{div {class:"extension-controls",for action in ["pause","resume","stop"]{{let id=id.clone();rsx!{ActionButton {kind:if action=="stop"{ButtonKind::Primary}else{ButtonKind::Secondary},compact:true,disabled:busy()||!commands.is_empty(),onclick:move |_|{let id=id.clone();spawn(async move{
-                busy.set(true);match crate::api::evaluate("return crypto.randomUUID();").await{Ok(command)=>{match post(&format!("/extensions/recordings/{id}/controls"),json!({"commandId":command,"action":action})).await{Ok(_)=>notify.call("Control requested — waiting for the extension.".into()),Err(e)=>error.set(e)}},Err(e)=>error.set(e)}busy.set(false);
+            if receiving{div {class:"extension-controls",for action in ["pause","resume","stop"]{{let id=id.clone();rsx!{ActionButton {kind:if action=="stop"{ButtonKind::Primary}else{ButtonKind::Secondary},compact:true,disabled:busy()||pending_here||!commands.is_empty(),onclick:move |_|{
+                if busy() || pending_control()["recordingId"]==id || recording()["controls"].as_array().is_some_and(|items|!items.is_empty()) { return; }
+                busy.set(true);let id=id.clone();spawn(async move{
+                error.set(String::new());acknowledgement.set(Value::Null);
+                match crate::api::evaluate("return crypto.randomUUID();").await{Ok(command)=>{match post(&format!("/extensions/recordings/{id}/controls"),json!({"commandId":command,"action":action})).await{Ok(_)=>pending_control.set(json!({"recordingId":id,"commandId":command,"action":action})),Err(e)=>error.set(e)}},Err(e)=>error.set(e)}busy.set(false);
             });},{match action{"pause"=>"Pause","resume"=>"Resume",_=>"Stop"}}}}}}}}
-            if !commands.is_empty(){p {role:"status","Control pending — waiting for the extension."}}
+            if pending_here||!commands.is_empty(){p {role:"status","Control pending — waiting for the extension."}}
+            else if acknowledged_here {p {role:"status",{text(&acknowledgement(),"message")}}}
             if !draft.is_empty(){p {class:"extension-live-preview",role:"status","Draft transcript: {draft}"}}
         }
         if !error().is_empty(){p {class:"inline-error",role:"alert","{error}"}}

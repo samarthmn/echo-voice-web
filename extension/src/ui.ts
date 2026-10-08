@@ -20,7 +20,18 @@ export function renderRecordings(rows: Recording[], exportRecording: (row: Recor
     copy.append(title,text); if(row.error) {const error = document.createElement('p'); error.className = 'attention'; error.textContent = row.error; copy.append(error);}
     if(row.interruption) {const reason = document.createElement('p'); reason.className = 'attention'; reason.textContent = `Interrupted at ${duration(row.interruption.atFrame)}: ${INTERRUPTION_DESCRIPTIONS[row.interruption.reason] ?? INTERRUPTION_DESCRIPTIONS['capture-failed']}`; copy.append(reason);}
     item.append(copy);
-    if(!row.receipt && row.chunkCount && row.recordingId !== activeRecordingId) {const button = document.createElement('button'); button.className = 'quiet'; button.textContent = 'Export'; button.addEventListener('click',() => exportRecording(row)); item.append(button);}
+    const actions = document.createElement('div'); actions.className = 'recording-actions';
+    if(row.receipt) {const button = document.createElement('button'); button.className = 'quiet'; button.textContent = 'Open in Echo'; button.addEventListener('click',() => {void action(async () => {await request({type:'OPEN_ECHO',recordingId:row.recordingId});},button);}); actions.append(button);}
+    if(!row.receipt && row.chunkCount && row.recordingId !== activeRecordingId) {const button = document.createElement('button'); button.className = 'quiet'; button.textContent = 'Export'; button.addEventListener('click',() => exportRecording(row)); actions.append(button);}
+    if(row.recordingId !== activeRecordingId) {
+      const button = document.createElement('button'); button.className = 'quiet danger'; button.textContent = row.receipt ? 'Remove receipt':'Delete local audio';
+      button.addEventListener('click',() => {
+        const warning = row.receipt ? 'Remove this browser’s recording receipt? The recording and audio saved in Echo will remain.' : 'Permanently delete this browser’s recording and audio? Echo has not confirmed a complete copy. Export first if you want to keep it. Any audio already transferred to Echo will remain.';
+        if(!window.confirm(warning)) return;
+        void action(async () => {await request({type:'DELETE_RECORDING',recordingId:row.recordingId,confirmed:true}); item.remove();},button);
+      }); actions.append(button);
+    }
+    item.append(actions);
     list.append(item);
   }
 }

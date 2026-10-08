@@ -98,6 +98,12 @@ fn public_recording(mut r: Value, lib: &str) -> Value {
     r["libraryId"] = json!(lib);
     r
 }
+fn extension_recording(r: Value, lib: &str) -> Value {
+    let mut value = public_recording(r, lib);
+    value.as_object_mut().unwrap().remove("draft");
+    value.as_object_mut().unwrap().remove("liveStatus");
+    value
+}
 pub(crate) fn validate_metadata(v: &Value) -> Result<()> {
     fields(
         v,
@@ -299,7 +305,7 @@ async fn access(req: Request, next: Next) -> Response {
         .insert(header::VARY, HeaderValue::from_static("Origin"));
     response.headers_mut().insert(
         header::ACCESS_CONTROL_ALLOW_METHODS,
-        HeaderValue::from_static("GET, PUT, POST, OPTIONS"),
+        HeaderValue::from_static("GET, PUT, POST, DELETE, OPTIONS"),
     );
     response.headers_mut().insert(
         header::ACCESS_CONTROL_ALLOW_HEADERS,
@@ -315,9 +321,11 @@ fn reply_error(e: ApiError) -> Response {
 }
 pub fn extension_routes() -> Router {
     Router::new()
+        .route("/connection", get(connection).delete(disconnect))
         .route("/pairing/request", post(pair_request))
         .route("/pairing/claim", post(pair_claim))
         .route("/recordings/{id}", put(start).get(status))
+        .route("/recordings/{id}/live", get(live_preview))
         .route("/recordings/{id}/chunks/{sequence}", put(chunk))
         .route("/recordings/{id}/complete", post(complete))
         .route("/recordings/{id}/controls/{command}/ack", post(ack))
@@ -334,6 +342,7 @@ pub fn workspace_routes() -> Router {
         .route("/extensions/recordings", get(recordings))
         .route("/extensions/recordings/{id}/controls", post(control))
         .route("/extensions/recordings/{id}/lease", post(lease))
+        .route("/extensions/recordings/{id}/live-status", post(live_status))
         .route(
             "/extensions/recordings/{id}/draft",
             post(draft).layer(DefaultBodyLimit::max(16 * 1024 * 1024)),
@@ -341,6 +350,24 @@ pub fn workspace_routes() -> Router {
         .route("/extensions/recordings/{id}/pcm", get(pcm))
         .layer(DefaultBodyLimit::max(256 * 1024))
         .layer(axum::middleware::from_fn(protocol))
+}
+async fn connection(headers: HeaderMap) -> Result<Json<Value>> {
+    store::with_db(|db| {
+        let installation = authenticated(db, &headers)?;
+        Ok(reply(
+            json!({"installationId":installation,"libraryId":library(db)?}),
+        ))
+    })
+}
+async fn disconnect(headers: HeaderMap) -> Result<Json<Value>> {
+    store::with_db(|db| {
+        let installation = authenticated(db, &headers)?;
+        db.execute(
+            "DELETE FROM extension_connections WHERE installation_id=?",
+            [&installation],
+        )?;
+        Ok(reply(json!({"status":"disconnected"})))
+    })
 }
 async fn pair_code() -> Result<Json<Value>> {
     store::with_db(|db| {
@@ -551,7 +578,7 @@ async fn start(
                     "Recording metadata conflicts with the saved session.",
                 ));
             }
-            return Ok(reply(public_recording(r, &lib)));
+            return Ok(reply(extension_recording(r, &lib)));
         }
         let count:i64=tx.query_row("SELECT COUNT(*) FROM extension_recordings WHERE installation_id=? AND json_extract(data,'$.status')='receiving'",[&install],|r|r.get(0))?;
         if count >= 20 {
@@ -579,7 +606,7 @@ async fn start(
             params![id, install, meeting, r.to_string()],
         )?;
         tx.commit()?;
-        Ok(reply(public_recording(r, &lib)))
+        Ok(reply(extension_recording(r, &lib)))
     })
 }
 fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
@@ -632,7 +659,116 @@ async fn status(Path(id): Path<String>, headers: HeaderMap) -> Result<Json<Value
     store::with_db(|db| {
         let r = owned(db, &headers, &id)?;
         verify_complete_files(db, &r)?;
-        Ok(reply(public_recording(r, &library(db)?)))
+        Ok(reply(extension_recording(r, &library(db)?)))
+    })
+}
+/// Only a short draft tail is exposed to the recording's authenticated installation.
+async fn live_preview(Path(id): Path<String>, headers: HeaderMap) -> Result<Json<Value>> {
+    store::with_db(|db| {
+        let r = owned(db, &headers, &id)?;
+        if r["status"] == "deleted" {
+            return Err(ApiError::new(410, "Recording was deleted."));
+        }
+        let meeting = store::require_meeting(db, r["meetingId"].as_str().unwrap())?;
+        Ok(reply(live_snapshot(&r, &meeting, &library(db)?, seconds())))
+    })
+}
+fn live_snapshot(r: &Value, meeting: &Value, lib: &str, now: i64) -> Value {
+    let total = r["totalFrames"].as_u64().unwrap_or(0);
+    let finalized = r["status"] == "complete"
+        && meeting["transcripts"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty());
+    let through = r["draft"]["throughFrame"]
+        .as_u64()
+        .unwrap_or(if finalized { total } else { 0 });
+    let fresh = r["liveStatus"]["updatedAt"]
+        .as_i64()
+        .is_some_and(|at| at <= now && now - at < 15)
+        && r["liveStatus"]["generation"] == r["generation"];
+    let status = if r["liveTranscription"] != true {
+        "disabled"
+    } else if meeting["status"] == "processing" {
+        "finalizing"
+    } else if finalized {
+        "complete"
+    } else if r["status"] == "complete" {
+        "final-transcript-needed"
+    } else if fresh {
+        r["liveStatus"]["status"]
+            .as_str()
+            .unwrap_or("paused-open-echo")
+    } else {
+        "paused-open-echo"
+    };
+    // Walk backwards until the bounded tail is full; do not assemble an hours-long transcript.
+    let mut tail = Vec::new();
+    let mut remaining = 600;
+    if let Some(words) = r["draft"]["words"].as_array() {
+        for word in words.iter().rev() {
+            let Some(text) = word["text"].as_str() else {
+                continue;
+            };
+            if remaining == 0 {
+                break;
+            }
+            let fragment: String = text
+                .chars()
+                .rev()
+                .take(remaining)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            remaining = remaining.saturating_sub(fragment.chars().count() + 1);
+            tail.push(fragment);
+        }
+    }
+    tail.reverse();
+    json!({"recordingId":r["recordingId"],"meetingId":r["meetingId"],"libraryId":lib,"status":status,
+        "throughFrame":through,"committedThroughFrame":r["draft"]["committedThroughFrame"].as_u64().unwrap_or(if finalized { total } else { 0 }),
+        "totalFrames":total,"backlogSeconds":total.saturating_sub(through) as f64 / RATE as f64,
+        "preview":tail.join(" "),"provisional":r["draft"]["words"].as_array().is_some_and(|words| words.iter().any(|word| word["provisional"] == true))})
+}
+/// A status heartbeat is advisory; it never changes draft text or acquires a processing lease.
+async fn live_status(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Value>> {
+    fields(&v, &["ownerId", "generation", "status"])?;
+    text(&v, "ownerId", 100)?;
+    let status = text(&v, "status", 32)?;
+    if !matches!(
+        status,
+        "live"
+            | "catching-up"
+            | "waiting-audio"
+            | "model-missing"
+            | "processing-busy"
+            | "paused-open-echo"
+    ) || v["generation"].as_u64().is_none()
+    {
+        return Err(ApiError::bad("Invalid live status."));
+    }
+    store::with_db(|db| {
+        let mut r = recording(db, &id)?;
+        let active = r["lease"]["expiresAt"]
+            .as_i64()
+            .is_some_and(|at| at > seconds());
+        if r["status"] != "receiving"
+            || r["liveTranscription"] != true
+            || r["generation"] != v["generation"]
+            || (active
+                && (r["lease"]["ownerId"] != v["ownerId"]
+                    || r["lease"]["generation"] != v["generation"]))
+            || (!active && matches!(status, "live" | "catching-up" | "waiting-audio"))
+        {
+            return Err(ApiError::new(
+                409,
+                "Live status owner was replaced or is unavailable.",
+            ));
+        }
+        r["liveStatus"] =
+            json!({"status":status,"generation":v["generation"],"updatedAt":seconds()});
+        save_recording(db, &r)?;
+        Ok(reply(json!({"status":"saved"})))
     })
 }
 fn pcm_dir(id: &str) -> PathBuf {
@@ -729,7 +865,7 @@ async fn chunk(
             let path = chunk_path(&id, &file)?;
             read_chunk(&path, n, &h)?;
             sync_audio(&path, &pcm_dir(&id))?;
-            return Ok(reply(public_recording(r, &library(&tx)?)));
+            return Ok(reply(extension_recording(r, &library(&tx)?)));
         }
         if r["status"] != "receiving" || r["nextSequence"].as_u64() != Some(sequence) {
             return Err(ApiError::new(
@@ -770,7 +906,7 @@ async fn chunk(
         store::save(&tx, &mut meeting)?;
         let lib = library(&tx)?;
         tx.commit()?;
-        Ok(reply(public_recording(r, &lib)))
+        Ok(reply(extension_recording(r, &lib)))
     })
 }
 fn wav_header(frames: u64) -> Vec<u8> {
@@ -828,14 +964,14 @@ async fn complete(
         let mut r = owned(&tx, &headers, &id)?;
         let lib = library(&tx)?;
         if r["status"] == "deleted" {
-            return Ok(reply(public_recording(r, &lib)));
+            return Ok(reply(extension_recording(r, &lib)));
         }
         if r["status"] == "complete" {
             verify_complete_files(&tx, &r)?;
             if r["manifest"] != manifest {
                 return Err(ApiError::new(409, "Completion manifest conflicts."));
             }
-            return Ok(reply(public_recording(r, &lib)));
+            return Ok(reply(extension_recording(r, &lib)));
         }
         if r["nextSequence"] != input.chunk_count || r["totalFrames"] != input.total_frames {
             return Err(ApiError::new(
@@ -931,7 +1067,7 @@ async fn complete(
         r.as_object_mut().unwrap().remove("lease");
         save_recording(&tx, &r)?;
         tx.commit()?;
-        Ok(reply(public_recording(r, &lib)))
+        Ok(reply(extension_recording(r, &lib)))
     })
 }
 async fn recordings() -> Result<Json<Value>> {
@@ -1582,6 +1718,221 @@ mod tests {
     }
     fn input() -> Value {
         json!({"title":"Extension test","provider":"meet","meetingUrl":"https://meet.google.com/aaa-bbbb-ccc","consent":true,"liveTranscription":true,"sampleRate":16000,"channels":1,"createdAt":"2026-10-05T12:00:00Z"})
+    }
+    #[test]
+    fn live_status_snapshot_bounds_preview_and_expires_heartbeats() {
+        let mut r = json!({"recordingId":"r","meetingId":"m","status":"receiving","liveTranscription":true,"generation":2,"totalFrames":640000,
+            "draft":{"throughFrame":320000,"committedThroughFrame":280000,"words":[{"text":"é".repeat(1000),"provisional":true}]},
+            "liveStatus":{"status":"catching-up","updatedAt":100,"generation":2}});
+        let current = live_snapshot(&r, &json!({}), "library", 110);
+        assert_eq!(current["status"], "catching-up");
+        assert_eq!(current["preview"].as_str().unwrap().chars().count(), 600);
+        assert_eq!(current["backlogSeconds"], 20.0);
+        assert_eq!(
+            live_snapshot(&r, &json!({}), "library", 115)["status"],
+            "paused-open-echo"
+        );
+        r["generation"] = json!(3);
+        assert_eq!(
+            live_snapshot(&r, &json!({}), "library", 110)["status"],
+            "paused-open-echo"
+        );
+        r["status"] = json!("complete");
+        assert_eq!(
+            live_snapshot(&r, &json!({}), "library", 110)["status"],
+            "final-transcript-needed"
+        );
+        // Missing models, cancellation and processing failures leave saved audio ready for retry.
+        for meeting in [
+            json!({"status":"saved"}),
+            json!({"status":"saved","error":"Cancelled"}),
+            json!({"status":"error","error":"Model unavailable"}),
+        ] {
+            assert_eq!(
+                live_snapshot(&r, &meeting, "library", 110)["status"],
+                "final-transcript-needed"
+            );
+        }
+        assert_eq!(
+            live_snapshot(&r, &json!({"status":"processing"}), "library", 110)["status"],
+            "finalizing"
+        );
+        assert_eq!(
+            live_snapshot(&r, &json!({"transcripts":[{}]}), "library", 110)["status"],
+            "complete"
+        );
+    }
+    #[tokio::test]
+    async fn live_preview_ownership_status_fencing_and_connection_revocation() {
+        let _guard = store::TEST_LIBRARY_LOCK.lock().await;
+        let directory = tempfile::tempdir().unwrap();
+        store::reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        store::init().unwrap();
+        let app = app();
+        let first = Uuid::new_v4().to_string();
+        let second = Uuid::new_v4().to_string();
+        let (token, _, _) = pair(&app, &first).await;
+        let (other, _, _) = pair(&app, &second).await;
+        let id = Uuid::new_v4().to_string();
+        let (code, _) = json_request(
+            &app,
+            "PUT",
+            &format!("/extension/v1/recordings/{id}"),
+            ORIGIN,
+            Some(&token),
+            input(),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let path = format!("/extension/v1/recordings/{id}/live");
+        let (code, preview) =
+            json_request(&app, "GET", &path, ORIGIN, Some(&token), json!(null)).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(preview["status"], "paused-open-echo");
+        assert!(preview.get("draft").is_none());
+        for (credential, expected) in [
+            (Some(other.as_str()), StatusCode::FORBIDDEN),
+            (None, StatusCode::UNAUTHORIZED),
+        ] {
+            assert_eq!(
+                json_request(&app, "GET", &path, ORIGIN, credential, json!(null))
+                    .await
+                    .0,
+                expected
+            );
+        }
+        assert_eq!(
+            json_request(
+                &app,
+                "GET",
+                &format!("/extension/v1/recordings/{}/live", Uuid::new_v4()),
+                ORIGIN,
+                Some(&token),
+                json!(null)
+            )
+            .await
+            .0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            json_request(
+                &app,
+                "GET",
+                &path,
+                "https://hostile.example",
+                Some(&token),
+                json!(null)
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+        let report = format!("/api/extensions/recordings/{id}/live-status");
+        assert_eq!(
+            json_request(
+                &app,
+                "POST",
+                &report,
+                "http://localhost:3000",
+                None,
+                json!({"ownerId":"a","generation":0,"status":"model-missing"})
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            json_request(&app, "GET", &path, ORIGIN, Some(&token), json!(null))
+                .await
+                .1["status"],
+            "model-missing"
+        );
+        let (_, lease) = json_request(
+            &app,
+            "POST",
+            &format!("/api/extensions/recordings/{id}/lease"),
+            "http://localhost:3000",
+            None,
+            json!({"ownerId":"a"}),
+        )
+        .await;
+        for (owner, generation, expected) in [
+            ("b", lease["generation"].clone(), StatusCode::CONFLICT),
+            ("a", json!(0), StatusCode::CONFLICT),
+            ("a", lease["generation"].clone(), StatusCode::OK),
+        ] {
+            assert_eq!(
+                json_request(
+                    &app,
+                    "POST",
+                    &report,
+                    "http://localhost:3000",
+                    None,
+                    json!({"ownerId":owner,"generation":generation,"status":"live"})
+                )
+                .await
+                .0,
+                expected
+            );
+        }
+        assert_eq!(
+            json_request(
+                &app,
+                "POST",
+                &report,
+                ORIGIN,
+                Some(&token),
+                json!({"ownerId":"a","generation":lease["generation"],"status":"live"})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+        let (_, connection) = json_request(
+            &app,
+            "GET",
+            "/extension/v1/connection",
+            ORIGIN,
+            Some(&token),
+            json!(null),
+        )
+        .await;
+        assert_eq!(connection["installationId"], first);
+        assert!(connection.get("credential").is_none());
+        assert_eq!(
+            json_request(
+                &app,
+                "DELETE",
+                "/extension/v1/connection",
+                ORIGIN,
+                Some(&token),
+                json!(null)
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            json_request(&app, "GET", &path, ORIGIN, Some(&token), json!(null))
+                .await
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            json_request(
+                &app,
+                "GET",
+                "/extension/v1/connection",
+                ORIGIN,
+                Some(&other),
+                json!(null)
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        store::reset_for_tests();
     }
     #[tokio::test]
     async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases() {

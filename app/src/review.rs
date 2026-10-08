@@ -635,7 +635,7 @@ fn AudioPlayer(
         text(&track, "url")
     };
     let label = if continuous {
-        "Meeting audio and permitted microphone".to_string()
+        "Browser recording".to_string()
     } else {
         text(&track, "label")
     };

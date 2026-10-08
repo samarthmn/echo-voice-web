@@ -2,10 +2,11 @@ import {Recording, Settings, MAX_BACKLOG_FRAMES, MAX_FRAMES, MAX_PENDING_BYTES, 
 import {allRecordings, appendChunk, createRecording, markInterrupted, recording, updateRecording} from './storage';
 import {transferPending} from './protocol';
 declare const chrome: any;
-type Capture = {id: string; context: AudioContext; worklet: AudioWorkletNode; tab: MediaStream; mic?: MediaStream; micDisconnected?: boolean; lastGateRevision: number; sequence: number; queuedFrames: number; persistedFrames: number; queue: Promise<void>; failed: boolean; pausedAt?: number; waiters: Map<string,() => void>; sourceState: string};
+type Capture = {id: string; context: AudioContext; worklet: AudioWorkletNode; tab: MediaStream; mic?: MediaStream; micDisconnected?: boolean; micExcluded: boolean; exclusionRevision: number; lastGateRevision: number; sequence: number; queuedFrames: number; persistedFrames: number; queue: Promise<void>; failed: boolean; pausedAt?: number; waiters: Map<string,() => void>; sourceState: string};
 let active: Capture | undefined; let transition = false; let recoveryError: string | undefined;
 let initializing: Promise<void> = markInterrupted().catch(error => {recoveryError = `Local recovery metadata could not be updated. Saved audio is retained for export. ${(error as Error).message}`;});
-const publish = (endedRecordingId?: string) => chrome.runtime.sendMessage({target:'background',type:'CAPTURE_STATUS',endedRecordingId,active:active ? {recordingId:active.id,mic:active.mic ? active.sourceState : 'tab-only',tab:true,paused:!!active.pausedAt} : null}).catch(() => {});
+const activeStatus = () => active ? {recordingId:active.id,mic:active.mic ? active.sourceState:'tab-only',micCaptured:!!active.mic,micAvailable:!!active.mic && !active.micDisconnected,micExcluded:active.micExcluded,tab:true,paused:!!active.pausedAt}:null;
+const publish = (endedRecordingId?: string) => chrome.runtime.sendMessage({target:'background',type:'CAPTURE_STATUS',endedRecordingId,active:activeStatus()}).catch(() => {});
 async function trustedSettings(): Promise<Settings> {const response = await chrome.runtime.sendMessage({target:'background',type:'TRUSTED_SETTINGS'}); if(!response?.ok) throw new Error('Trusted recorder settings are unavailable.'); return response.value;}
 function microphoneFailure(error: unknown): string {
   const name = (error as {name?: string} | null)?.name;
@@ -35,7 +36,7 @@ async function start(message: any) {
   await initializing; if(recoveryError) throw new Error(recoveryError); if(active || transition) throw new Error('A recording is already active.'); transition = true;
   let tab: MediaStream | undefined; let mic: MediaStream | undefined; let context: AudioContext | undefined;
   try {
-    const rows = await allRecordings(); if(rows.filter(row => !row.receipt).reduce((n,row) => n + row.totalFrames * 2,0) >= MAX_PENDING_BYTES) throw new Error('Local pending audio has reached 2 GiB. Transfer or export your saved recordings before starting.');
+    const rows = await allRecordings(); if(rows.filter(row => !row.receipt).reduce((n,row) => n + row.totalFrames * 2,0) >= MAX_PENDING_BYTES) throw new Error('Local pending audio has reached 2 GiB. Transfer recordings, or export and delete local copies, before starting.');
     tab = await navigator.mediaDevices.getUserMedia({audio:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:message.streamId}} as any,video:false});
     if(message.micEnabled) {
       try {mic = await navigator.mediaDevices.getUserMedia({audio:{deviceId:message.micDeviceId ? {exact:message.micDeviceId}:undefined,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});}
@@ -45,7 +46,7 @@ async function start(message: any) {
     const worklet = new AudioWorkletNode(context,'echo-pcm',{numberOfInputs:2,numberOfOutputs:1,outputChannelCount:[1],processorOptions:{recordingId:message.recording.recordingId}});
     const row: Recording = {...message.recording,chunkCount:0,totalFrames:0,captureState:'recording',transferState:'saved-local',gaps:[],interrupted:false};
     await createRecording(row);
-    const capture: Capture = {id:row.recordingId,context,worklet,tab,mic,lastGateRevision:-1,sequence:0,queuedFrames:0,persistedFrames:0,queue:Promise.resolve(),failed:false,waiters:new Map(),sourceState:'Excluded · unknown mute state'}; active = capture;
+    const capture: Capture = {id:row.recordingId,context,worklet,tab,mic,micExcluded:false,exclusionRevision:0,lastGateRevision:-1,sequence:0,queuedFrames:0,persistedFrames:0,queue:Promise.resolve(),failed:false,waiters:new Map(),sourceState:'Excluded · unknown mute state'}; active = capture;
     worklet.port.onmessage = ({data}) => {
       if(data.type === 'flushed') {capture.waiters.get(data.requestId)?.(); capture.waiters.delete(data.requestId); return;}
       if(data.type === 'failed') {void fail(capture,'Local saving fell five seconds behind. Recording stopped; the committed audio prefix is retained.','save-backlog'); return;}
@@ -101,9 +102,16 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
     await initializing;
     if(message.type === 'START') return start(message);
     if(message.type === 'CONTROL') return control(message.recordingId,message.action,message.interrupted,Object.hasOwn(INTERRUPTION_DESCRIPTIONS,message.interruptionReason) ? message.interruptionReason : 'capture-failed');
-    if(message.type === 'GATE' && active && message.recordingId === active.id && Number.isSafeInteger(message.gateRevision) && message.gateRevision > active.lastGateRevision) {active.lastGateRevision = message.gateRevision; const ttlMs = Math.max(0,Math.min(message.ttlMs ?? 0,(message.expiresAt ?? 0) - Date.now())); const allowed = message.allowed && ttlMs > 0 && !active.pausedAt && !active.micDisconnected && !!active.mic; active.sourceState = active.micDisconnected ? 'Excluded · microphone disconnected; tab audio continues' : active.pausedAt ? 'Excluded · paused' : allowed ? 'Included · meeting microphone on' : `Excluded · ${message.state ?? 'unknown mute state'}`; active.worklet.port.postMessage({type:'gate',recordingId:active.id,gateRevision:message.gateRevision,allowed,ttlMs,expiresAt:message.expiresAt}); publish();}
+    if(message.type === 'MIC_EXCLUSION') {
+      if(!active || message.recordingId !== active.id) throw new Error('That recording is no longer active.');
+      if(!active.mic || active.micDisconnected) throw new Error('This recording has no available microphone. Stop and start with microphone access to include it.');
+      active.micExcluded = message.excluded === true; active.exclusionRevision++;
+      active.sourceState = active.micExcluded ? 'Excluded · by you':'Excluded · waiting for meeting microphone state';
+      active.worklet.port.postMessage({type:'exclude-mic',recordingId:active.id,exclusionRevision:active.exclusionRevision,excluded:active.micExcluded}); publish();
+    }
+    if(message.type === 'GATE' && active && message.recordingId === active.id && Number.isSafeInteger(message.gateRevision) && message.gateRevision > active.lastGateRevision) {active.lastGateRevision = message.gateRevision; const ttlMs = Math.max(0,Math.min(message.ttlMs ?? 0,(message.expiresAt ?? 0) - Date.now())); const allowed = message.allowed && ttlMs > 0 && !active.pausedAt && !active.micDisconnected && !active.micExcluded && !!active.mic; active.sourceState = active.micDisconnected ? 'Excluded · microphone disconnected; tab audio continues' : active.pausedAt ? 'Excluded · paused' : active.micExcluded ? 'Excluded · by you' : allowed ? 'Included · meeting microphone on' : `Excluded · ${message.state ?? 'unknown mute state'}`; active.worklet.port.postMessage({type:'gate',recordingId:active.id,gateRevision:message.gateRevision,allowed,ttlMs,expiresAt:message.expiresAt}); publish();}
     if(message.type === 'SYNC') await sync();
-    if(message.type === 'STATUS') return {active:active ? {recordingId:active.id,paused:!!active.pausedAt,mic:active.mic ? active.sourceState:'tab-only'} : null,error:recoveryError};
+    if(message.type === 'STATUS') return {active:activeStatus(),error:recoveryError};
     return {};
   };
   run().then(value => respond({ok:true,value}),error => respond({ok:false,error:(error as Error).message})); return true;

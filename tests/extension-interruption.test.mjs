@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {build} from 'esbuild';
-const fakeModules = {settings:"export async function settings(){return {enabledProviders:['meet'],activeLibraryId:null}}; export async function saveSettings(){return {}}",storage:'export async function allRecordings(){return []}',protocol:'export async function jsonRequest(){throw new Error("unexpected network")}'};
-const built = await build({entryPoints:['extension/src/background.ts'],bundle:true,format:'iife',write:false,plugins:[{name:'background-events',setup(builder){builder.onResolve({filter:/^\.\/(settings|storage|protocol)$/},args => ({path:args.path.slice(2),namespace:'mock'}));builder.onLoad({filter:/.*/,namespace:'mock'},args => ({contents:fakeModules[args.path]}));}}]});
+const fakeModules = {connection:'export async function connectionAction(work){return work()}; export async function connectionStatus(){return {status:"not-connected"}};export async function disconnect(){};export async function livePreview(){}','library-actions':'export async function openEcho(){}; export async function deleteLocalRecording(){}',settings:"export async function settings(){return {enabledProviders:['meet'],activeLibraryId:null}}; export async function saveSettings(){return {}}",storage:'export async function allRecordings(){return []}',protocol:'export async function jsonRequest(){throw new Error("unexpected network")}'};
+const built = await build({entryPoints:['extension/src/background.ts'],bundle:true,format:'iife',write:false,plugins:[{name:'background-events',setup(builder){builder.onResolve({filter:/^\.\/(settings|storage|protocol|library-actions|connection)$/},args => ({path:args.path.slice(2),namespace:'mock'}));builder.onLoad({filter:/.*/,namespace:'mock'},args => ({contents:fakeModules[args.path]}));}}]});
 function harness() {
   let owner={tabId:7,identity:'https://meet.google.com/abc-defg-hij',recordingId:'recording',documentId:'original',gateRevision:0}; let probeDocumentId='original'; const events={}; const sent=[];
   const event = name => ({addListener:listener => {events[name]=listener}});

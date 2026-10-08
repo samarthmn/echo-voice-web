@@ -18,6 +18,31 @@ use ui::{
     StatusBadge,
 };
 
+fn valid_extension_link_id(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if [8, 13, 18, 23].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+// Capture progress must not overwrite a title edit or a newer transcript/notes response.
+fn merge_extension_progress(existing: &Value, incoming: &Value) -> Value {
+    if existing["id"] != incoming["id"] || !existing.is_object() {
+        return incoming.clone();
+    }
+    let mut next = existing.clone();
+    for key in ["duration", "extensionRecording"] {
+        if !incoming[key].is_null() {
+            next[key] = incoming[key].clone();
+        }
+    }
+    next
+}
+
 /// A terminal event removes only its meeting, preserving other queued jobs.
 fn transcription_jobs(mut jobs: Vec<String>, id: &str, started: bool) -> Vec<String> {
     if id.is_empty() {
@@ -64,7 +89,39 @@ fn start_notes_job(jobs: &mut HashMap<String, String>, id: &str, provider: &str)
 
 #[cfg(test)]
 mod processing_tests {
-    use super::{processing_label, start_notes_job, transcription_jobs};
+    use super::{
+        merge_extension_progress, processing_label, start_notes_job, transcription_jobs,
+        valid_extension_link_id,
+    };
+
+    #[test]
+    fn receiving_progress_updates_duration_without_overwriting_local_review_content() {
+        let existing = serde_json::json!({"id":"meeting","title":"Edited title","duration":100,"transcripts":[{"text":"final"}]});
+        let incoming = serde_json::json!({"id":"meeting","title":"Old title","duration":360,"transcripts":[],"extensionRecording":{"totalFrames":5760000}});
+        let merged = merge_extension_progress(&existing, &incoming);
+        assert_eq!(merged["duration"], 360);
+        assert_eq!(merged["title"], "Edited title");
+        assert_eq!(merged["transcripts"], existing["transcripts"]);
+        assert_eq!(
+            merge_extension_progress(&serde_json::Value::Null, &incoming),
+            incoming
+        );
+    }
+
+    #[test]
+    fn extension_links_accept_only_uuid_path_segments() {
+        assert!(valid_extension_link_id(
+            "12345678-1234-1234-1234-123456789abc"
+        ));
+        for value in [
+            "",
+            "../settings",
+            "12345678-1234-1234-1234-123456789ab/",
+            "12345678-1234-1234-1234-123456789abc?x",
+        ] {
+            assert!(!valid_extension_link_id(value));
+        }
+    }
 
     #[test]
     fn notes_jobs_retain_provider_across_review_remount_and_finish_only_their_meeting() {
@@ -197,11 +254,37 @@ fn App() -> Element {
             settings.set(v)
         };
         loading.set(false);
-        if let Ok(params)=document::eval("const p=new URLSearchParams(location.search);const v={calendar:p.get('calendar'),message:p.get('message')};if(v.calendar)history.replaceState(null,'',location.pathname);return v;").await {if params["calendar"]=="connected"{page.set("calendar".into());toast.set("Google Calendar connected.".into());}else if params["calendar"]=="error"{page.set("calendar".into());toast.set(text(&params,"message"));}}
+        if let Ok(params) = document::eval("const p=new URLSearchParams(location.search);const v={calendar:p.get('calendar'),message:p.get('message'),library:p.get('library'),meeting:p.get('meeting')};if(v.calendar||v.library||v.meeting){for(const key of ['calendar','message','library','meeting'])p.delete(key);history.replaceState(null,'',location.pathname+(p.size?'?'+p.toString():'')+location.hash);}return v;").await {
+            if params["calendar"] == "connected" {
+                page.set("calendar".into()); toast.set("Google Calendar connected.".into());
+            } else if params["calendar"] == "error" {
+                page.set("calendar".into()); toast.set(text(&params,"message"));
+            } else if !params["library"].is_null() || !params["meeting"].is_null() {
+                let library = text(&params,"library"); let meeting = text(&params,"meeting");
+                if !valid_extension_link_id(&library) || (!meeting.is_empty() && !valid_extension_link_id(&meeting)) {
+                    toast.set("This Echo recording link is invalid.".into());
+                } else {
+                    match get("/extensions/connections").await {
+                        Ok(connection) if text(&connection,"libraryId") == library => {
+                            if !meeting.is_empty() {
+                                match get(&format!("/meetings/{meeting}")).await {
+                                    Ok(value) if text(&value,"id") == meeting && text(&value["extensionRecording"],"libraryId") == library => {
+                                        selected.set(value); page.set("review".into());
+                                    },
+                                    _ => toast.set("This recording is unavailable in this Echo library.".into()),
+                                }
+                            }
+                        },
+                        Ok(_) => toast.set("This recording belongs to a different Echo library. Open its original library and try again.".into()),
+                        Err(error) => toast.set(error),
+                    }
+                }
+            }
+        }
     });
     use_future(move || async move {
         let mut events = document::eval(
-            r#"for(const name of ['echo-notes-request','echo-notes-download-state','echo-model-download-state','echo-open-models','echo-upload-progress','echo-recorder-state','echo-recording-saved','echo-library-changed','echo-transcription-complete','echo-transcript-saved','echo-transcription-error','echo-transcription-start','echo-model-progress','echo-auto-transcription-skipped']){window.addEventListener(name,e=>dioxus.send({name,detail:e.detail}));} dioxus.send({name:'echo-model-download-state',detail:window.echoInference.getModelDownloadState()});dioxus.send({name:'echo-notes-download-state',detail:window.echoNotes.getDownloadState()}); window.addEventListener('keydown',e=>{if(document.querySelector('[aria-modal="true"],dialog[open],.sidebar.open'))return;if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();dioxus.send({name:'search'})} if((e.metaKey||e.ctrlKey)&&e.key==='j'){e.preventDefault();dioxus.send({name:'new'})}});"#,
+            r#"for(const name of ['echo-notes-request','echo-notes-download-state','echo-model-download-state','echo-open-models','echo-upload-progress','echo-recorder-state','echo-recording-saved','echo-library-changed','echo-extension-recording-progress','echo-transcription-complete','echo-transcript-saved','echo-transcription-error','echo-transcription-start','echo-model-progress','echo-auto-transcription-skipped']){window.addEventListener(name,e=>dioxus.send({name,detail:e.detail}));} dioxus.send({name:'echo-model-download-state',detail:window.echoInference.getModelDownloadState()});dioxus.send({name:'echo-notes-download-state',detail:window.echoNotes.getDownloadState()}); window.addEventListener('keydown',e=>{if(document.querySelector('[aria-modal="true"],dialog[open],.sidebar.open'))return;if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();dioxus.send({name:'search'})} if((e.metaKey||e.ctrlKey)&&e.key==='j'){e.preventDefault();dioxus.send({name:'new'})}});"#,
         );
         while let Ok(event) = events.recv::<Value>().await {
             match event["name"].as_str().unwrap_or("") {
@@ -263,6 +346,24 @@ fn App() -> Element {
                     uploads.set(active);
                 }
                 "echo-recorder-state" => recorder.set(event["detail"].clone()),
+                "echo-extension-recording-progress" => {
+                    let incoming = &event["detail"];
+                    if !incoming["extensionRecording"].is_object()
+                        || text(incoming, "id").is_empty()
+                    {
+                        continue;
+                    }
+                    let mut current = meetings();
+                    if let Some(row) = current.iter_mut().find(|row| row["id"] == incoming["id"]) {
+                        *row = merge_extension_progress(row, incoming);
+                    } else {
+                        current.insert(0, incoming.clone());
+                    }
+                    meetings.set(current);
+                    if selected()["id"] == incoming["id"] {
+                        selected.set(merge_extension_progress(&selected(), incoming));
+                    }
+                }
                 "echo-recording-saved" => {
                     selected.set(event["detail"].clone());
                     page.set("review".into());
