@@ -1,5 +1,5 @@
 import './theme.js';
-import { resolveSpeechModel } from './models.js';
+import { assertModel, resolveSpeechModel } from './models.js';
 import { automaticTranscriptionEligible } from './automatic-transcription.js';
 import './inference.js';
 import './notes.js';
@@ -161,6 +161,7 @@ export async function autoTranscribeMeeting(meeting) {
     const settings = await request('/settings');
     if (!settings.autoTranscribe) return;
     const model = resolveSpeechModel(meeting.speechModel || settings.speechModel);
+    assertModel(model);
     if (!(await window.echoInference.getDownloadedModels()).includes(model)) {
       skipped('model-not-downloaded', 'Recording saved. Download its speech model in Models, then choose Transcribe.');
       return;

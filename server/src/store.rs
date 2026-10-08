@@ -962,6 +962,19 @@ pub fn delete_meeting(key: &str) -> Result<()> {
     with_db(|db| {
         let tx = db.transaction()?;
         let meeting = require_meeting(&tx, key)?;
+        // Echo can restart while the extension's offscreen recorder keeps running.
+        // The meeting's recovery status is advisory; only completion seals ingest.
+        let receiving_extension: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM extension_recordings WHERE meeting_id=? AND json_extract(data,'$.status')='receiving')",
+            [key],
+            |row| row.get(0),
+        )?;
+        if receiving_extension {
+            return Err(ApiError::new(
+                409,
+                "Stop the browser recording and finish transferring its audio before deleting this meeting.",
+            ));
+        }
         if data_dir()
             .join("bot-starts")
             .join(format!("{key}.json"))
@@ -2083,6 +2096,64 @@ mod tests {
         assert!(validate_notes(&note, false).is_ok());
         note["provider"] = json!("api-key");
         assert!(validate_notes(&note, false).is_err());
+    }
+
+    #[test]
+    fn receiving_extension_blocks_deletion_after_server_restart() {
+        let _guard = TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = tempfile::tempdir().unwrap();
+        reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        init().unwrap();
+        let meeting =
+            create_meeting(json!({"title":"Still capturing","mode":"online","consent":true}))
+                .unwrap();
+        let key = meeting["id"].as_str().unwrap();
+        update_meeting(key, json!({"status":"recording"})).unwrap();
+        let recording_id = uuid::Uuid::new_v4().to_string();
+        let installation_id = uuid::Uuid::new_v4().to_string();
+        let mut receipt = json!({"recordingId":recording_id,"installationId":installation_id,"meetingId":key,"status":"receiving","controls":[]});
+        with_db(|db| {
+            db.execute(
+                "INSERT INTO extension_recordings VALUES(?,?,?,?)",
+                params![recording_id, installation_id, key, receipt.to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        reset_for_tests();
+        init().unwrap();
+        assert_eq!(get_meeting(key).unwrap().unwrap()["status"], "interrupted");
+        let error = delete_meeting(key).unwrap_err();
+        assert_eq!(error.status, axum::http::StatusCode::CONFLICT);
+        assert!(get_meeting(key).unwrap().is_some());
+        with_db(|db| {
+            let data: String = db.query_row(
+                "SELECT data FROM extension_recordings WHERE recording_id=?",
+                [&recording_id],
+                |row| row.get(0),
+            )?;
+            assert_eq!(serde_json::from_str::<Value>(&data)?["status"], "receiving");
+            Ok(())
+        })
+        .unwrap();
+        // A pending recording must not block unrelated meetings or completed imports.
+        let unrelated =
+            create_meeting(json!({"title":"Unrelated","mode":"import","consent":true})).unwrap();
+        delete_meeting(unrelated["id"].as_str().unwrap()).unwrap();
+        receipt["status"] = json!("complete");
+        with_db(|db| {
+            db.execute(
+                "UPDATE extension_recordings SET data=? WHERE recording_id=?",
+                params![receipt.to_string(), recording_id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        delete_meeting(key).unwrap();
+        assert!(get_meeting(key).unwrap().is_none());
+        reset_for_tests();
+        std::env::remove_var("ECHO_DATA_DIR");
     }
 
     #[test]

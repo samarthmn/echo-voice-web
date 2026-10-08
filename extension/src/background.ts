@@ -20,7 +20,7 @@ async function send(message: any) {
   if(!reply?.ok) throw new Error(reply?.error ?? 'The local audio recorder did not respond.'); return reply.value;
 }
 async function restoreOwner() {if(!owner) {const saved = (await chrome.storage.session.get('captureOwner')).captureOwner; if(!owner) owner = saved;}}
-async function clearOwner() {owner = undefined; await chrome.storage.session.remove('captureOwner');}
+async function clearOwner(expectedRecordingId?: string) {if(expectedRecordingId && owner?.recordingId !== expectedRecordingId) return; owner = undefined; await chrome.storage.session.remove('captureOwner');}
 async function setBadge(active: any) {
   const rows = await allRecordings(); const attention = rows.some(row => !row.receipt && (row.transferState === 'attention' || row.captureState === 'interrupted'));
   const text = active ? active.paused ? 'II':'REC' : attention ? '!':'';
@@ -46,7 +46,7 @@ async function stopOwner(reason: InterruptionReason) {
   await restoreOwner(); if(!owner) return;
   const capturedOwner = owner; capturedOwner.departing = true; await gate().catch(() => {});
   if(owner !== capturedOwner) return;
-  const id = capturedOwner.recordingId; await send({type:'CONTROL',recordingId:id,action:'stop',interrupted:true,interruptionReason:reason}); await clearOwner();
+  const id = capturedOwner.recordingId; await send({type:'CONTROL',recordingId:id,action:'stop',interrupted:true,interruptionReason:reason}); await clearOwner(id);
 }
 async function verifyOwnerDocument(tabId: number) {
   await restoreOwner(); const capturedOwner = owner; if(capturedOwner?.tabId !== tabId) return;
@@ -173,7 +173,7 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
     if(message.type === 'START') return start(message);
     if(message.type === 'CONTROL' && ['pause','resume','stop'].includes(message.action)) {
       await restoreOwner(); if(!owner || owner.recordingId !== message.recordingId) throw new Error('That recording is no longer active.');
-      const response = await send({type:'CONTROL',recordingId:owner.recordingId,action:message.action}); if(message.action === 'stop') await clearOwner(); return response;
+      const id = owner.recordingId; const response = await send({type:'CONTROL',recordingId:id,action:message.action}); if(message.action === 'stop') await clearOwner(id); return response;
     }
     if(message.type === 'PAIR_REQUEST') return pairRequest(message);
     if(message.type === 'PAIR_CLAIM') return claimPair(message.confirmLibrary === true);

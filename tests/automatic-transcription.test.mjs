@@ -29,6 +29,21 @@ test('new eligible imports still process once and are marked automatic',async()=
   const row=meeting('new');const h=harness(new Map([['new',row]]));await h.api.autoTranscribeMeeting(row);await h.api.autoTranscribeMeeting(row);
   assert.equal(h.calls.length,1);assert.equal(h.calls[0][3].automatic,true);
 });
+test('unsupported saved model is rejected before download guidance or inference',async()=>{
+  const row={...meeting('unsupported'),speechModel:'unsupported/custom-model'};
+  const h=harness(new Map([[row.id,row]]));const skipped=[];let downloadChecks=0;
+  h.window.addEventListener('echo-auto-transcription-skipped',event=>skipped.push(event.detail));
+  h.window.echoInference.getDownloadedModels=async()=>{downloadChecks++;return [turbo];};
+  await h.api.autoTranscribeMeeting(row);
+  assert.equal(downloadChecks,0);assert.equal(h.calls.length,0);
+  assert.equal(skipped.length,1);assert.equal(skipped[0].reason,'processing-unavailable');
+  assert.match(skipped[0].message,/Choose one of the supported speech models/);
+});
+test('retired speech selections still resolve to Turbo for automatic transcription',async()=>{
+  const row={...meeting('retired'),speechModel:'onnx-community/whisper-tiny.en'};
+  const h=harness(new Map([[row.id,row]]));await h.api.autoTranscribeMeeting(row);
+  assert.equal(h.calls.length,1);assert.equal(h.calls[0][1],turbo);
+});
 test('a generic previous processing error does not permanently suppress automatic processing',async()=>{
   const row={...meeting('retryable'),error:'The local server was temporarily unavailable.'};const h=harness(new Map([[row.id,row]]));
   await h.api.autoTranscribeMeeting(row);assert.equal(h.calls.length,1);

@@ -74,6 +74,9 @@ jobs:
       - name: Test browser modules and REST lifecycle
         run: npm test
 
+      - name: Test AMI score provenance and numerical reproduction
+        run: python3 -B tests/ami_score_test.py
+
       - name: Test native speech API
         env:
           ECHO_TEST_BINARY: target/release/echo-server

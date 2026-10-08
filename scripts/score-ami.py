@@ -37,27 +37,61 @@ def word_errors(reference, hypothesis):
     return {"substitutions": substitutions, "deletions": deletions, "insertions": insertions}
 
 
+def validate_provenance(case, meeting, audio, fixtures):
+    """Check clip identity and the downloaded imported audio before scoring."""
+    identity = meeting.get("amiCase")
+    if identity is not None:
+        if not isinstance(identity, dict) or any(
+            identity.get(key) != case[key] for key in ("id", "startSeconds", "endSeconds")
+        ):
+            raise ValueError("Meeting AMI case or recording interval does not match --case")
+    elif meeting.get("title") != Path(case["audio"]).stem:
+        # Historical app exports have no AMI metadata. Require the complete clip
+        # title, including its interval; UUIDs never establish corpus identity.
+        raise ValueError("Meeting title must identify the selected AMI case and recording interval")
+    if meeting.get("duration") != case["endSeconds"] - case["startSeconds"]:
+        raise ValueError("Meeting duration does not match the selected recording interval")
+    tracks = meeting.get("tracks", [])
+    if len(tracks) != 1:
+        raise ValueError("AMI scoring requires exactly one imported audio track")
+    imported = audio.read_bytes()
+    if tracks[0].get("bytes") != len(imported):
+        raise ValueError("Downloaded audio size does not match the meeting track")
+    audio_digest = hashlib.sha256(imported).hexdigest()
+    if audio_digest != case["audioSha256"]:
+        raise ValueError("Imported audio does not match the selected AMI clip")
+    for name, checksum in (("audio", "audioSha256"), ("reference", "referenceSha256")):
+        if hashlib.sha256((fixtures / case[name]).read_bytes()).hexdigest() != case[checksum]:
+            raise ValueError(f"Fixture {name} checksum does not match its manifest")
+    return audio_digest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", choices=["ES2002a", "ES2003a", "ES2004a"], required=True)
     parser.add_argument("--meeting-json", type=Path, required=True)
+    parser.add_argument("--audio", type=Path, required=True,
+                        help="Unmodified audio bytes downloaded from the meeting's sole track URL")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     fixtures = ROOT / "tests/fixtures/ami"
     manifest = json.loads((fixtures / "manifest.json").read_text(encoding="utf-8"))
     case = next(item for item in manifest["cases"] if item["id"] == args.case)
-    for name, checksum in (("audio", "audioSha256"), ("reference", "referenceSha256")):
-        assert hashlib.sha256((fixtures / case[name]).read_bytes()).hexdigest() == case[checksum]
     meeting = json.loads(args.meeting_json.read_text(encoding="utf-8"))
+    try:
+        audio_digest = validate_provenance(case, meeting, args.audio, fixtures)
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
     version = next(item for item in meeting["transcripts"] if item["id"] == meeting["activeTranscriptId"])
     hypothesis = " ".join(item["text"] for item in version["passages"])
     reference = tokens((fixtures / case["reference"]).read_text(encoding="utf-8"))
     actual = tokens(hypothesis)
-    assert reference and version["passages"], "A failed inference is not an accuracy result"
+    if not reference or not version["passages"]:
+        parser.error("A failed inference is not an accuracy result")
     counts = word_errors(reference, actual)
     wer = sum(counts.values()) / len(reference)
     result = {"case": args.case, "durationSeconds": case["endSeconds"] - case["startSeconds"],
-              "sourceAudioSha256": case["sourceAudioSha256"], "audioSha256": case["audioSha256"],
+              "sourceAudioSha256": case["sourceAudioSha256"], "audioSha256": audio_digest,
               "referenceSha256": case["referenceSha256"],
               "meetingId": meeting["id"], "transcriptVersionId": version["id"], "model": version["model"],
               "createdAt": version["createdAt"], "referenceWords": len(reference),

@@ -159,7 +159,7 @@ If Git reports local changes or conflicts, resolve them without deleting work. F
 
 ## Run tests
 
-Build first to create the release server and current browser assets. Runner tests need Python 3. Browser tests need Chromium. Install Playwright's browser and Linux system dependencies if needed:
+Build first to create the release server and current browser assets. Native speech API and AMI provenance tests need Python 3. Browser tests need Chromium. Install Playwright's browser and Linux system dependencies if needed:
 
 ```bash
 npx playwright install --with-deps chromium
@@ -169,7 +169,8 @@ export ECHO_TEST_BINARY=target/release/echo-server
 cargo test --locked -p echo-server
 cargo check --locked -p echo-app --target wasm32-unknown-unknown
 npm test
-python3 -m unittest discover -s tests -p '*_test.py' -v
+python3 -B -m unittest discover -s tests -p '*_test.py' -v
+npm run test:extension
 npm run test:e2e
 ```
 

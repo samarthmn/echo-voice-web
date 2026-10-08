@@ -4,6 +4,9 @@ import {transferPending} from './protocol';
 declare const chrome: any;
 type Capture = {id: string; context: AudioContext; worklet: AudioWorkletNode; tab: MediaStream; mic?: MediaStream; micDisconnected?: boolean; micExcluded: boolean; exclusionRevision: number; lastGateRevision: number; sequence: number; queuedFrames: number; persistedFrames: number; queue: Promise<void>; failed: boolean; pausedAt?: number; waiters: Map<string,() => void>; sourceState: string};
 let active: Capture | undefined; let transition = false; let recoveryError: string | undefined;
+let transitionDone = Promise.resolve(); let finishTransition: (() => void) | undefined;
+function beginTransition() {transition = true; transitionDone = new Promise(resolve => {finishTransition = resolve;});}
+function endTransition() {transition = false; finishTransition?.(); finishTransition = undefined;}
 let initializing: Promise<void> = markInterrupted().catch(error => {recoveryError = `Local recovery metadata could not be updated. Saved audio is retained for export. ${(error as Error).message}`;});
 const activeStatus = () => active ? {recordingId:active.id,mic:active.mic ? active.sourceState:'tab-only',micCaptured:!!active.mic,micAvailable:!!active.mic && !active.micDisconnected,micExcluded:active.micExcluded,tab:true,paused:!!active.pausedAt}:null;
 const publish = (endedRecordingId?: string) => chrome.runtime.sendMessage({target:'background',type:'CAPTURE_STATUS',endedRecordingId,active:activeStatus()}).catch(() => {});
@@ -33,7 +36,7 @@ async function flush(capture: Capture, type: string) {
   capture.worklet.port.postMessage({type,requestId}); await response; await capture.queue; if(capture.failed) throw new Error('Recording stopped because local audio could not be safely saved.');
 }
 async function start(message: any) {
-  await initializing; if(recoveryError) throw new Error(recoveryError); if(active || transition) throw new Error('A recording is already active.'); transition = true;
+  await initializing; if(recoveryError) throw new Error(recoveryError); if(active || transition) throw new Error('A recording is already active.'); beginTransition();
   let tab: MediaStream | undefined; let mic: MediaStream | undefined; let context: AudioContext | undefined;
   try {
     const rows = await allRecordings(); if(rows.filter(row => !row.receipt).reduce((n,row) => n + row.totalFrames * 2,0) >= MAX_PENDING_BYTES) throw new Error('Local pending audio has reached 2 GiB. Transfer recordings, or export and delete local copies, before starting.');
@@ -53,13 +56,19 @@ async function start(message: any) {
       if(data.type !== 'pcm' || capture.failed) return;
       capture.queuedFrames += data.frames;
       if(capture.queuedFrames > MAX_BACKLOG_FRAMES) {void fail(capture,'Local saving fell more than five seconds behind. Recording stopped; the committed audio prefix is retained.','save-backlog'); return;}
-      const sequence = capture.sequence++;
       capture.queue = capture.queue.then(async () => {
         if(capture.failed) return;
-        await appendChunk(capture.id,sequence,data.pcm); capture.queuedFrames -= data.frames;
-        capture.persistedFrames += data.frames; capture.worklet.port.postMessage({type:'committed',throughFrame:capture.persistedFrames});
         const row = await recording(capture.id);
-        if(row && row.totalFrames >= MAX_FRAMES) void control(capture.id,'stop');
+        if(!row) throw new Error('The local recording is unavailable.');
+        const frames = Math.min(data.frames,Math.max(0,MAX_FRAMES - row.totalFrames));
+        // A partial pause chunk can offset the journal boundary. Commit precisely
+        // the declared limit; only samples generated after that limit are discarded.
+        if(frames) {
+          await appendChunk(capture.id,capture.sequence++,frames === data.frames ? data.pcm:data.pcm.slice(0,frames * 2));
+          capture.persistedFrames += frames; capture.worklet.port.postMessage({type:'committed',throughFrame:capture.persistedFrames});
+        }
+        capture.queuedFrames -= data.frames;
+        if(row.totalFrames + frames >= MAX_FRAMES) void control(capture.id,'stop').catch(() => {});
       });
       capture.queue.catch(error => {void fail(capture,`Local storage stopped accepting audio. Recording stopped; the committed audio prefix is retained. ${(error as Error).name === 'QuotaExceededError' ? 'Storage quota was reached.' : (error as Error).message}`,'local-storage');});
     };
@@ -76,10 +85,13 @@ async function start(message: any) {
     context.addEventListener('statechange',() => {if(context?.state === 'suspended' && active === capture) void fail(capture,'Audio capture was suspended. Recording stopped and its committed audio is retained.','audio-suspended');});
     publish(); return {recordingId:row.recordingId};
   } catch(error) {tab?.getTracks().forEach(track => track.stop()); mic?.getTracks().forEach(track => track.stop()); if(context) void context.close(); if(active) {await updateRecording(active.id,{captureState:'interrupted',interrupted:true,interruption:interruption('start-failed',active.persistedFrames),transferState:'attention',error:(error as Error).message}); active = undefined;} throw error;}
-  finally {transition = false;}
+  finally {endTransition();}
 }
 async function control(id: string, action: string, interrupted = false, reason: InterruptionReason = 'capture-failed') {
-  const capture = active; if(!capture || capture.id !== id) return; if(transition) throw new Error('Recording is changing state. Retry the control.'); transition = true;
+  // Tab closure/navigation is a one-shot event. Its stop must survive an in-flight
+  // startup, pause or resume, then re-check ownership before touching capture.
+  if(action === 'stop') while(transition) await transitionDone;
+  const capture = active; if(!capture || capture.id !== id) return; if(transition) throw new Error('Recording is changing state. Retry the control.'); beginTransition();
   try {
     if(action === 'pause' && !capture.pausedAt) {await flush(capture,'pause'); capture.pausedAt = Date.now(); capture.sourceState = 'excluded: paused'; await updateRecording(id,{captureState:'paused'});}
     if(action === 'resume' && capture.pausedAt) {
@@ -93,7 +105,7 @@ async function control(id: string, action: string, interrupted = false, reason: 
       active = undefined; cleanup(capture); await updateRecording(id,{captureState:interrupted ? 'interrupted':'stopped',interrupted,gaps,...(interrupted ? {interruption:interruption(reason,row?.totalFrames ?? capture.persistedFrames)} : {})});
     }
     publish(action === 'stop' ? id : undefined);
-  } catch(error) {await fail(capture,(error as Error).message,'flush-failed'); throw error;} finally {transition = false;}
+  } catch(error) {await fail(capture,(error as Error).message,'flush-failed'); throw error;} finally {endTransition();}
   if(action === 'stop') void sync().catch(() => {});
 }
 chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => {

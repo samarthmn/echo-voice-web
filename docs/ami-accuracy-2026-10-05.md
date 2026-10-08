@@ -32,16 +32,30 @@ All three outputs reached “Ready to review” in the product. The active saved
 - ES2003a: version `6bdca978-32e9-4ccb-98c4-fb366269a7b2`, saved `2026-10-05T03:39:36.060Z`; [actual output](../artifacts/brave-e2e-2026-10-05/ami-ES2003a.transcript.json), [score](../artifacts/brave-e2e-2026-10-05/ami-ES2003a.score.json).
 - ES2004a: version `764e3eaa-90e5-4aba-b805-2c3b4d9e4708`, saved `2026-10-05T03:43:38.046Z`; [actual output](../artifacts/brave-e2e-2026-10-05/ami-ES2004a.transcript.json), [score](../artifacts/brave-e2e-2026-10-05/ami-ES2004a.score.json).
 
-Run from the repository root:
+The historical meeting exports identify the case and interval through their full clip titles. The original test library was cleaned up, so its served track bytes are no longer available for independent audio-provenance verification. The saved scores remain historical observations; matching a fixture hash in those older artifacts does not establish that the imported track was independently checked.
+
+For a fresh result, export the meeting JSON and download its sole track's bytes from the `tracks[0].url` on the same local Echo server into project `tmp/`. Pass that downloaded file to `--audio`; do not substitute the fixture WAV. The scorer rejects a mismatched case, interval, duration, track size, or audio digest before scoring. It accepts an explicit `amiCase` object with `id`, `startSeconds`, and `endSeconds` when present; otherwise it requires the exact fixture clip title, such as `ES2002a-60-210`. App exports currently use the title fallback.
+
+Example after saving the JSON as `tmp/ami-ES2002a.meeting.json` and the audio served by that meeting's track URL as `tmp/ami-ES2002a.imported.wav`:
+
+```sh
+python3 scripts/score-ami.py --case ES2002a \
+  --meeting-json tmp/ami-ES2002a.meeting.json \
+  --audio tmp/ami-ES2002a.imported.wav \
+  --output tmp/ami-ES2002a.score.json
+```
+
+To reproduce only the historical numerical scores from the saved transcripts and repository fixtures, run from the repository root (this does not verify the unavailable historical imported audio):
 
 ```sh
 for case in ES2002a ES2003a ES2004a; do
   python3 scripts/score-ami.py --case "$case" \
     --meeting-json "artifacts/brave-e2e-2026-10-05/ami-$case.transcript.json" \
+    --audio "tests/fixtures/ami/$case-60-210.wav" \
     --output "tmp/ami-$case.score.json"
 done
 ```
 
-Create project `tmp/` first if absent. For a fresh inference, upload only the WAV files through the app, select Turbo and English, leave vocabulary empty, and score the resulting active saved versions. Fixture provenance, CC BY 4.0 attribution and preparation instructions are in [the fixture README](../tests/fixtures/ami/README.md).
+Create project `tmp/` first if absent. `python3 -B tests/ami_score_test.py` checks provenance rejection and exact numerical reproduction of all three saved results. For a fresh inference, upload only the WAV files through the app, select Turbo and English, leave vocabulary empty, and score the resulting active saved versions with their downloaded track bytes. Fixture provenance, CC BY 4.0 attribution and preparation instructions are in [the fixture README](../tests/fixtures/ami/README.md).
 
 These scores describe the saved Turbo versions above, before the later word-alignment frame correction. They have not been rescored or tuned. Full Large V3 initially failed browser execution; the subsequent native CPU engine completed the 150-second ES2002a clip through Brave on this Mac. That execution check was not used for these accuracy scores and does not establish broader hardware compatibility or speaker-label accuracy. Google Meet guest admission was refused; the container audio smoke passed, but live Google Meet capture is not qualified by this report.
