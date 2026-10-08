@@ -1,17 +1,17 @@
-//! Google Calendar OAuth and an explicitly configured local Google Meet runner.
+//! Optional read-only Google Calendar integration.
 //! Credentials and recordings remain on this machine; Calendar and the live
 //! meeting itself necessarily communicate with Google.
 use crate::{security::ApiError, store};
 use axum::{
     extract::Query,
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration as ChronoDuration, Utc};
-use reqwest::{Client, Method};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -29,12 +29,114 @@ use uuid::Uuid;
 
 const COOKIE: &str = "echo_google_oauth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const MAX_AUDIO: usize = 512 * 1024 * 1024;
-const BOT_IMPORT_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 static TOKEN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-static BOT_START_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-/// Register optional Calendar OAuth and authenticated local recorder operations.
+#[derive(Default)]
+struct CalendarAssociationCache {
+    library: PathBuf,
+    fetched_at: i64,
+    account: Option<String>,
+    events: Vec<Value>,
+}
+static CALENDAR_ASSOCIATIONS: OnceLock<std::sync::Mutex<CalendarAssociationCache>> =
+    OnceLock::new();
+
+fn meeting_identity(raw: &str) -> Option<String> {
+    if meeting_provider(raw) == "other" {
+        return None;
+    }
+    let mut url = Url::parse(raw).ok()?;
+    if meeting_provider(raw) == "zoom" {
+        let segments: Vec<_> = url
+            .path()
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        if segments.len() >= 2
+            && matches!(segments[0], "j" | "wc")
+            && segments[1].len() <= 20
+            && segments[1].bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Some(format!("zoom:{}", segments[1]));
+        }
+        return None;
+    }
+    // Query parameters carry admission/account hints, not the meeting identity.
+    url.set_query(None);
+    if meeting_provider(raw) != "teams" {
+        url.set_fragment(None);
+    }
+    let path = url
+        .path()
+        .trim_end_matches('/')
+        .trim_end_matches("/join")
+        .to_string();
+    url.set_path(&path);
+    Some(url.to_string())
+}
+fn unique_calendar_event(events: &[Value], raw: &str, recorded_at: &str) -> Option<String> {
+    let identity = meeting_identity(raw)?;
+    let time = chrono::DateTime::parse_from_rfc3339(recorded_at)
+        .ok()?
+        .timestamp_millis();
+    let mut candidates = events.iter().filter_map(|event| {
+        if meeting_identity(event["url"].as_str()?)? != identity {
+            return None;
+        }
+        let start = chrono::DateTime::parse_from_rfc3339(event["start"].as_str()?)
+            .ok()?
+            .timestamp_millis();
+        let end = chrono::DateTime::parse_from_rfc3339(event["end"].as_str()?)
+            .ok()?
+            .timestamp_millis();
+        if end < start || start > time + 15 * 60_000 || end < time - 15 * 60_000 {
+            return None;
+        }
+        event["id"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 500)
+            .map(str::to_owned)
+    });
+    let id = candidates.next()?;
+    if candidates.next().is_some() {
+        None
+    } else {
+        Some(id)
+    }
+}
+/// Only use a fresh Calendar view already fetched by the same local workspace.
+/// Ingest never fetches Calendar, exposes its events, or relies on stale/ambiguous matches.
+fn cached_calendar_event(
+    cache: &CalendarAssociationCache,
+    library: &std::path::Path,
+    account: &str,
+    now: i64,
+    raw: &str,
+    recorded_at: &str,
+) -> Option<String> {
+    let age = now - cache.fetched_at;
+    if cache.account.as_deref() != Some(account)
+        || cache.library != library
+        || !(0..=5 * 60_000).contains(&age)
+    {
+        return None;
+    }
+    unique_calendar_event(&cache.events, raw, recorded_at)
+}
+pub(crate) fn associated_calendar_event(raw: &str, recorded_at: &str) -> Option<String> {
+    let current_account = read_tokens().ok()??.email?;
+    let cache = CALENDAR_ASSOCIATIONS.get()?.lock().ok()?;
+    cached_calendar_event(
+        &cache,
+        &store::data_dir(),
+        &current_account,
+        Utc::now().timestamp_millis(),
+        raw,
+        recorded_at,
+    )
+}
+
+/// Register optional Calendar OAuth and read-only authorization operations.
 pub fn routes() -> Router {
     Router::new()
         .route("/integrations/status", get(status))
@@ -45,12 +147,6 @@ pub fn routes() -> Router {
             "/integrations/google/disconnect",
             post(disconnect).delete(disconnect),
         )
-        .route(
-            "/integrations/bot",
-            get(bot_status).post(bot_start).delete(bot_stop),
-        )
-        .route("/integrations/bot/audio", get(bot_audio))
-        .route("/integrations/bot/import", post(bot_import))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -188,7 +284,7 @@ fn authorization() -> Result<(String, String, bool), ApiError> {
             "openid email https://www.googleapis.com/auth/calendar.readonly",
         ),
         ("access_type", "offline"),
-        ("prompt", "consent"),
+        ("prompt", "select_account consent"),
         ("state", state.state.as_str()),
         ("code_challenge_method", "S256"),
         ("code_challenge", challenge.as_str()),
@@ -368,6 +464,11 @@ async fn callback(headers: HeaderMap, Query(query): Query<HashMap<String, String
 }
 /// Delete saved Google credentials while retaining meeting data.
 async fn disconnect() -> Result<Json<Value>, ApiError> {
+    if let Some(cache) = CALENDAR_ASSOCIATIONS.get() {
+        if let Ok(mut cache) = cache.lock() {
+            *cache = CalendarAssociationCache::default();
+        }
+    }
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     match fs::remove_file(credentials_file()) {
         Ok(()) => (),
@@ -419,7 +520,7 @@ async fn access_token() -> Result<Tokens, ApiError> {
     save_tokens(&saved)?;
     Ok(saved)
 }
-/// Classify recognized conferencing hosts without implying unsupported runner capabilities.
+/// Classify recognized conferencing hosts without implying automatic meeting attendance.
 fn meeting_provider(raw: &str) -> &'static str {
     let Ok(url) = Url::parse(raw) else {
         return "other";
@@ -429,8 +530,8 @@ fn meeting_provider(raw: &str) -> &'static str {
     }
     match url.host_str().unwrap_or_default() {
         "meet.google.com" => "google-meet",
-        "teams.microsoft.com" | "teams.live.com" => "teams",
-        h if h == "zoom.us" || h.ends_with(".zoom.us") => "zoom",
+        "teams.microsoft.com" | "teams.live.com" | "teams.cloud.microsoft" => "teams",
+        h if h == "app.zoom.com" || h == "zoom.us" || h.ends_with(".zoom.us") => "zoom",
         _ => "other",
     }
 }
@@ -498,6 +599,7 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
         ("orderBy", "startTime"),
         ("maxResults", "250"),
     ]);
+    let account = tokens.email.clone();
     let data = google_response(
         client(20)?
             .get(url)
@@ -512,405 +614,129 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
         .flatten()
         .filter_map(normalize_event)
         .collect();
+    if let Ok(mut cache) = CALENDAR_ASSOCIATIONS
+        .get_or_init(|| std::sync::Mutex::new(CalendarAssociationCache::default()))
+        .lock()
+    {
+        *cache = CalendarAssociationCache {
+            library: store::data_dir(), fetched_at: Utc::now().timestamp_millis(), account,
+            events: events.iter().map(|event| json!({"id":event["id"],"url":event["url"],"start":event["start"],"end":event["end"]})).collect(),
+        };
+    }
     Ok(Json(json!({"events":events})))
 }
 
-/// Reject missing or path-unsafe meeting and recording-start identifiers.
-fn validate_id(raw: Option<&str>) -> Result<&str, ApiError> {
-    let id = raw.ok_or_else(|| ApiError::bad("A valid meeting ID is required."))?;
-    if id.is_empty()
-        || id.len() > 100
-        || !id.as_bytes()[0].is_ascii_alphanumeric()
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-    {
-        return Err(ApiError::bad("A valid meeting ID is required."));
-    }
-    Ok(id)
-}
-/// Canonicalize standard Google Meet codes and reject other conferencing destinations.
-fn validate_meet_url(raw: &str) -> Result<String, ApiError> {
-    let fail = || {
-        ApiError::new(422,"The local runner supports standard Google Meet links only. Zoom and Teams are not available.")
-    };
-    let url = Url::parse(raw).map_err(|_| fail())?;
-    let p = url.path().trim_end_matches('/');
-    let bytes = p.as_bytes();
-    let valid_code = bytes.len() == 13
-        && bytes[0] == b'/'
-        && bytes[4] == b'-'
-        && bytes[9] == b'-'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(i, b)| matches!(i, 0 | 4 | 9) || b.is_ascii_lowercase());
-    if url.scheme() != "https"
-        || url.host_str() != Some("meet.google.com")
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || !valid_code
-    {
-        return Err(fail());
-    }
-    Ok(format!("https://meet.google.com{p}"))
-}
-/// Read the configured loopback runner address and its generated per-library credential.
-fn runner_config() -> Result<(String, String), ApiError> {
-    let raw = crate::config::get().runner.url.clone();
-    let url = loopback_url(&raw)?;
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
-        return Err(ApiError::new(
-            503,
-            "The local runner URL must contain only its loopback address and port.",
-        ));
-    }
-    Ok((
-        url.origin().ascii_serialization(),
-        crate::config::runner_token(&store::data_dir())?,
-    ))
-}
-/// Call the local runner directly with bearer authentication, no proxy, and no redirects.
-async fn runner_request(
-    method: Method,
-    endpoint: &str,
-    body: Option<Value>,
-    timeout: u64,
-) -> Result<reqwest::Response, ApiError> {
-    let (origin, token) = runner_config()?;
-    let direct = Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(timeout))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| ApiError::new(500, "Could not initialize the local runner client."))?;
-    let mut request = direct
-        .request(method, format!("{origin}{endpoint}"))
-        .bearer_auth(token);
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-    let response = request.send().await.map_err(|_| {
-        ApiError::new(
-            503,
-            "The local meeting runner is offline. Start it on this computer, then retry.",
-        )
-    })?;
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let data: Value = response.json().await.unwrap_or_default();
-        return Err(ApiError::new(
-            if (400..600).contains(&status) {
-                status
-            } else {
-                502
-            },
-            data["error"]
-                .as_str()
-                .unwrap_or("The local meeting runner could not complete this request."),
-        ));
-    }
-    Ok(response)
-}
-/// Decode a successful runner response or report an invalid protocol payload.
-async fn runner_json(
-    method: Method,
-    endpoint: &str,
-    body: Option<Value>,
-    timeout: u64,
-) -> Result<Value, ApiError> {
-    runner_request(method, endpoint, body, timeout)
-        .await?
-        .json()
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                502,
-                "The local runner returned an invalid response. Restart it and retry.",
-            )
-        })
-}
-/// Report optional Google and runner setup without returning either integration's credentials.
+/// Report Calendar connection without exposing its credentials.
 async fn status() -> Result<Json<Value>, ApiError> {
     let tokens = read_tokens()?;
     let mut google = json!({"configured":google_configured(),"connected":tokens.is_some()});
     if let Some(email) = tokens.and_then(|t| t.email) {
         google["email"] = json!(email);
     }
-    let mut runner = json!({"configured":false,"reachable":false,"detail":"Optional Google Meet runner needs local setup."});
-    match runner_config() {
-        Ok((_, token)) if !token.is_empty() => {
-            runner["configured"] = json!(true);
-            match runner_json(Method::GET, "/health", None, 2).await {
-                Ok(health) => {
-                    runner["reachable"] = json!(true);
-                    runner["ready"] = health["ready"].clone();
-                    runner["detail"] = health["detail"].clone();
-                }
-                Err(error) => runner["detail"] = json!(error.message),
-            }
-        }
-        Err(error) => runner["detail"] = json!(error.message),
-        _ => (),
-    }
-    Ok(Json(json!({"google":google,"runner":runner})))
+    Ok(Json(json!({"google":google})))
 }
-/// Persist a unique start reservation before joining and compensate any ambiguous acceptance.
-async fn bot_start(Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let _guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let id = validate_id(body["meetingId"].as_str())?;
-    if body["consent"] != true {
-        return Err(ApiError::new(
-            422,
-            "Confirm participant consent before inviting the recording bot.",
-        ));
-    }
-    let url = validate_meet_url(body["url"].as_str().unwrap_or_default())?;
-    if store::get_meeting(id)?.is_none() {
-        return Err(ApiError::not_found());
-    }
-    let pending = start_file(id);
-    if pending.exists() {
-        cancel_start(id, &pending).await?;
-    }
-    let request_id = Uuid::new_v4().to_string();
-    crate::config::write_private(
-        &pending,
-        &serde_json::to_vec(&json!({"meetingId":id,"requestId":request_id}))?,
-    )?;
-    // Reserve first so deletion cannot race acceptance; no database write follows joining.
-    if let Err(error) = store::update_meeting(id, json!({"meetingUrl":url,"consent":true})) {
-        fs::remove_file(&pending)?;
-        return Err(error);
-    }
-    let result = runner_json(
-        Method::POST,
-        "/sessions",
-        Some(json!({"meetingId":id,"requestId":request_id,"url":url,"consent":true})),
-        10,
-    )
-    .await;
-    let session = match result {
-        Ok(session) if session["meetingId"] == id && session["requestId"] == request_id => {
-            match fs::remove_file(&pending) {
-                Ok(()) => session,
-                Err(error) => {
-                    cancel_start(id, &pending).await?;
-                    return Err(error.into());
-                }
-            }
-        }
-        other => {
-            cancel_start(id, &pending).await?;
-            return Err(other.err().unwrap_or_else(|| ApiError::new(502, "The runner returned an unrecognized start ID. That recording attempt was cancelled.")));
-        }
-    };
-    Ok((StatusCode::ACCEPTED, Json(session)))
-}
-
-/// Durable start reservations also protect meetings from deletion during ambiguity.
-fn start_file(id: &str) -> PathBuf {
-    store::data_dir()
-        .join("bot-starts")
-        .join(format!("{id}.json"))
-}
-
-/// Cancellation is scoped to a start ID and fences off a delayed POST in the runner.
-async fn cancel_start(id: &str, pending: &std::path::Path) -> Result<(), ApiError> {
-    let state: Value = serde_json::from_slice(&fs::read(pending)?)?;
-    let request_id = validate_id(state["requestId"].as_str())?;
-    let result = runner_json(
-        Method::DELETE,
-        &format!("/sessions/{id}?requestId={request_id}"),
-        None,
-        10,
-    )
-    .await;
-    if !result.as_ref().is_ok_and(|state| {
-        state["meetingId"] == id
-            && state["requestId"] == request_id
-            && matches!(
-                state["status"].as_str(),
-                Some("stopping" | "completed" | "failed")
-            )
-    }) {
-        return Err(ApiError::new(503, "The recording start could not be confirmed or cancelled. It may still be active. Keep the runner available and use Stop bot; Echo will keep retrying cancellation."));
-    }
-    fs::remove_file(pending)?;
-    Ok(())
-}
-
-/// Recover interrupted starts before serving, then retry while an offline runner returns.
-pub async fn recover_bot_starts() {
-    reconcile_starts().await;
-    tokio::spawn(async {
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            reconcile_starts().await;
-        }
-    });
-}
-
-/// Serialize reconciliation with starts so an in-flight accepted attempt is not cancelled.
-async fn reconcile_starts() {
-    let _guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let Ok(files) = fs::read_dir(store::data_dir().join("bot-starts")) else {
-        return;
-    };
-    for file in files.flatten() {
-        let path = file.path();
-        let Some(id) = path.file_stem().and_then(|v| v.to_str()) else {
-            continue;
-        };
-        if path.extension().is_some_and(|v| v == "json") && validate_id(Some(id)).is_ok() {
-            if let Err(error) = cancel_start(id, &path).await {
-                tracing::warn!("Pending recording cancellation: {}", error.message);
-            }
-        }
-    }
-}
-/// Reconcile runner recording and completion states with the meeting lifecycle.
-async fn bot_status(Query(query): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
-    let id = validate_id(query.get("meetingId").map(String::as_str))?;
-    let session = runner_json(Method::GET, &format!("/sessions/{id}"), None, 10).await?;
-    if let Some(meeting) = store::get_meeting(id)? {
-        if session["status"] == "recording" && meeting["status"] != "recording" {
-            store::update_meeting(id, json!({"status":"recording","error":Value::Null}))?;
-        } else if matches!(session["status"].as_str(), Some("completed" | "failed"))
-            && matches!(meeting["status"].as_str(), Some("recording" | "paused"))
-        {
-            store::update_meeting(
-                id,
-                json!({"status":if session["audioAvailable"]==true{"saved"}else{"error"},"error":if session["status"]=="failed"{session["detail"].clone()}else{Value::Null}}),
-            )?;
-        }
-    }
-    Ok(Json(session))
-}
-/// Cancel unresolved start intent or request the active guest to leave its meeting.
-async fn bot_stop(Query(query): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
-    let id = validate_id(query.get("meetingId").map(String::as_str))?;
-    let guard = BOT_START_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let pending = start_file(id);
-    if pending.exists() {
-        cancel_start(id, &pending).await?;
-        return Ok(Json(
-            json!({"meetingId":id,"status":"stopping","detail":"The uncertain start was cancelled. Waiting for the runner to finish."}),
-        ));
-    }
-    drop(guard);
-    Ok(Json(
-        runner_json(Method::DELETE, &format!("/sessions/{id}"), None, 10).await?,
-    ))
-}
-/// Retrieve a bounded WAV from the runner without losing the original on transfer failure.
-async fn audio_bytes(id: &str) -> Result<Vec<u8>, ApiError> {
-    let mut response =
-        runner_request(Method::GET, &format!("/sessions/{id}/audio"), None, 60).await?;
-    let too_large = || {
-        ApiError::new(413,"This recording exceeds the 512 MB import limit. Copy its WAV from the local runner data folder.")
-    };
-    if response.content_length().unwrap_or(0) > MAX_AUDIO as u64 {
-        return Err(too_large());
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk)=response.chunk().await.map_err(|_|ApiError::new(502,"Audio transfer from the local runner was interrupted. Retry; the original remains on disk."))? {
-        if bytes.len()+chunk.len()>MAX_AUDIO {return Err(too_large());} bytes.extend_from_slice(&chunk);
-    }
-    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
-        return Err(ApiError::new(
-            422,
-            "The runner did not return a supported WAV recording.",
-        ));
-    }
-    Ok(bytes)
-}
-/// Download finalized runner audio as a local attachment.
-async fn bot_audio(Query(query): Query<HashMap<String, String>>) -> Result<Response, ApiError> {
-    let id = validate_id(query.get("meetingId").map(String::as_str))?;
-    let bytes = audio_bytes(id).await?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "audio/wav"),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=\"meeting-audio.wav\"",
-            ),
-        ],
-        bytes,
-    )
-        .into_response())
-}
-/// Split runner audio into deterministic store-sized chunks for resumable import.
-fn persist_bot_audio(
-    bytes: &[u8],
-    mut persist: impl FnMut(&[u8], i64) -> Result<(), ApiError>,
-) -> Result<(), ApiError> {
-    for (sequence, chunk) in bytes.chunks(BOT_IMPORT_CHUNK_BYTES).enumerate() {
-        persist(chunk, sequence as i64)?;
-    }
-    Ok(())
-}
-
-/// Import finalized runner audio idempotently while retaining existing processed results on retries.
-async fn bot_import(Query(query): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
-    let id = validate_id(query.get("meetingId").map(String::as_str))?;
-    let meeting = store::get_meeting(id)?.ok_or_else(ApiError::not_found)?;
-    let session = runner_json(Method::GET, &format!("/sessions/{id}"), None, 10).await?;
-    if session["audioAvailable"] != true
-        || !matches!(session["status"].as_str(), Some("completed" | "failed"))
-    {
-        return Err(ApiError::new(
-            409,
-            "Stop the bot and wait for its recording to finish before importing.",
-        ));
-    }
-    let bytes = audio_bytes(id).await?;
-    let previously_complete = meeting["tracks"].as_array().is_some_and(|tracks| {
-        tracks.iter().any(|track| {
-            track["id"] == "meeting-bot" && track["bytes"].as_u64() == Some(bytes.len() as u64)
-        })
-    });
-    if !previously_complete {
-        store::update_meeting(id, json!({"status":"processing","error":Value::Null}))?;
-    }
-    // Replay all deterministic chunks on retry. The store accepts identical
-    // sequence/hash pairs, so an interrupted import cannot look complete just
-    // because its first chunk already created the track.
-    let result = persist_bot_audio(&bytes, |chunk, sequence| {
-        store::add_audio(
-            id,
-            chunk,
-            Some("meeting-bot"),
-            "Google Meet audio",
-            "audio/wav",
-            Some(sequence),
-        )?;
-        Ok(())
-    });
-    if let Err(error) = result {
-        let _ = store::update_meeting(
-            id,
-            json!({"status":"error","error":format!("Audio import stopped: {} Retry importing to resume saved chunks.",error.message)}),
-        );
-        return Err(error);
-    }
-    if previously_complete && matches!(meeting["status"].as_str(), Some("ready" | "processing")) {
-        return Ok(Json(
-            json!({"meeting":store::get_meeting(id)?.ok_or_else(ApiError::not_found)?,"imported":true}),
-        ));
-    }
-    let updated = store::update_meeting(
-        id,
-        json!({"status":"saved","duration":session["duration"].as_f64().unwrap_or(meeting["duration"].as_f64().unwrap_or(0.0)),"error":if session["status"]=="failed"{session["detail"].clone()}else{Value::Null}}),
-    )?;
-    Ok(Json(json!({"meeting":updated,"imported":true})))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn calendar_association_requires_one_matching_current_event() {
+        let event = json!({"id":"event-one","url":"https://meet.google.com/aaa-bbbb-ccc?authuser=1","start":"2026-10-05T10:00:00Z","end":"2026-10-05T11:00:00Z"});
+        let time = "2026-10-05T10:05:00Z";
+        assert_eq!(
+            unique_calendar_event(
+                std::slice::from_ref(&event),
+                "https://meet.google.com/aaa-bbbb-ccc",
+                time
+            ),
+            Some("event-one".into())
+        );
+        assert_eq!(
+            unique_calendar_event(
+                &[event.clone(), event.clone()],
+                "https://meet.google.com/aaa-bbbb-ccc",
+                time
+            ),
+            None
+        );
+        assert_eq!(
+            unique_calendar_event(
+                std::slice::from_ref(&event),
+                "https://meet.google.com/ddd-eeee-fff",
+                time
+            ),
+            None
+        );
+        assert_eq!(
+            unique_calendar_event(
+                std::slice::from_ref(&event),
+                "https://meet.google.com/aaa-bbbb-ccc",
+                "2026-10-05T12:00:00Z"
+            ),
+            None
+        );
+        assert_eq!(
+            unique_calendar_event(&[event], "https://hostile.example/aaa-bbbb-ccc", time),
+            None
+        );
+        let zoom_event = json!({"id":"zoom-event","url":"https://company.zoom.us/j/123456789?pwd=synthetic","start":"2026-10-05T10:00:00Z","end":"2026-10-05T11:00:00Z"});
+        assert_eq!(
+            unique_calendar_event(
+                std::slice::from_ref(&zoom_event),
+                "https://app.zoom.com/wc/123456789/join",
+                time
+            ),
+            Some("zoom-event".into())
+        );
+        assert_eq!(
+            unique_calendar_event(
+                std::slice::from_ref(&zoom_event),
+                "https://app.zoom.com/wc/987654321/join",
+                time
+            ),
+            None
+        );
+        assert_eq!(
+            meeting_identity("https://app.zoom.com/profile/123456789"),
+            None
+        );
+        let cache = CalendarAssociationCache {
+            library: PathBuf::from("library"),
+            fetched_at: 1000,
+            account: Some("authorized-account".into()),
+            events: vec![
+                json!({"id":"event-one","url":"https://meet.google.com/aaa-bbbb-ccc","start":"2026-10-05T10:00:00Z","end":"2026-10-05T11:00:00Z"}),
+            ],
+        };
+        let library = std::path::Path::new("library");
+        let url = "https://meet.google.com/aaa-bbbb-ccc";
+        assert_eq!(
+            cached_calendar_event(&cache, library, "authorized-account", 1000, url, time),
+            Some("event-one".into())
+        );
+        assert_eq!(
+            cached_calendar_event(&cache, library, "another-account", 1000, url, time),
+            None
+        );
+        assert_eq!(
+            cached_calendar_event(
+                &cache,
+                std::path::Path::new("other-library"),
+                "authorized-account",
+                1000,
+                url,
+                time
+            ),
+            None
+        );
+        assert_eq!(
+            cached_calendar_event(&cache, library, "authorized-account", 302000, url, time),
+            None
+        );
+        assert_eq!(
+            cached_calendar_event(&cache, library, "authorized-account", 0, url, time),
+            None
+        );
+    }
     #[test]
     fn state_requires_matching_fresh_cookie() {
         let value = OAuthState {
@@ -936,7 +762,7 @@ mod tests {
         .is_err());
     }
     #[test]
-    fn destinations_cannot_escape_loopback_or_meet() {
+    fn callback_destinations_cannot_escape_loopback() {
         for bad in [
             "http://169.254.169.254",
             "https://localhost.attacker.test",
@@ -946,23 +772,6 @@ mod tests {
             assert!(loopback_url(bad).is_err(), "{bad}");
         }
         assert!(loopback_url("http://127.0.0.1:8765").is_ok());
-        for bad in [
-            "http://127.0.0.1:22",
-            "https://meet.google.com.evil.test/abc-defg-hij",
-            "https://user@meet.google.com/abc-defg-hij",
-            "https://meet.google.com:444/abc-defg-hij",
-            "https://zoom.us/j/123",
-            "https://meet.google.com/lookup/private",
-        ] {
-            assert!(validate_meet_url(bad).is_err(), "{bad}");
-        }
-        assert_eq!(
-            validate_meet_url("https://meet.google.com/abc-defg-hij?authuser=0").unwrap(),
-            "https://meet.google.com/abc-defg-hij"
-        );
-        assert!(validate_id(Some("../../credentials")).is_err());
-        assert!(validate_id(Some("")).is_err());
-        assert!(validate_id(Some("meeting-1")).is_ok());
     }
     #[test]
     fn events_have_honest_providers_and_dates() {
@@ -977,51 +786,6 @@ mod tests {
             "other"
         );
     }
-    #[test]
-    fn large_bot_audio_resumes_partial_import_without_duplicates() {
-        // A >128 MB WAV exceeds the store's single-upload limit. Chunk replay
-        // must finish it safely after a simulated interruption at sequence 1.
-        let mut bytes = vec![0u8; 128 * 1024 * 1024 + 137];
-        bytes[0..4].copy_from_slice(b"RIFF");
-        bytes[8..12].copy_from_slice(b"WAVE");
-        bytes[BOT_IMPORT_CHUNK_BYTES] = 7;
-        bytes[2 * BOT_IMPORT_CHUNK_BYTES] = 11;
-        let mut saved = HashMap::<i64, (usize, Vec<u8>)>::new();
-        let persist = |chunk: &[u8], seq: i64, saved: &mut HashMap<i64, (usize, Vec<u8>)>| {
-            assert!(chunk.len() <= BOT_IMPORT_CHUNK_BYTES);
-            let entry = (chunk.len(), Sha256::digest(chunk).to_vec());
-            if let Some(existing) = saved.get(&seq) {
-                assert_eq!(existing, &entry);
-            } else {
-                saved.insert(seq, entry);
-            }
-        };
-        let interrupted = persist_bot_audio(&bytes, |chunk, seq| {
-            if seq == 1 {
-                return Err(ApiError::new(507, "Simulated full disk"));
-            }
-            persist(chunk, seq, &mut saved);
-            Ok(())
-        });
-        assert!(interrupted.is_err());
-        assert_eq!(saved.len(), 1);
-        persist_bot_audio(&bytes, |chunk, seq| {
-            persist(chunk, seq, &mut saved);
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(saved.len(), 3);
-        assert_eq!(
-            saved.values().map(|(size, _)| size).sum::<usize>(),
-            bytes.len()
-        );
-        persist_bot_audio(&bytes, |chunk, seq| {
-            persist(chunk, seq, &mut saved);
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(saved.len(), 3);
-    }
     #[tokio::test]
     async fn callback_without_valid_state_clears_cookie_and_returns_an_error() {
         let response = callback(
@@ -1029,7 +793,7 @@ mod tests {
             Query(HashMap::from([("code".into(), "untrusted".into())])),
         )
         .await;
-        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
         assert!(response.headers()[header::LOCATION]
             .to_str()
             .unwrap()
@@ -1038,11 +802,6 @@ mod tests {
             .to_str()
             .unwrap()
             .contains("Max-Age=0"));
-    }
-    #[tokio::test]
-    async fn bot_cannot_join_without_explicit_consent() {
-        let result=bot_start(Json(json!({"meetingId":"example","url":"https://meet.google.com/abc-defg-hij","consent":false}))).await;
-        assert_eq!(result.unwrap_err().status, StatusCode::UNPROCESSABLE_ENTITY);
     }
     #[test]
     fn cookie_parser_does_not_accept_substring_matches() {

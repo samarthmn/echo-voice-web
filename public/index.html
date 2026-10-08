@@ -1,2 +1,22 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#f8f7fa"><meta name="description" content="Echo Voice is your private, local meeting workspace. Be a little more present."><title>Echo Voice — A little more present</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/review.css"><link rel="stylesheet" href="/settings.css"><link rel="stylesheet" href="/chatgpt.css">
-</head><body><div id="main"><div class="boot-screen"><div class="brand-mark">e</div><p>Opening your quiet corner…</p></div></div><script type="module" src="/js/bridge.js"></script><script type="module">import init from '/assets/echo_app.js'; document.getElementById('main').replaceChildren(); init().catch(() => { document.getElementById('main').innerHTML = '<div class="boot-screen"><h1>Echo couldn’t start.</h1><p>Reload this page. If the problem persists, rebuild the web app using the README instructions.</p></div>'; });</script></body></html>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#f8f7fa"><meta name="description" content="Record meetings, transcribe speech, and review notes locally."><title>Echo Voice</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><script>try{const t=localStorage.getItem('echo-theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch{document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}</script><link rel="stylesheet" href="/design-tokens.css"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/review.css"><link rel="stylesheet" href="/settings.css"><link rel="stylesheet" href="/chatgpt.css"><link rel="stylesheet" href="/theme.css">
+</head><body><div id="main"><div class="boot-screen"><div class="brand-mark">e</div><p>Loading Echo…</p></div></div><script type="module">
+try {
+  const response = await fetch('/js/asset-manifest.json', { cache: 'no-store' });
+  if (!response.ok) throw new Error('Browser assets are missing.');
+  const versions = await response.json();
+  window.echoAssetVersions = versions;
+  const asset = path => {
+    if (!/^[a-f0-9]{64}$/.test(versions[path])) throw new Error(`Missing asset version: ${path}`);
+    return `${path}?v=${versions[path]}`;
+  };
+  for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+    link.href = asset(new URL(link.href).pathname);
+  }
+  await import(asset('/js/bridge.js'));
+  const { default: init } = await import(asset('/assets/echo_app.js'));
+  document.getElementById('main').replaceChildren();
+  await init({ module_or_path: asset('/assets/echo_app_bg.wasm') });
+} catch {
+  document.getElementById('main').innerHTML = '<div class="boot-screen"><h1>Echo couldn’t start.</h1><p>Reload this page. If the problem persists, rebuild the web app using the README instructions.</p></div>';
+}
+</script></body></html>

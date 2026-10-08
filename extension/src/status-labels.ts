@@ -1,0 +1,5 @@
+export function connectionLabel(status: string): string {return ({connected:'Connected to Echo','not-connected':'Not connected',unavailable:'Echo unavailable · audio stays local',revoked:'Connection revoked · reconnect in Setup',checking:'Checking Echo connection'} as Record<string,string>)[status] ?? 'Checking Echo connection';}
+export function liveLabel(status: string, backlogSeconds = 0): string {
+  const labels: Record<string,string> = {live:'Live text', 'catching-up':`Catching up · ${Math.ceil(backlogSeconds)} seconds behind`, 'waiting-audio':'Waiting for audio to reach Echo', 'model-missing':'Speech model missing · open Echo', 'processing-busy':'Speech processing busy', 'paused-open-echo':'Live text paused · open Echo', finalizing:'Final transcript processing','final-transcript-needed':'Saved · open Echo to create final transcript',complete:'Transcript complete',disabled:'Live text is off','not-connected':'Connect Echo for live text',revoked:'Connection revoked · reconnect in Setup',unavailable:'Echo unavailable · live text paused',deleted:'Recording deleted in Echo',checking:'Checking live text'};
+  return labels[status] ?? 'Live text unavailable';
+}

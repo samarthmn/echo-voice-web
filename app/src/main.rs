@@ -1,14 +1,174 @@
 mod api;
 mod calendar;
+mod extension;
+use extension::ExtensionRecordingStatus;
 mod chatgpt;
 mod models;
 mod review;
 mod settings;
+mod ui;
 use api::{get, patch, post, text, time};
 use dioxus::prelude::*;
 use review::MeetingReview;
 use serde_json::{json, Value};
 use settings::Settings;
+use std::collections::HashMap;
+use ui::{
+    count_label, ActionButton, BadgeTone, ButtonKind, IconButton, PageHeading, SectionHeading,
+    StatusBadge,
+};
+
+fn valid_extension_link_id(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if [8, 13, 18, 23].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+// Capture progress must not overwrite a title edit or a newer transcript/notes response.
+fn merge_extension_progress(existing: &Value, incoming: &Value) -> Value {
+    if existing["id"] != incoming["id"] || !existing.is_object() {
+        return incoming.clone();
+    }
+    let mut next = existing.clone();
+    for key in ["duration", "extensionRecording"] {
+        if !incoming[key].is_null() {
+            next[key] = incoming[key].clone();
+        }
+    }
+    next
+}
+
+/// A terminal event removes only its meeting, preserving other queued jobs.
+fn transcription_jobs(mut jobs: Vec<String>, id: &str, started: bool) -> Vec<String> {
+    if id.is_empty() {
+        return jobs;
+    }
+    jobs.retain(|job| job != id);
+    if started {
+        jobs.push(id.into());
+    }
+    jobs
+}
+
+/// Progress describes the current real worker stage while other jobs stay queued.
+fn processing_label(
+    jobs: &[String],
+    progress: &HashMap<String, String>,
+    active: &str,
+    cancelling: bool,
+) -> String {
+    if cancelling {
+        return "Cancelling transcription…".into();
+    }
+    if let Some(status) = progress.get(active) {
+        if jobs.len() > 1 {
+            return format!("{status} · {} queued", jobs.len() - 1);
+        }
+        return status.clone();
+    }
+    if jobs.len() > 1 {
+        format!("Transcribing {} meetings on this device…", jobs.len())
+    } else {
+        "Transcribing on this device…".into()
+    }
+}
+
+/// Reserve notes independently of speech jobs and suppress duplicate requests after navigation.
+fn start_notes_job(jobs: &mut HashMap<String, String>, id: &str, provider: &str) -> bool {
+    if id.is_empty() || jobs.contains_key(id) {
+        return false;
+    }
+    jobs.insert(id.into(), provider.into());
+    true
+}
+
+#[cfg(test)]
+mod processing_tests {
+    use super::{
+        merge_extension_progress, processing_label, start_notes_job, transcription_jobs,
+        valid_extension_link_id,
+    };
+
+    #[test]
+    fn receiving_progress_updates_duration_without_overwriting_local_review_content() {
+        let existing = serde_json::json!({"id":"meeting","title":"Edited title","duration":100,"transcripts":[{"text":"final"}]});
+        let incoming = serde_json::json!({"id":"meeting","title":"Old title","duration":360,"transcripts":[],"extensionRecording":{"totalFrames":5760000}});
+        let merged = merge_extension_progress(&existing, &incoming);
+        assert_eq!(merged["duration"], 360);
+        assert_eq!(merged["title"], "Edited title");
+        assert_eq!(merged["transcripts"], existing["transcripts"]);
+        assert_eq!(
+            merge_extension_progress(&serde_json::Value::Null, &incoming),
+            incoming
+        );
+    }
+
+    #[test]
+    fn extension_links_accept_only_uuid_path_segments() {
+        assert!(valid_extension_link_id(
+            "12345678-1234-1234-1234-123456789abc"
+        ));
+        for value in [
+            "",
+            "../settings",
+            "12345678-1234-1234-1234-123456789ab/",
+            "12345678-1234-1234-1234-123456789abc?x",
+        ] {
+            assert!(!valid_extension_link_id(value));
+        }
+    }
+
+    #[test]
+    fn notes_jobs_retain_provider_across_review_remount_and_finish_only_their_meeting() {
+        let mut jobs = HashMap::new();
+        assert!(start_notes_job(&mut jobs, "first", "chatgpt"));
+        assert!(!start_notes_job(&mut jobs, "first", "ollama"));
+        assert!(start_notes_job(&mut jobs, "second", "ollama"));
+        assert_eq!(jobs.get("first").map(String::as_str), Some("chatgpt"));
+        jobs.remove("second"); // The same removal runs for success and failure.
+        assert_eq!(jobs.get("first").map(String::as_str), Some("chatgpt"));
+        jobs.remove("first");
+        assert!(start_notes_job(&mut jobs, "first", "ollama"));
+        assert!(!start_notes_job(&mut jobs, "", "ollama"));
+    }
+    use std::collections::HashMap;
+
+    #[test]
+    fn progress_describes_the_active_stage_and_remaining_queue() {
+        let jobs = vec!["first".into(), "second".into()];
+        let progress = HashMap::from([("first".into(), "Encoding chunk 2 of 8".into())]);
+        assert_eq!(
+            processing_label(&jobs, &progress, "first", false),
+            "Encoding chunk 2 of 8 · 1 queued"
+        );
+        assert_eq!(
+            processing_label(&jobs, &progress, "first", true),
+            "Cancelling transcription…"
+        );
+        assert_eq!(
+            processing_label(&jobs[1..], &progress, "", false),
+            "Transcribing on this device…"
+        );
+    }
+
+    #[test]
+    fn completing_one_meeting_preserves_other_queued_jobs() {
+        let jobs = transcription_jobs(vec!["first".into(), "second".into()], "first", false);
+        assert_eq!(jobs, vec!["second"]);
+    }
+
+    #[test]
+    fn duplicate_start_and_unidentified_error_do_not_corrupt_the_queue() {
+        let jobs = transcription_jobs(vec!["first".into()], "first", true);
+        assert_eq!(jobs, vec!["first"]);
+        assert_eq!(transcription_jobs(jobs, "", false), vec!["first"]);
+    }
+}
 
 /// Launch the browser-rendered Dioxus workspace.
 fn main() {
@@ -39,6 +199,8 @@ pub fn Icon(name: String, #[props(default = 18)] size: u32) -> Element {
         "mute"=>"m11 5-6 4H2v6h3l6 4Zm5 4 5 6m-5 0 5-6",
         "edit"=>"m16 3 5 5-13 13H3v-5Zm-2 2 5 5", "users"=>"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm5-3a4 4 0 0 1 0 8m4 9v-2a4 4 0 0 0-3-4",
         "link"=>"m10 13 4-4m-7 7-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m4 1 2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0",
+        "sun"=>"M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M5.6 18.4 7 17m10-10 1.4-1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
+        "moon"=>"M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z",
         "menu"=>"M4 6h16M4 12h16M4 18h16", "alert"=>"m12 3 10 18H2Zm0 6v5m0 3h.01", "video"=>"M3 5h12v14H3Zm12 5 7-4v12l-7-4",
         _ => "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
     };
@@ -52,20 +214,35 @@ fn App() -> Element {
     let mut meetings = use_signal(Vec::<Value>::new);
     let mut selected = use_signal(|| Value::Null);
     let mut settings = use_signal(
-        || json!({"name":"","speechModel":"onnx-community/whisper-tiny.en","notesModel":"qwen2.5:3b","autoTranscribe":true,"language":"en"}),
+        || json!({"name":"","speechModel":"onnx-community/whisper-large-v3-turbo","notesModel":"qwen2.5:3b","autoTranscribe":true,"language":"en"}),
     );
     // Keep unsaved preferences through tabs and the account-setup round trip.
-    let settings_draft = use_signal(|| settings());
-    let settings_snapshot = use_signal(|| settings());
+    let settings_draft = use_signal(&*settings);
+    let settings_snapshot = use_signal(&*settings);
     let mut loading = use_signal(|| true);
     let mut load_error = use_signal(String::new);
     let mut toast = use_signal(String::new);
     let mut new_meeting = use_signal(|| false);
     let mut mobile_nav = use_signal(|| false);
+    let mut dark_mode = use_signal(|| false);
+    use_future(move || async move {
+        let mut events = document::eval(
+            "dioxus.send(window.echoTheme.current()==='dark');window.addEventListener('echo-theme-change',e=>dioxus.send(e.detail==='dark'));",
+        );
+        while let Ok(value) = events.recv::<bool>().await {
+            dark_mode.set(value);
+        }
+    });
     let mut query = use_signal(String::new);
     let mut filter = use_signal(|| "all".to_string());
     let mut recorder = use_signal(|| json!({"status":"idle","elapsed":0}));
-    let mut processing = use_signal(String::new);
+    let mut processing_jobs = use_signal(Vec::<String>::new);
+    let mut cancelling_processing = use_signal(|| false);
+    let mut processing_progress = use_signal(HashMap::<String, String>::new);
+    let mut progressing_meeting = use_signal(String::new);
+    let mut model_download = use_signal(|| json!({"status":"idle"}));
+    let mut notes_download = use_signal(|| json!({"status":"idle"}));
+    let mut notes_jobs = use_signal(HashMap::<String, String>::new);
     let mut uploads = use_signal(Vec::<Value>::new);
     let mut settings_section = use_signal(|| "general".to_string());
     use_future(move || async move {
@@ -77,14 +254,83 @@ fn App() -> Element {
             settings.set(v)
         };
         loading.set(false);
-        if let Ok(params)=document::eval("const p=new URLSearchParams(location.search);const v={calendar:p.get('calendar'),message:p.get('message')};if(v.calendar)history.replaceState(null,'',location.pathname);return v;").await {if params["calendar"]=="connected"{page.set("calendar".into());toast.set("Google Calendar connected.".into());}else if params["calendar"]=="error"{page.set("calendar".into());toast.set(text(&params,"message"));}}
+        if let Ok(params) = document::eval("const p=new URLSearchParams(location.search);const v={calendar:p.get('calendar'),message:p.get('message'),library:p.get('library'),meeting:p.get('meeting')};if(v.calendar||v.library||v.meeting){for(const key of ['calendar','message','library','meeting'])p.delete(key);history.replaceState(null,'',location.pathname+(p.size?'?'+p.toString():'')+location.hash);}return v;").await {
+            if params["calendar"] == "connected" {
+                page.set("calendar".into()); toast.set("Google Calendar connected.".into());
+            } else if params["calendar"] == "error" {
+                page.set("calendar".into()); toast.set(text(&params,"message"));
+            } else if !params["library"].is_null() || !params["meeting"].is_null() {
+                let library = text(&params,"library"); let meeting = text(&params,"meeting");
+                if !valid_extension_link_id(&library) || (!meeting.is_empty() && !valid_extension_link_id(&meeting)) {
+                    toast.set("This Echo recording link is invalid.".into());
+                } else {
+                    match get("/extensions/connections").await {
+                        Ok(connection) if text(&connection,"libraryId") == library => {
+                            if !meeting.is_empty() {
+                                match get(&format!("/meetings/{meeting}")).await {
+                                    Ok(value) if text(&value,"id") == meeting && text(&value["extensionRecording"],"libraryId") == library => {
+                                        selected.set(value); page.set("review".into());
+                                    },
+                                    _ => toast.set("This recording is unavailable in this Echo library.".into()),
+                                }
+                            }
+                        },
+                        Ok(_) => toast.set("This recording belongs to a different Echo library. Open its original library and try again.".into()),
+                        Err(error) => toast.set(error),
+                    }
+                }
+            }
+        }
     });
     use_future(move || async move {
         let mut events = document::eval(
-            r#"for(const name of ['echo-open-models','echo-upload-progress','echo-recorder-state','echo-recording-saved','echo-library-changed','echo-transcription-complete','echo-transcript-saved','echo-transcription-error','echo-transcription-start','echo-auto-transcription-skipped']){window.addEventListener(name,e=>dioxus.send({name,detail:e.detail}));} window.addEventListener('keydown',e=>{if(document.querySelector('[aria-modal="true"],dialog[open],.sidebar.open'))return;if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();dioxus.send({name:'search'})} if((e.metaKey||e.ctrlKey)&&e.key==='j'){e.preventDefault();dioxus.send({name:'new'})}});"#,
+            r#"for(const name of ['echo-notes-request','echo-notes-download-state','echo-model-download-state','echo-open-models','echo-upload-progress','echo-recorder-state','echo-recording-saved','echo-library-changed','echo-extension-recording-progress','echo-transcription-complete','echo-transcript-saved','echo-transcription-error','echo-transcription-start','echo-model-progress','echo-auto-transcription-skipped']){window.addEventListener(name,e=>dioxus.send({name,detail:e.detail}));} dioxus.send({name:'echo-model-download-state',detail:window.echoInference.getModelDownloadState()});dioxus.send({name:'echo-notes-download-state',detail:window.echoNotes.getDownloadState()}); window.addEventListener('keydown',e=>{if(document.querySelector('[aria-modal="true"],dialog[open],.sidebar.open'))return;if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();dioxus.send({name:'search'})} if((e.metaKey||e.ctrlKey)&&e.key==='j'){e.preventDefault();dioxus.send({name:'new'})}});"#,
         );
         while let Ok(event) = events.recv::<Value>().await {
             match event["name"].as_str().unwrap_or("") {
+                "echo-notes-request" => {
+                    let body = event["detail"].clone();
+                    let id = text(&body, "meetingId");
+                    if !start_notes_job(&mut notes_jobs.write(), &id, &text(&body, "provider")) {
+                        continue;
+                    }
+                    spawn(async move {
+                        let result = post("/notes", body).await;
+                        notes_jobs.write().remove(&id);
+                        match result {
+                            Ok(meeting) => {
+                                if meeting["id"] == selected()["id"] {
+                                    selected.set(meeting);
+                                }
+                                toast.set("Notes ready.".into());
+                                if let Ok(value) = get("/meetings").await {
+                                    meetings.set(
+                                        value["meetings"].as_array().cloned().unwrap_or_default(),
+                                    );
+                                }
+                            }
+                            Err(error) => toast.set(error),
+                        }
+                    });
+                }
+                "echo-notes-download-state" => {
+                    let detail = event["detail"].clone();
+                    if detail["status"] == "completed" {
+                        toast.set("Notes model downloaded.".into());
+                    } else if detail["status"] == "failed" {
+                        toast.set(text(&detail, "error"));
+                    }
+                    notes_download.set(detail);
+                }
+                "echo-model-download-state" => {
+                    let detail = event["detail"].clone();
+                    match detail["status"].as_str().unwrap_or("") {
+                        "completed" => toast.set("Model is ready for local transcription.".into()),
+                        "cancelled" => toast.set("Download cancelled.".into()),
+                        _ => {}
+                    }
+                    model_download.set(detail);
+                }
                 "echo-open-models" => {
                     page.set("models".into());
                     mobile_nav.set(false);
@@ -100,10 +346,28 @@ fn App() -> Element {
                     uploads.set(active);
                 }
                 "echo-recorder-state" => recorder.set(event["detail"].clone()),
+                "echo-extension-recording-progress" => {
+                    let incoming = &event["detail"];
+                    if !incoming["extensionRecording"].is_object()
+                        || text(incoming, "id").is_empty()
+                    {
+                        continue;
+                    }
+                    let mut current = meetings();
+                    if let Some(row) = current.iter_mut().find(|row| row["id"] == incoming["id"]) {
+                        *row = merge_extension_progress(row, incoming);
+                    } else {
+                        current.insert(0, incoming.clone());
+                    }
+                    meetings.set(current);
+                    if selected()["id"] == incoming["id"] {
+                        selected.set(merge_extension_progress(&selected(), incoming));
+                    }
+                }
                 "echo-recording-saved" => {
                     selected.set(event["detail"].clone());
                     page.set("review".into());
-                    toast.set("Recording saved safely in your workspace.".into());
+                    toast.set("Recording saved.".into());
                     if let Ok(v) = get("/meetings").await {
                         meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
                     }
@@ -117,8 +381,19 @@ fn App() -> Element {
                     }
                 }
                 "echo-transcription-complete" | "echo-transcript-saved" => {
-                    processing.set(String::new());
                     let detail = &event["detail"];
+                    let id = detail["meetingId"]
+                        .as_str()
+                        .or_else(|| detail["id"].as_str())
+                        .unwrap_or("");
+                    processing_jobs.set(transcription_jobs(processing_jobs(), id, false));
+                    processing_progress.write().remove(id);
+                    if progressing_meeting() == id {
+                        progressing_meeting.set(String::new());
+                    }
+                    if processing_jobs().is_empty() {
+                        cancelling_processing.set(false);
+                    }
                     if detail["id"].is_string() && detail["id"] == selected()["id"] {
                         selected.set(detail.clone())
                     } else if let Some(id) = detail["meetingId"].as_str() {
@@ -128,22 +403,52 @@ fn App() -> Element {
                             }
                         }
                     }
-                    toast.set("Transcript ready. Make it your own.".into());
+                    toast.set("Transcript ready.".into());
                     if let Ok(v) = get("/meetings").await {
                         meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
                     }
                 }
                 "echo-transcription-error" => {
-                    processing.set(String::new());
+                    let id = text(&event["detail"], "meetingId");
+                    processing_jobs.set(transcription_jobs(processing_jobs(), &id, false));
+                    processing_progress.write().remove(&id);
+                    if progressing_meeting() == id {
+                        progressing_meeting.set(String::new());
+                    }
+                    if processing_jobs().is_empty() {
+                        cancelling_processing.set(false);
+                    }
                     toast.set(
                         event["detail"]["error"]
                             .as_str()
                             .unwrap_or("Transcription failed. Your recording is still saved.")
                             .into(),
-                    )
+                    );
+                    if !id.is_empty() && selected()["id"] == id {
+                        if let Ok(meeting) = get(&format!("/meetings/{id}")).await {
+                            if meeting["id"] == selected()["id"] {
+                                selected.set(meeting);
+                            }
+                        }
+                    }
+                }
+                "echo-model-progress" => {
+                    let id = text(&event["detail"], "meetingId");
+                    let status = text(&event["detail"], "status");
+                    if processing_jobs().contains(&id) && !status.is_empty() {
+                        processing_progress.write().insert(id.clone(), status);
+                        progressing_meeting.set(id);
+                    }
                 }
                 "echo-auto-transcription-skipped" => toast.set(text(&event["detail"], "message")),
-                "echo-transcription-start" => processing.set("Transcribing on your device…".into()),
+                "echo-transcription-start" => {
+                    processing_jobs.set(transcription_jobs(
+                        processing_jobs(),
+                        &text(&event["detail"], "meetingId"),
+                        true,
+                    ));
+                    cancelling_processing.set(false);
+                }
                 "search" => {
                     page.set("meetings".into());
                     let _ = document::eval(
@@ -200,7 +505,7 @@ fn App() -> Element {
                         && !m["moments"].as_array().unwrap_or(&vec![]).is_empty()))
         })
         .collect::<Vec<_>>();
-    visible.sort_by(|a, b| text(b, "createdAt").cmp(&text(a, "createdAt")));
+    visible.sort_by_key(|meeting| std::cmp::Reverse(text(meeting, "createdAt")));
     let current_page = page();
     let heading = match current_page.as_str() {
         "meetings" => "All meetings",
@@ -210,7 +515,6 @@ fn App() -> Element {
         "review" => "Meeting workspace",
         _ => "Overview",
     };
-    let name = text(&settings(), "name");
     let selected_id = text(&selected(), "id");
     rsx! {
         a{class:"skip-link",href:"#workspace-main","Skip to content"}
@@ -218,76 +522,50 @@ fn App() -> Element {
             if mobile_nav(){button{class:"nav-scrim","aria-label":"Close navigation",onclick:move |_|mobile_nav.set(false)}}
             aside{id:"workspace-navigation","aria-label":"Workspace",class:if mobile_nav(){"sidebar open"}else{"sidebar"},
                 a{class:"brand",href:"#",onclick:move |e|{e.prevent_default();page.set("overview".into());mobile_nav.set(false);},div{class:"brand-mark",span{} span{} span{} span{}} span{"echo" span{"voice"}}}
-                div{class:"workspace-switch",div{class:"workspace-avatar","P"}div{strong{"Personal workspace"}span{span{class:"tiny-dot"}"Only on this device"}}Icon{name:"chevron-down",size:15}}
-                span{class:"nav-section-label","WORKSPACE"}
                 nav{class:"main-nav","aria-label":"Main navigation",for (id,icon,label) in nav{button{class:if current_page==id{"nav-item active"}else{"nav-item"},"aria-current":if current_page==id{"page"}else{"false"},onclick:move |_|{page.set(id.into());mobile_nav.set(false);},Icon{name:icon}span{"{label}"}if id=="meetings"{span{class:"nav-count","{count}"}}if id=="models"{span{class:"nav-dot"}}}}}
-                div{class:"sidebar-bottom",div{class:"privacy-card",div{class:"privacy-icon",Icon{name:"shield",size:20}}h4{"Your words. Your choice."}p{"Local by default.\nCloud connections are your choice."}button{onclick:move |_|{settings_section.set("help".into());page.set("settings".into());mobile_nav.set(false);},"Our local-first promise" Icon{name:"arrow",size:14}}}
+                div{class:"sidebar-bottom",
                     button{class:if current_page=="settings"{"nav-item active"}else{"nav-item"},onclick:move |_|{page.set("settings".into());settings_section.set("general".into());mobile_nav.set(false);},Icon{name:"settings"}span{"Settings"}}
-                    button{class:"nav-item",onclick:move |_|{page.set("settings".into());settings_section.set("help".into());mobile_nav.set(false);},Icon{name:"help"}span{"Setup & help"}}
-                    div{class:"profile",div{class:"profile-avatar","{name.chars().next().unwrap_or('Y').to_uppercase()}"}div{strong{if name.is_empty(){"Your local space"}else{"{name}"}}span{"A little more present."}}span{class:"version","v0.1"}}
                 }
             }
-            div{class:"main-shell",header{class:"topbar",div{class:"topbar-left",button{class:"icon-button mobile-menu","aria-label":"Open navigation","aria-expanded":mobile_nav(),"aria-controls":"workspace-navigation",onclick:move |_|mobile_nav.set(true),Icon{name:"menu"}}span{class:"breadcrumb-home","Workspace"}Icon{name:"chevron",size:13}strong{"{heading}"}}div{class:"topbar-right",span{class:"local-pill",span{class:"tiny-dot"}"Local workspace"}button{class:"global-search",onclick:move |_|{page.set("meetings".into());let _=document::eval("setTimeout(()=>document.getElementById('library-search')?.focus(),100)");},Icon{name:"search",size:16}span{"Search anything"}kbd{"⌘ K"}}button{class:"button button-primary button-small",disabled:is_recording,onclick:move |_|new_meeting.set(true),Icon{name:"plus",size:16}span{"New meeting"}}}}
+            div{class:"main-shell",header{class:"topbar",div{class:"topbar-left",button{class:"icon-button mobile-menu","aria-label":"Open navigation","aria-expanded":mobile_nav(),"aria-controls":"workspace-navigation",onclick:move |_|mobile_nav.set(true),Icon{name:"menu"}}span{class:"breadcrumb-home","Workspace"}Icon{name:"chevron",size:13}strong{"{heading}"}}div{class:"topbar-right",button{class:"icon-button theme-toggle","aria-label":if dark_mode(){"Switch to light mode"}else{"Switch to dark mode"},"aria-pressed":dark_mode(),onclick:move |_|{let next=if dark_mode(){"light"}else{"dark"};dark_mode.set(next=="dark");let _=document::eval(&format!("window.echoTheme.set({})",json!(next)));},Icon{name:if dark_mode(){"sun"}else{"moon"},size:19}}button{class:"global-search",onclick:move |_|{page.set("meetings".into());let _=document::eval("setTimeout(()=>document.getElementById('library-search')?.focus(),100)");},Icon{name:"search",size:16}span{"Search meetings"}kbd{"⌘ K"}}ActionButton{kind:ButtonKind::Primary,compact:true,disabled:is_recording,onclick:move |_|new_meeting.set(true),Icon{name:"plus",size:16}span{"New meeting"}}}}
                 main{id:"workspace-main",tabindex:"-1",
-                    if !load_error().is_empty(){div{class:"load-error inline-error",Icon{name:"alert"}"{load_error}" button{class:"button button-secondary",onclick:move |_|{spawn(async move{loading.set(true);match get("/meetings").await{Ok(v)=>{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());load_error.set(String::new())},Err(e)=>load_error.set(e)}loading.set(false);});},"Retry"}}}
+                    if !load_error().is_empty(){div{class:"load-error inline-error",Icon{name:"alert"}"{load_error}" ActionButton{kind:ButtonKind::Secondary,onclick:move |_|{spawn(async move{loading.set(true);match get("/meetings").await{Ok(v)=>{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());load_error.set(String::new())},Err(e)=>load_error.set(e)}loading.set(false);});},"Retry"}}}
                     if current_page=="overview"{
-                        div{class:"page-content overview",div{class:"page-heading",div{span{class:"eyebrow","A LITTLE MORE PRESENT"}h1{"Good conversations start here."}p{"Let the ideas flow. We’ll help you remember the details."}}div{class:"today-label",Icon{name:"calendar",size:15}"Your personal workspace"}}
-                            section{class:"hero-card",div{class:"hero-content",span{class:"hero-kicker",span{class:"tiny-dot"}"LOCAL FIRST. YOUR CHOICE."}h2{"Less note-taking." br{}span{"More being there."}}p{"Turn your conversations into clear transcripts,\nthoughtful notes, and meaningful next steps."}div{class:"hero-actions",button{class:"button button-white",disabled:is_recording,onclick:move |_|new_meeting.set(true),Icon{name:"mic",size:17}"Start a conversation" Icon{name:"arrow-right",size:16}}button{class:"hero-secondary",onclick:move |_|{settings_section.set("help".into());page.set("settings".into());},"How it works" Icon{name:"arrow",size:15}}}}
-                                div{class:"hero-visual","aria-hidden":"true",div{class:"orbit orbit-one"}div{class:"orbit orbit-two"}div{class:"orbit orbit-three"}div{class:"hero-wave",for i in 0..35{span{style:format!("height:{}px;animation-delay:{}ms",18.+((i as f64*0.77).sin().abs()*75.)*(1.-((i as f64-17.)/23.).abs()),i*65)}}}div{class:"floating-note",div{class:"floating-note-icon",Icon{name:"sparkles",size:15}}div{strong{"Clarity, captured."}span{"Every good idea has a place."}}}div{class:"hero-local",Icon{name:"shield",size:13}"Recorded on your device"}}
+                        div{class:"page-content overview",PageHeading{title:"Overview"}
+                            div{class:"quick-actions",button{class:"quick-action",disabled:is_recording,onclick:move |_|new_meeting.set(true),span{class:"quick-icon peach",Icon{name:"mic",size:21}}span{strong{"Record in person"}small{"Room microphone"}}Icon{name:"arrow-right",size:17}}button{class:"quick-action",onclick:move |_|page.set("calendar".into()),span{class:"quick-icon lavender",Icon{name:"calendar",size:21}}span{strong{"Online meeting"}small{"Browser extension"}}Icon{name:"arrow-right",size:17}}label{class:"quick-action upload-action",span{class:"quick-icon mint",Icon{name:"upload",size:21}}span{strong{"Upload a recording"}small{"Audio file"}}Icon{name:"arrow-right",size:17}input{r#type:"file","aria-label":"Upload a recording",accept:"audio/*,video/webm,video/mp4",onchange:move |_|{spawn(async move{match crate::api::evaluate("return await window.echo.upload(document.getElementById('audio-upload'))").await{Ok(_)=>{},Err(e)=>toast.set(format!("Upload could not complete: {e}"))}});},id:"audio-upload",class:"file-input"}}}
+                            if count>0{div{class:"stats-row",div{class:"stat-item",span{class:"stat-icon",Icon{name:"video",size:18}}div{strong{"{count}"}span{"Meetings"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"clock",size:18}}div{strong{"{minutes:.0}"}span{"Minutes"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"sparkles",size:18}}div{strong{"{note_count}"}span{"With notes"}}}div{class:"stat-item privacy-stat",span{class:"stat-icon",Icon{name:"shield",size:18}}div{strong{"Local"}span{"Audio capture"}}}}}
+                            div{class:"overview-columns",section{class:"recent-section",SectionHeading{title:"Recent meetings",button{class:"text-button",onclick:move |_|page.set("meetings".into()),"View all" Icon{name:"arrow-right",size:15}}}if count==0{div{class:"empty-library panel",div{class:"empty-library-icon",Icon{name:"mic",size:27}}h3{"No meetings yet"}p{"Record a meeting or upload audio."}ActionButton{kind:ButtonKind::Secondary,onclick:move |_|{spawn(async move{if let Ok(v)=get("/demo").await{selected.set(v);page.set("review".into())}else{toast.set("Sample meeting is unavailable.".into())}});},Icon{name:"play",size:14}"Explore a sample meeting"}span{class:"small-muted","Sample · no audio"}}}else{div{class:"recent-list",for meeting in visible.iter().take(4).cloned(){MeetingCard{meeting,on_open:move |m|{selected.set(m);page.set("review".into());}}}}}
                             }
-                            div{class:"quick-actions",button{class:"quick-action",disabled:is_recording,onclick:move |_|new_meeting.set(true),span{class:"quick-icon peach",Icon{name:"mic",size:21}}span{strong{"In-person conversation"}small{"One room. Every voice."}}Icon{name:"arrow-right",size:17}}button{class:"quick-action",onclick:move |_|page.set("calendar".into()),span{class:"quick-icon lavender",Icon{name:"calendar",size:21}}span{strong{"From your calendar"}small{"A note-taker for your next call."}}Icon{name:"arrow-right",size:17}}label{class:"quick-action upload-action",span{class:"quick-icon mint",Icon{name:"upload",size:21}}span{strong{"Upload a recording"}small{"Give an existing conversation clarity."}}Icon{name:"arrow-right",size:17}input{r#type:"file","aria-label":"Upload a recording",accept:"audio/*,video/webm,video/mp4",onchange:move |_|{spawn(async move{match crate::api::evaluate("return await window.echo.upload(document.getElementById('audio-upload'))").await{Ok(_)=>{},Err(e)=>toast.set(format!("Upload could not complete: {e}"))}});},id:"audio-upload",class:"file-input"}}}
-                            if count>0{div{class:"stats-row",div{class:"stat-item",span{class:"stat-icon",Icon{name:"video",size:18}}div{strong{"{count}"}span{"Conversations captured"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"clock",size:18}}div{strong{"{minutes:.0}"}span{"Minutes remembered"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"sparkles",size:18}}div{strong{"{note_count}"}span{"Meetings with clarity"}}}div{class:"stat-item privacy-stat",span{class:"stat-icon",Icon{name:"shield",size:18}}div{strong{"Local"}span{"Audio capture"}}}}}
-                            div{class:if count==0{"overview-columns overview-first-use"}else{"overview-columns"},if count==0{SetupCard{on_help:move |_|{settings_section.set("help".into());page.set("settings".into());},on_models:move |_|page.set("models".into()),on_calendar:move |_|page.set("calendar".into())}}section{class:"recent-section",div{class:"section-heading",h2{"Your recent conversations"}button{class:"text-button",onclick:move |_|page.set("meetings".into()),"View all" Icon{name:"arrow-right",size:15}}}if count==0{div{class:"empty-library panel",div{class:"empty-library-icon",Icon{name:"mic",size:27}}h3{"The start of something worth remembering."}p{"Your conversations will find a home here.\nRecord your first, or take a look around."}button{class:"button button-secondary",onclick:move |_|{spawn(async move{if let Ok(v)=get("/demo").await{selected.set(v);page.set("review".into())}else{toast.set("Sample meeting is unavailable.".into())}});},Icon{name:"play",size:14}"Explore a sample meeting"}span{class:"small-muted","Illustrative example · no audio or real meeting data"}}}else{div{class:"recent-list",for meeting in visible.iter().take(4).cloned(){MeetingCard{meeting,on_open:move |m|{selected.set(m);page.set("review".into());}}}}}
+
                             }
-                                if count>0{SetupCard{on_help:move |_|{settings_section.set("help".into());page.set("settings".into());},on_models:move |_|page.set("models".into()),on_calendar:move |_|page.set("calendar".into())}}
-                            }div{class:"workspace-footer",Icon{name:"shield",size:13}"A quiet space for your conversations. Nothing leaves without you."}
                         }
                     }else if current_page=="meetings"{
-                        div{class:"page-content",div{class:"page-heading",div{span{class:"eyebrow","YOUR COLLECTIVE CLARITY"}h1{"Every conversation, remembered."}p{"Find the idea, the decision, or the detail you came back for."}}button{class:"button button-primary",disabled:is_recording,onclick:move |_|new_meeting.set(true),Icon{name:"plus"}"New meeting"}}
-                            div{class:"library-toolbar",div{class:"search-field",Icon{name:"search",size:18}input{id:"library-search",placeholder:"Search meetings, transcripts, and notes…",value:query(),oninput:move |e|query.set(e.value()),"aria-label":"Search meeting library"}if !query().is_empty(){button{class:"icon-button","aria-label":"Clear search",onclick:move |_|query.set(String::new()),Icon{name:"close",size:15}}}}div{class:"filter-tabs",for (id,label) in [("all","All meetings"),("in-person","In person"),("online","Online"),("saved","Saved moments")]{button{class:if filter()==id{"active"}else{""},"aria-pressed":filter()==id,onclick:move |_|filter.set(id.into()),"{label}"}}}}
-                            if loading(){div{class:"loading-panel",span{class:"spinner"}"Opening your library…"}}else if visible.is_empty(){div{class:"panel empty-state library-empty",Icon{name:"library",size:36}h2{if query().is_empty(){"Your story starts with a conversation."}else{"No conversations found."}}p{if query().is_empty(){"Start recording or upload audio from the overview to build your private library."}else{"Try a different word or choose All meetings."}}button{class:"button button-secondary",disabled:count==0&&is_recording,onclick:move |_|{query.set(String::new());filter.set("all".into());if count==0{new_meeting.set(true)}},if count==0{"Start a conversation"}else{"Clear filters"}}}}else{div{class:"section-heading",h2{"Saved on this device"}span{class:"small-muted","{visible.len()} meetings"}}div{class:"meeting-grid",for meeting in visible{MeetingCard{meeting,on_open:move |m|{selected.set(m);page.set("review".into());}}}}}
+                        div{class:"page-content",PageHeading{title:"All meetings",ActionButton{kind:ButtonKind::Primary,disabled:is_recording,onclick:move |_|new_meeting.set(true),Icon{name:"plus"}"New meeting"}}
+                            div{class:"library-toolbar",div{class:"search-field",Icon{name:"search",size:18}input{id:"library-search",placeholder:"Search meetings, transcripts, and notes…",value:query(),oninput:move |e|query.set(e.value()),"aria-label":"Search meeting library"}if !query().is_empty(){IconButton{label:"Clear search",icon:"close",onclick:move |_|query.set(String::new())}}}div{class:"filter-tabs",for (id,label) in [("all","All meetings"),("in-person","In person"),("online","Online"),("saved","Saved moments")]{button{class:if filter()==id{"active"}else{""},"aria-pressed":filter()==id,onclick:move |_|filter.set(id.into()),"{label}"}}}}
+                            if loading(){div{class:"loading-panel",span{class:"spinner"}"Loading meetings…"}}else if visible.is_empty(){div{class:"panel empty-state library-empty",Icon{name:"library",size:36}h2{if query().is_empty(){"No meetings yet"}else{"No meetings found."}}p{if query().is_empty(){"Record a meeting or upload audio."}else{"Try a different word or choose All meetings."}}ActionButton{kind:ButtonKind::Secondary,disabled:count==0&&is_recording,onclick:move |_|{query.set(String::new());filter.set("all".into());if count==0{new_meeting.set(true)}},if count==0{"New meeting"}else{"Clear filters"}}}}else{SectionHeading{title:"Meetings",span{class:"small-muted",{count_label(visible.len(),"meeting","meetings")}}}div{class:"meeting-grid",for meeting in visible{MeetingCard{meeting,on_open:move |m|{selected.set(m);page.set("review".into());}}}}}
                         }
                     }else if current_page=="review"{
                         if selected().is_object(){
                             div{key:"{selected_id}",
-                            if text(&selected(),"mode")=="online" && selected()["tracks"].as_array().map(|t|t.is_empty()).unwrap_or(true){BotStatus{meeting:selected,notify:move|s|toast.set(s)}}
-                            MeetingReview{meeting:selected,on_back:move |_|{page.set("meetings".into());spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});},on_change:move |m:Value|{if m["id"]==selected()["id"]{selected.set(m);}spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});},notify:move |s|toast.set(s)}
+                            if text(&selected(),"mode")=="online"{ExtensionRecordingStatus{meeting:selected,notify:move|s|toast.set(s)}}
+                            MeetingReview{meeting:selected,transcribing:processing_jobs().contains(&selected_id),generating_notes:notes_jobs().get(&selected_id).cloned().unwrap_or_default(),on_back:move |_|{page.set("meetings".into());spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});},on_change:move |m:Value|{if m["id"]==selected()["id"]{selected.set(m);}spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});},notify:move |s|toast.set(s)}
                             }
                         }
-                    }else if current_page=="calendar"{calendar::Calendar{settings,on_meeting:move|m|{selected.set(m);page.set("review".into());},notify:move|s|toast.set(s)}}
-                    else if current_page=="models"{models::Models{settings,on_change:move|s|settings.set(s),notify:move|s|toast.set(s),on_setup:move |_|{settings_section.set("help".into());page.set("settings".into());}}}
+                    }else if current_page=="calendar"{calendar::Calendar{notify:move|s|toast.set(s)}}
+                    else if current_page=="models"{models::Models{settings,download:model_download,notes_download,on_change:move|s|settings.set(s),notify:move|s|toast.set(s)}}
                     else if current_page=="settings"{Settings{key:"{settings_section}",settings,draft:settings_draft,snapshot:settings_snapshot,on_change:move|s|settings.set(s),notify:move|s|toast.set(s),initial_section:settings_section()}}
                 }
             }
         }
         div{class:if is_recording{"task-stack above-recording"}else{"task-stack"},
         for upload in uploads(){div{class:"upload-progress panel",role:"status",div{Icon{name:"upload",size:17}strong{"Saving recording…"}span{{format!("{:.0}%",upload["progress"].as_f64().unwrap_or(0.))}}}p{{text(&upload,"fileName")}}progress{max:"100",value:upload["progress"].as_f64().unwrap_or(0.).to_string(),"aria-label":format!("Saving {}",text(&upload,"fileName"))}}}
-        if !processing().is_empty(){div{class:"processing-banner",role:"status",span{class:"spinner"}"{processing}" button{class:"button button-ghost",onclick:move |_|{let _=document::eval("window.echoInference.cancelInference()");processing.set(String::new());},"Cancel"}}}
+        if !notes_jobs().is_empty(){div{class:"processing-banner",role:"status",span{class:"spinner"}span{{format!("Generating notes for {}…",count_label(notes_jobs().len(),"meeting","meetings"))}}}}
+        if !processing_jobs().is_empty(){div{class:"processing-banner",role:"status",span{class:"spinner"}span{{processing_label(&processing_jobs(), &processing_progress(), &progressing_meeting(), cancelling_processing())}}ActionButton{kind:ButtonKind::Ghost,disabled:cancelling_processing(),onclick:move |_|{cancelling_processing.set(true);let _=document::eval("window.echoInference.cancelInference()");},if processing_jobs().len()>1 {"Cancel all"} else {"Cancel"}}}}
         }
         if is_recording{RecorderBar{recorder,on_open:move |_|{let id=text(&recorder(),"meetingId");spawn(async move{if let Ok(m)=get(&format!("/meetings/{id}")).await{selected.set(m);page.set("review".into());}});},notify:move|s|toast.set(s)}}
         if new_meeting(){NewMeeting{settings,on_close:move |_|new_meeting.set(false),on_calendar:move |_|{new_meeting.set(false);page.set("calendar".into());},on_start:move|m|{selected.set(m);page.set("review".into());spawn(async move{if let Ok(v)=get("/meetings").await{meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())}});}}}
-        if !toast().is_empty(){div{class:"toast",role:"status",Icon{name:"sparkles",size:18}span{"{toast}"}button{class:"icon-button","aria-label":"Dismiss notification",onclick:move |_|toast.set(String::new()),Icon{name:"close",size:16}}}}
+        if !toast().is_empty(){div{class:"toast",role:"status",Icon{name:"sparkles",size:18}span{"{toast}"}IconButton{label:"Dismiss notification",icon:"close",onclick:move |_|toast.set(String::new())}}}
     }
-}
-
-#[component]
-/// Present the next optional setup action with its current completion state.
-fn SetupCard(
-    on_help: EventHandler<()>,
-    on_models: EventHandler<()>,
-    on_calendar: EventHandler<()>,
-) -> Element {
-    rsx! {aside {class:"onboarding-column",aria_label:"Getting started",
-        div {class:"section-heading",h2 {"Make yourself at home"}}
-        div {class:"panel setup-card",
-            span {class:"setup-card-icon",Icon {name:"sparkles",size:21}}
-            h3 {"Ready when you are."}
-            p {"Record right away. Set up transcription and connections when you need them."}
-            button {class:"setup-step",onclick:move |_|on_help.call(()),span {"1"}div {strong {"Meet your workspace"}small {"Microphone, storage, and privacy"}}Icon {name:"chevron",size:16}}
-            button {class:"setup-step",onclick:move |_|on_models.call(()),span {"2"}div {strong {"Set up transcription"}small {"Choose a model to run locally"}}Icon {name:"chevron",size:16}}
-            button {class:"setup-step",onclick:move |_|on_calendar.call(()),span {"3"}div {strong {"Connect your calendar"}small {"Optional · for online meetings"}}Icon {name:"chevron",size:16}}
-        }
-    }}
 }
 
 #[component]
@@ -307,7 +585,7 @@ fn MeetingCard(meeting: Value, on_open: EventHandler<Value>) -> Element {
     } else {
         0
     };
-    rsx! {button{class:"meeting-card panel",onclick:move |_|on_open.call(meeting.clone()),div{class:"meeting-card-top",span{class:if mode=="online"{"meeting-icon lavender"}else{"meeting-icon peach"},Icon{name:if mode=="online"{"video"}else{"mic"},size:21}}span{class:if status=="ready"{"badge badge-green"}else if status=="error"||status=="interrupted"{"badge badge-amber"}else{"badge"},"{status}"}}h3{"{title}"}div{class:"meeting-card-meta",span{"{date}"}span{"·"}Icon{name:"clock",size:13}span{"{duration}"}}div{class:"meeting-card-bottom",span{if tags>0{"{tags} next steps"}else if status=="ready"{"Ready to revisit"}else{"Open conversation"}}Icon{name:"arrow-right",size:16}}}}
+    rsx! {button{class:"meeting-card panel",onclick:move |_|on_open.call(meeting.clone()),div{class:"meeting-card-top",span{class:if mode=="online"{"meeting-icon lavender"}else{"meeting-icon peach"},Icon{name:if mode=="online"{"video"}else{"mic"},size:21}}StatusBadge{tone:if status=="ready"{BadgeTone::Success}else if status=="error"||status=="interrupted"{BadgeTone::Warning}else{BadgeTone::Neutral},"{status}"}}h3{"{title}"}div{class:"meeting-card-meta",span{"{date}"}span{"·"}Icon{name:"clock",size:13}span{"{duration}"}}div{class:"meeting-card-bottom",span{if tags>0{{count_label(tags,"next step","next steps")}}else if status=="ready"{"Open transcript"}else{"Open meeting"}}Icon{name:"arrow-right",size:16}}}}
 }
 
 #[component]
@@ -326,17 +604,17 @@ fn NewMeeting(
     let mut devices = use_signal(Vec::<Value>::new);
     let mut device = use_signal(String::new);
     let mut tested = use_signal(|| false);
-    rsx! {div{class:"dialog-backdrop",div{class:"dialog",id:"new-meeting-dialog",role:"dialog","aria-modal":"true","aria-labelledby":"new-meeting-heading",button{class:"icon-button dialog-close",id:"close-new-meeting","aria-label":"Close new meeting",disabled:busy(),onclick:move |_|on_close.call(()),Icon{name:"close",size:20}}h2{id:"new-meeting-heading","Make space for a conversation."}p{class:"dialog-description","A private recording. A clearer head."}
-        div{class:"meeting-mode-options",div{class:"mode-option selected",span{class:"mode-option-icon",Icon{name:"mic",size:22}}div{strong{"In person"}span{"Capture your room microphone"}}Icon{name:"check",size:17}}button{class:"mode-option",disabled:busy(),onclick:move |_|on_calendar.call(()),span{class:"mode-option-icon",Icon{name:"calendar",size:22}}div{strong{"Online meeting"}span{"Connect a meeting from your calendar"}}Icon{name:"chevron",size:17}}}
+    rsx! {div{class:"dialog-backdrop",div{class:"dialog",id:"new-meeting-dialog",role:"dialog","aria-modal":"true","aria-labelledby":"new-meeting-heading",IconButton{class:"dialog-close",id:"close-new-meeting",label:"Close new meeting",icon:"close",disabled:busy(),onclick:move |_|on_close.call(())}h2{id:"new-meeting-heading","New meeting"}
+        div{class:"meeting-mode-options",div{class:"mode-option selected",span{class:"mode-option-icon",Icon{name:"mic",size:22}}div{strong{"In person"}span{"Capture your room microphone"}}Icon{name:"check",size:17}}button{class:"mode-option",disabled:busy(),onclick:move |_|on_calendar.call(()),span{class:"mode-option-icon",Icon{name:"calendar",size:22}}div{strong{"Online meeting"}span{"Open a meeting and record with the extension"}}Icon{name:"chevron",size:17}}}
         label{class:"field-label",r#for:"new-meeting-title","Meeting name " span{"Optional"}}input{class:"input",id:"new-meeting-title",placeholder:"e.g. Monday product catch-up",maxlength:"180",disabled:busy(),value:title(),oninput:move|e|title.set(e.value())}
-        div{class:"mic-setup",div{Icon{name:"mic",size:18}span{if tested(){"Microphone access is ready"}else{"Choose your microphone"}}}button{class:"button button-secondary button-small",disabled:busy(),onclick:move |_|{spawn(async move{busy.set(true);error.set(String::new());match crate::api::evaluate("return await window.echo.testMicrophone()").await{Ok(v)=>{devices.set(v.as_array().cloned().unwrap_or_default());tested.set(true)},Err(e)=>error.set(format!("Microphone access failed. Check your browser permissions. {e}"))}busy.set(false);});},if tested(){"Check again"}else{"Test access"}}}
+        div{class:"mic-setup",div{Icon{name:"mic",size:18}span{if tested(){"Microphone access is ready"}else{"Choose your microphone"}}}ActionButton{kind:ButtonKind::Secondary,compact:true,disabled:busy(),onclick:move |_|{spawn(async move{busy.set(true);error.set(String::new());match crate::api::evaluate("return await window.echo.testMicrophone()").await{Ok(v)=>{devices.set(v.as_array().cloned().unwrap_or_default());tested.set(true)},Err(e)=>error.set(format!("Microphone access failed. Check your browser permissions. {e}"))}busy.set(false);});},if tested(){"Check again"}else{"Test access"}}}
         if !devices().is_empty(){select{class:"input","aria-label":"Microphone",disabled:busy(),value:device(),onchange:move|e|device.set(e.value()),option{value:"","System default microphone"}for d in devices(){option{value:text(&d,"id"),{text(&d,"label")}}}}}
         label{class:"check-row",input{r#type:"checkbox",disabled:busy(),checked:muted(),onchange:move|e|muted.set(e.checked())}span{"Start with microphone capture muted"}}
-        div{class:"privacy-note",Icon{name:"shield",size:19}p{"Audio stays in your local workspace. Transcription runs on this device after recording. Keep this tab open while recording."}}
+        div{class:"privacy-note",Icon{name:"shield",size:19}p{"Keep this tab open while recording. Audio is saved on this device."}}
         label{class:"check-row consent-row",input{r#type:"checkbox",disabled:busy(),checked:consent(),onchange:move|e|consent.set(e.checked())}span{"I have permission from everyone being recorded."}}
         if !error().is_empty(){div{class:"inline-error",role:"alert",Icon{name:"alert"}"{error}"}}
-        button{class:"button button-primary full-width",disabled:!consent()||busy(),onclick:move |_|{spawn(async move{busy.set(true);error.set(String::new());let meeting_title=if title().trim().is_empty(){"New conversation".into()}else{title()};match post("/meetings",json!({"title":meeting_title,"mode":"in-person","consent":true,"speechModel":settings()["speechModel"],"notesModel":settings()["notesModel"],"liveTranscription":false})).await{Ok(m)=>{let script=format!("return await window.echoRecorder.start({{meeting:{},deviceId:{},startMuted:{}}})",m,serde_json::to_string(&device()).unwrap(),muted());match crate::api::evaluate(&script).await{Ok(_)=>{let latest=get(&format!("/meetings/{}",text(&m,"id"))).await.unwrap_or(m);on_start.call(latest);on_close.call(())},Err(e)=>{let msg=format!("Could not start recording: {e}");let _=patch(&format!("/meetings/{}",text(&m,"id")),json!({"status":"error","error":msg})).await;error.set(msg)}}},Err(e)=>error.set(e)}busy.set(false);});},if busy(){span{class:"spinner"}"Getting ready…"}else{Icon{name:"mic"}"Start recording"}}
-        p{class:"dialog-footnote","No model yet? Record now and transcribe when you’re ready."}
+        ActionButton{kind:ButtonKind::Primary,full_width:true,disabled:!consent()||busy(),onclick:move |_|{spawn(async move{busy.set(true);error.set(String::new());let meeting_title=if title().trim().is_empty(){"New meeting".into()}else{title()};match post("/meetings",json!({"title":meeting_title,"mode":"in-person","consent":true,"speechModel":settings()["speechModel"],"notesModel":settings()["notesModel"],"liveTranscription":false})).await{Ok(m)=>{let script=format!("return await window.echoRecorder.start({{meeting:{},deviceId:{},startMuted:{}}})",m,serde_json::to_string(&device()).unwrap(),muted());match crate::api::evaluate(&script).await{Ok(_)=>{let latest=get(&format!("/meetings/{}",text(&m,"id"))).await.unwrap_or(m);on_start.call(latest);on_close.call(())},Err(e)=>{let msg=format!("Could not start recording: {e}");let _=patch(&format!("/meetings/{}",text(&m,"id")),json!({"status":"error","error":msg})).await;error.set(msg)}}},Err(e)=>error.set(e)}busy.set(false);});},if busy(){span{class:"spinner"}"Getting ready…"}else{Icon{name:"mic"}"Start recording"}}
+
     }}}
 }
 
@@ -352,40 +630,5 @@ fn RecorderBar(
     let muted = state["muted"].as_bool().unwrap_or(false);
     let elapsed = time(state["elapsed"].as_f64().unwrap_or(0.));
     let level = state["level"].as_f64().unwrap_or(0.);
-    rsx! {div{class:"recorder-bar",role:"region","aria-label":"Active recording controls",div{class:"recording-status",span{class:if status=="recording"{"record-dot pulse"}else{"record-dot"}}div{strong{if status=="paused"{"Recording paused"}else if status=="saving"{"Saving your conversation…"}else if status=="error"{"Recording needs attention"}else{"Listening to your conversation"}}button{onclick:move |_|on_open.call(()),"View active meeting"}}}div{class:"recorder-level","aria-label":"Microphone audio level",for i in 0..12{span{class:if level*12.>i as f64{"lit"}else{""},style:format!("height:{}px",8+(i%5)*3)}}}strong{class:"recorder-time","{elapsed}"}button{class:"icon-button",disabled:status=="saving"||status=="error","aria-label":if muted{"Unmute capture"}else{"Mute capture"},onclick:move |_|{let _=document::eval("window.echoRecorder.toggleMute()");},Icon{name:if muted{"mute"}else{"mic"}}}button{class:"icon-button",disabled:status=="saving"||status=="error","aria-label":if status=="paused"{"Resume recording"}else{"Pause recording"},onclick:move |_|{let _=document::eval(if status=="paused"{"window.echoRecorder.resume()"}else{"window.echoRecorder.pause()"});},Icon{name:if text(&state,"status")=="paused"{"play"}else{"pause"}}}button{class:"button button-record-stop",disabled:text(&state,"status")=="saving",onclick:move |_|{spawn(async move{let script=if text(&recorder(),"status")=="error"{"return await window.echoRecorder.retry()"}else{"return await window.echoRecorder.stop()"};if let Err(e)=crate::api::evaluate(script).await{notify.call(format!("Could not finish saving: {e}. Keep this tab open and retry."));}});},Icon{name:"stop",size:15}if text(&state,"status")=="error"{"Retry save"}else{"Stop & save"}}if let Some(error)=state["error"].as_str(){p{class:"recorder-error","{error}"}}}}
-}
-
-#[component]
-/// Poll a meeting guest's state and expose stop and finalized-audio import actions.
-fn BotStatus(mut meeting: Signal<Value>, notify: EventHandler<String>) -> Element {
-    let mut status = use_signal(|| Value::Null);
-    let mut busy = use_signal(|| false);
-    let id = text(&meeting(), "id");
-    use_future(move || async move {
-        let id = text(&meeting(), "id");
-        loop {
-            match get(&format!("/integrations/bot?meetingId={id}")).await {
-                Ok(v) => {
-                    let state = text(&v, "status");
-                    status.set(v);
-                    if state == "recording" {
-                        if let Ok(m) = get(&format!("/meetings/{id}")).await {
-                            meeting.set(m);
-                        }
-                    }
-                    if state == "completed" || state == "failed" {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    status.set(json!({"status":"Needs attention","detail":e}));
-                    break;
-                }
-            }
-            let _ =
-                document::eval("await new Promise(resolve=>setTimeout(resolve,5000));return true;")
-                    .await;
-        }
-    });
-    rsx! {div{class:"bot-status panel",Icon{name:"video"}div{strong{"Local meeting participant"}p{if status().is_null(){"Check the runner for admission and recording status."}else{{format!("{} · {}",text(&status(),"status"),text(&status(),"detail"))}}}}button{class:"button button-secondary button-small",disabled:busy(),onclick:{let id=id.clone();move |_|{let id=id.clone();spawn(async move{busy.set(true);match get(&format!("/integrations/bot?meetingId={id}")).await{Ok(v)=>status.set(v),Err(e)=>notify.call(e)}busy.set(false);});}},"Check status"}button{class:"button button-secondary button-small",disabled:busy(),onclick:{let id=id.clone();move |_|{let id=id.clone();spawn(async move{busy.set(true);match api::delete(&format!("/integrations/bot?meetingId={id}")).await{Ok(v)=>{status.set(v);notify.call("Stop requested. Check status, then save the completed recording.".into())},Err(e)=>notify.call(e)}busy.set(false);});}},"Stop bot"}button{class:"button button-primary button-small",disabled:busy(),onclick:move |_|{let id=id.clone();spawn(async move{busy.set(true);match post(&format!("/integrations/bot/import?meetingId={id}"),json!({})).await{Ok(v)=>{meeting.set(v["meeting"].clone());let _=document::eval(&format!("window.dispatchEvent(new CustomEvent('echo-recording-saved',{{detail:{}}}))",v["meeting"]));notify.call("Meeting recording saved locally.".into());},Err(e)=>notify.call(e)}busy.set(false);});},"Save recording"}}}
+    rsx! {div{class:"recorder-bar",role:"region","aria-label":"Active recording controls",div{class:"recording-status",span{class:if status=="recording"{"record-dot pulse"}else{"record-dot"}}div{strong{if status=="paused"{"Recording paused"}else if status=="saving"{"Saving recording…"}else if status=="error"{"Recording interrupted"}else if muted{"Microphone muted"}else{"Recording"}}button{onclick:move |_|on_open.call(()),"View active meeting"}}}div{class:"recorder-level","aria-label":"Microphone audio level",for i in 0..12{span{class:if level*12.>i as f64{"lit"}else{""},style:format!("height:{}px",8+(i%5)*3)}}}strong{class:"recorder-time","{elapsed}"}button{class:"icon-button",disabled:status=="saving"||status=="error","aria-label":if muted{"Unmute capture"}else{"Mute capture"},onclick:move |_|{let _=document::eval("window.echoRecorder.toggleMute()");},Icon{name:if muted{"mute"}else{"mic"}}}button{class:"icon-button",disabled:status=="saving"||status=="error","aria-label":if status=="paused"{"Resume recording"}else{"Pause recording"},onclick:move |_|{let _=document::eval(if status=="paused"{"window.echoRecorder.resume()"}else{"window.echoRecorder.pause()"});},Icon{name:if text(&state,"status")=="paused"{"play"}else{"pause"}}}button{class:"button button-record-stop",disabled:text(&state,"status")=="saving",onclick:move |_|{spawn(async move{let script=if text(&recorder(),"status")=="error"{"return await window.echoRecorder.retry()"}else{"return await window.echoRecorder.stop()"};if let Err(e)=crate::api::evaluate(script).await{notify.call(format!("Could not finish saving: {e}. Keep this tab open and retry."));}});},Icon{name:"stop",size:15}if text(&state,"status")=="error"{"Retry save"}else{"Stop & save"}}if let Some(error)=state["error"].as_str(){p{class:"recorder-error","{error}"}}}}
 }

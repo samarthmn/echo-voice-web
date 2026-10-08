@@ -102,8 +102,8 @@ test('real Rust REST server preserves meeting lifecycle, audio, history, privacy
     const restored = await api(`/meetings/${id}`); assert.equal(restored.transcripts.length, 2); assert.equal(restored.notes.length, 1); assert.equal(restored.moments.length, 1);
     const restoredAudio = await fetch(`${server.base}${track.url}`); assert.deepEqual(Buffer.from(await restoredAudio.arrayBuffer()), Buffer.concat([wav, tail]));
     const storage = await api('/storage'); assert.equal(storage.meetings, 1); assert.ok(storage.bytes > track.bytes); assert.ok(storage.availableBytes > 0); assert.equal(storage.path, directory);
-    const absentRunner = await api('/integrations/status'); assert.equal(absentRunner.runner.configured, true); assert.equal(absentRunner.runner.reachable, false); assert.equal(absentRunner.google.configured, false);
-    await api('/integrations/bot', { method: 'POST', body: { meetingId: id, consent: false, url: 'https://meet.google.com/abc-defg-hij' }, status: 422 });
+    const absentRunner = await api('/integrations/status'); assert.equal(absentRunner.runner, undefined); assert.equal(absentRunner.google.configured, false);
+    const removedBot = await fetch(`${server.base}/api/integrations/bot`, {method:'POST'}); assert.equal(removedBot.status, 405);
     const csrfCallback = await rawGet(`${server.base}/api/integrations/google/callback?code=fake&state=fake`, { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' }); assert.equal(csrfCallback.status, 303); assert.match(csrfCallback.headers.location, /calendar=error/);
     // Exercise the route-specific multipart and archive limits above the 8 MB JSON default.
     const largeMeeting = await api('/meetings', { method: 'POST', body: { title: 'Longer recording', mode: 'import', consent: false }, status: 201 });
@@ -114,6 +114,21 @@ test('real Rust REST server preserves meeting lifecycle, audio, history, privacy
     await api(`/meetings/${id}`, { method: 'DELETE' }); await api(`/meetings/${largeMeeting.id}`, { method: 'DELETE' }); await api(`/vocabulary/${word.id}`, { method: 'DELETE' });
     const importedLarge = await api('/storage/import', { method: 'POST', body: largeBackup }); assert.equal(importedLarge.meetings, 2);
     assert.equal((await api(`/meetings/${largeMeeting.id}`)).tracks[0].bytes, large.length);
+    // A finalized old capture remains recoverable even after an interrupted import already created its track.
+    const oldMeeting = await api('/meetings', {method:'POST',body:{title:'Old finalized capture',mode:'online',consent:true},status:201});
+    await api(`/meetings/${oldMeeting.id}`, {method:'PATCH',body:{status:'interrupted'}});
+    const oldFolder = join(directory,'bot',oldMeeting.id); await mkdir(oldFolder,{recursive:true});
+    const oldWav = wavFixture(); await writeFile(join(oldFolder,'meeting.wav'),oldWav);
+    const partial = new FormData(); partial.append('file',new Blob([oldWav],{type:'audio/wav'}),'meeting.wav'); partial.append('trackId','meeting-bot');partial.append('sequence','0');
+    await api(`/meetings/${oldMeeting.id}/audio`,{method:'POST',body:partial,status:201});
+    await writeFile(join(oldFolder,'session.json'),JSON.stringify({status:'recording',audioAvailable:true,requestId:'old-request'}));
+    await api(`/extensions/legacy-recordings/${oldMeeting.id}/recover`,{method:'POST',body:{},status:409});
+    await writeFile(join(oldFolder,'session.json'),JSON.stringify({status:'completed',audioAvailable:true,requestId:'old-request'}));
+    assert.equal((await api('/extensions/legacy-recordings')).recordings.find(r=>r.meetingId===oldMeeting.id).ready,true);
+    const recoveredOld = await api(`/extensions/legacy-recordings/${oldMeeting.id}/recover`,{method:'POST',body:{}});
+    assert.equal(recoveredOld.meeting.tracks.length,1);assert.equal(recoveredOld.meeting.tracks[0].bytes,oldWav.length);assert.equal(recoveredOld.meeting.status,'saved');
+    const retriedOld = await api(`/extensions/legacy-recordings/${oldMeeting.id}/recover`,{method:'POST',body:{}});assert.deepEqual(retriedOld.meeting.tracks,recoveredOld.meeting.tracks);
+    assert.deepEqual(await readFile(join(oldFolder,'meeting.wav')),oldWav);
     assert.equal((await readFile(join(directory, 'workspace.sqlite'))).subarray(0, 15).toString(), 'SQLite format 3');
   } finally { await stop(server); await rm(directory, { recursive: true, force: true }); }
 });

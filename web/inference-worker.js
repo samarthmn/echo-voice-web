@@ -1,22 +1,23 @@
-import { env, pipeline } from '@huggingface/transformers';
-import { assertModel, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl } from './models.js';
+import { env, pipeline, AutoProcessor, AutoModelForAudioFrameClassification, AutoModelForXVector } from '@huggingface/transformers';
+import { assertModel, speechModelConfig, assertWordTimestampSupport, DEFAULT_SPEECH_MODEL, SPEAKER_MODELS, MODEL_CACHE, MODEL_MANIFEST_CACHE, modelManifestUrl } from './models.js';
+import { diarize, speakerPassages } from './diarization.js';
+import { speechFailureMessage, traceSpeechChunks } from './speech-errors.js';
+import { wasmThreadCount } from './runtime-options.js';
+import { correctWhisperAlignment, validatedWhisperWords } from './whisper-alignment.js';
 
 env.allowLocalModels = false;
 env.useBrowserCache = false;
 env.useCustomCache = true;
 env.backends.onnx.wasm.wasmPaths = '/wasm/';
-env.backends.onnx.wasm.numThreads = 1;
+env.backends.onnx.wasm.numThreads = wasmThreadCount(globalThis.crossOriginIsolated, globalThis.navigator?.hardwareConcurrency);
 env.backends.onnx.wasm.proxy = false;
+const runtime = { threads: env.backends.onnx.wasm.numThreads, isolated: globalThis.crossOriginIsolated === true };
 
-let transcriber = null;
-let loadedModel = '';
-let busy = false;
-let usedFiles = new Set();
-const keyOf = (request) => typeof request === 'string' ? request : request instanceof URL ? request.href : request.url;
+let transcriber = null, loadedModel = '', busy = false, usedFiles = new Set();
+const keyOf = request => typeof request === 'string' ? request : request instanceof URL ? request.href : request.url;
 const originalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = async (request, init) => {
-  const response = await originalFetch(request, init);
-  const key = keyOf(request);
+  const response = await originalFetch(request, init), key = keyOf(request);
   if (response.ok && key.startsWith('https://huggingface.co/')) usedFiles.add(key);
   return response;
 };
@@ -31,53 +32,107 @@ env.customCache = {
     usedFiles.add(keyOf(request));
   },
 };
-
-self.addEventListener('message', async (event) => {
-  const { id, type, modelId, audio } = event.data;
-  const progress = (status, amount, file) => self.postMessage({ id, type: 'progress', progress: { status, progress: amount, file } });
+/** Release the speech session before loading companion models or another job. */
+async function unloadSpeech() {
+  if (transcriber) await transcriber.dispose();
+  transcriber = null; loadedModel = '';
+}
+self.addEventListener('message', async event => {
+  const { id, type, modelId, audio, options = {} } = event.data;
+  if (busy) { self.postMessage({ id, type: 'error', error: 'Wait for the current processing job to finish.' }); return; }
+  busy = true;
+  let runtimeReported = false;
+  const progress = (status, amount, file) => {
+    self.postMessage({ id, type: 'progress', progress: { status, progress: amount, file, ...(!runtimeReported ? { runtime } : {}) } });
+    runtimeReported = true;
+  };
+  const download = ['download', 'download-companions'].includes(type);
+  const live = type === 'transcribe-live';
+  const loadOptions = {
+    device: 'wasm', dtype: 'q8', local_files_only: !download,
+    progress_callback: value => progress(value.status === 'progress' ? 'Downloading model file' : value.status === 'done' ? 'Model file saved' : 'Loading model', value.progress ?? (value.status === 'done' ? 100 : 0), value.file),
+  };
+  let segmentation, embedding, reply;
+  let phase = 'loading the speech model';
   try {
-    if (busy) throw new Error('Another local inference job is running. Wait for it to finish.');
-    busy = true; assertModel(modelId);
-    if (type === 'download' || loadedModel !== modelId || !transcriber) {
-      if (transcriber) { await transcriber.dispose(); transcriber = null; loadedModel = ''; }
-      usedFiles = new Set();
-      // Transformers.js requires allowLocalModels when local_files_only is set.
-      // Successful cache hits are checked before any local URL request.
-      env.allowLocalModels = type !== 'download';
-      progress(type === 'download' ? 'Preparing download' : 'Loading local model', 0);
-      transcriber = await pipeline('automatic-speech-recognition', modelId, {
-        device: 'wasm', dtype: 'q8', local_files_only: type !== 'download',
-        progress_callback: (value) => {
-          const info = value;
-          progress(info.status === 'progress' ? 'Downloading model file' : info.status === 'done' ? 'Model file saved' : 'Loading model', info.progress ?? (info.status === 'done' ? 100 : 0), info.file);
-        },
-      });
-      loadedModel = modelId;
-      if (type === 'download') {
-        if (!usedFiles.size) throw new Error('Model cache could not be verified. Check available browser storage and try again.');
-        const cache = await caches.open(MODEL_CACHE);
-        if (!(await Promise.all([...usedFiles].map(file => cache.match(file)))).every(Boolean)) throw new Error('The browser could not save every model file. Free some browser storage, then download again.');
-        await (await caches.open(MODEL_MANIFEST_CACHE)).put(modelManifestUrl(modelId), new Response(JSON.stringify({ files: [...usedFiles], createdAt: new Date().toISOString() }), { headers: { 'Content-Type': 'application/json' } }));
+    assertModel(modelId);
+    if (!['download', 'transcribe', 'transcribe-live', 'download-companions', 'diarize'].includes(type)) throw new Error('Unsupported speech operation.');
+    if (live && modelId !== DEFAULT_SPEECH_MODEL) throw new Error('Live transcription requires the downloaded Large V3 Turbo model.');
+    if (live && (!audio?.length || audio.length > 20 * 16000)) throw new Error('Live audio must contain at most twenty seconds.');
+    const native = speechModelConfig(modelId).engine === 'native';
+    if (native !== ['download-companions', 'diarize'].includes(type)) throw new Error('This speech model requires its configured local engine.');
+    env.allowLocalModels = !download;
+    usedFiles = new Set();
+    let words = [];
+    if (!native) {
+      if (download || loadedModel !== modelId || !transcriber) {
+        await unloadSpeech();
+        progress(download ? 'Preparing download' : 'Loading speech model', 0);
+        const config = speechModelConfig(modelId);
+        transcriber = await pipeline('automatic-speech-recognition', config.checkpoint, { ...loadOptions, dtype: config.dtype ?? 'q8', revision: config.revision });
+        assertWordTimestampSupport(transcriber.model.sessions.decoder_model_merged.outputNames);
+        correctWhisperAlignment(transcriber.model);
+        loadedModel = modelId;
       }
+      if (!download) {
+        if (!audio?.length) throw new Error('No decoded audio was received.');
+        progress('Transcribing on this device', 0);
+        phase = 'transcribing audio and aligning word timestamps';
+        // Final jobs own a fresh worker. A warm live model must not accumulate
+        // progress wrappers around generate/session.run on every window.
+        if (!live) traceSpeechChunks(transcriber.model, audio.length,
+          value => self.postMessage({ id, type: 'progress', progress: value }),
+          next => { phase = next; });
+        const output = await transcriber(audio, {
+          return_timestamps: 'word', chunk_length_s: 29, stride_length_s: 5,
+          ...(options.language && options.language !== 'auto' ? { language: options.language, task: 'transcribe' } : {}),
+        });
+        const result = Array.isArray(output) ? output[0] : output;
+        words = validatedWhisperWords(result, audio.length / 16000);
+      }
+    } else if (!download) {
+      if (!audio?.length || !Array.isArray(options.words)) throw new Error('The local speech engine did not return word timestamps.');
+      words = options.words;
     }
-    if (type === 'download') {
-      progress('Ready for offline transcription', 100);
-      self.postMessage({ id, type: 'result' }); return;
+    if (live) {
+      progress('Live transcript ready', 100);
+      reply = { id, type: 'result', result: { words, duration: audio.length / 16000, model: modelId, modelRevision: speechModelConfig(modelId).revision } };
+      return;
     }
-    if (!audio?.length) throw new Error('No decoded audio was received.');
-    progress('Transcribing on this device', 0);
-    const output = await transcriber(audio, {
-      return_timestamps: true, chunk_length_s: 30, stride_length_s: 5,
-    });
-    const result = Array.isArray(output) ? output[0] : output;
+    // Release browser speech before loading the two smaller speaker models.
+    await unloadSpeech();
+    phase = 'loading speaker recognition';
+    progress(download ? 'Preparing speaker recognition' : 'Loading speaker recognition', 0);
+    segmentation = await AutoModelForAudioFrameClassification.from_pretrained(SPEAKER_MODELS.segmentation, { ...loadOptions, dtype: 'fp32' });
+    const segmentProcessor = await AutoProcessor.from_pretrained(SPEAKER_MODELS.segmentation, loadOptions);
+    embedding = await AutoModelForXVector.from_pretrained(SPEAKER_MODELS.embedding, loadOptions);
+    const embedProcessor = await AutoProcessor.from_pretrained(SPEAKER_MODELS.embedding, loadOptions);
+    if (download) {
+      phase = 'verifying the downloaded model cache';
+      if (!usedFiles.size) throw new Error('Model cache could not be verified. Check browser storage and retry.');
+      const cache = await caches.open(MODEL_CACHE);
+      if (!(await Promise.all([...usedFiles].map(file => cache.match(file)))).every(Boolean)) throw new Error('The browser could not save every model file. Free storage and retry.');
+      const config = speechModelConfig(modelId);
+      await (await caches.open(MODEL_MANIFEST_CACHE)).put(modelManifestUrl(modelId), new Response(JSON.stringify({ files: [...usedFiles], ...(native ? { engine: 'native-companions-v1', speakerModels: SPEAKER_MODELS } : { checkpoint: config.checkpoint, revision: config.revision, precision: config.precision ?? 'q8', wordTimestamps: true }), createdAt: new Date().toISOString() }), { headers: { 'Content-Type': 'application/json' } }));
+      progress('Ready for offline transcription and speaker recognition', 100);
+      reply = { id, type: 'result' }; return;
+    }
+    const speakers = options.speakers || [];
+    phase = 'recognizing speakers';
+    const turns = words.length ? await diarize(audio, segmentation, segmentProcessor, embedding, embedProcessor, speakers, progress) : [];
     const duration = audio.length / 16000;
-    const passages = (result.chunks || [{ text: result.text, timestamp: [0, duration] }]).filter(chunk => chunk.text.trim()).map(chunk => ({ id: crypto.randomUUID(), text: chunk.text.trim(), start: Math.max(0, chunk.timestamp[0] ?? 0), end: Math.min(duration, chunk.timestamp[1] ?? duration), speaker: 'Speaker' }));
+    const passages = speakerPassages(words, turns, duration);
     progress('Transcript ready', 100);
-    self.postMessage({ id, type: 'result', result: { passages, model: modelId, duration } });
+    reply = { id, type: 'result', result: { passages, speakers, model: modelId, duration } };
   } catch (error) {
-    let message = error instanceof Error ? error.message : 'Local speech processing failed.';
-    if (type === 'download' && /failed to fetch|networkerror|network request|fetch failed/i.test(message)) message = 'The model download could not reach Hugging Face. Check your internet connection or network restrictions, then retry. Completed files are kept for the retry.';
-    if (/quota/i.test(message)) message = 'The browser has run out of model storage. Remove an unused model or free disk space, then retry.';
-    self.postMessage({ id, type: 'error', error: message });
-  } finally { busy = false; }
+    const modelName = (() => { try { return speechModelConfig(modelId).name; } catch { return 'Speech model'; } })();
+    const message = speechFailureMessage(error, { download, phase, modelName });
+    reply = { id, type: 'error', error: message };
+  } finally {
+    if (!live || reply?.type !== 'result') await unloadSpeech().catch(() => {});
+    await segmentation?.dispose().catch(() => {});
+    await embedding?.dispose().catch(() => {});
+    busy = false;
+    if (reply) self.postMessage(reply);
+  }
 });

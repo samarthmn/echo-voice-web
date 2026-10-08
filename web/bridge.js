@@ -1,12 +1,20 @@
+import './theme.js';
+import { assertModel, resolveSpeechModel } from './models.js';
+import { automaticTranscriptionEligible } from './automatic-transcription.js';
 import './inference.js';
+import './notes.js';
+import './files.js';
 import './recorder.js';
 import './accessibility.js';
+import './extension-workspace.js';
 
 const IMPORT_CHUNK_BYTES = 8 * 1024 * 1024;
 const imports = new Map();
 const startingImports = new Map();
 const autoHandled = new Set();
 let automaticQueue = Promise.resolve();
+let automaticGeneration = 0;
+const pendingAutomatic = new Set();
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
 /** Call the local API while preserving meaningful JSON or HTTP errors. */
@@ -143,26 +151,40 @@ export async function upload(input) {
 
 /** Start local transcription only when the configured model is downloaded and enabled. */
 export async function autoTranscribeMeeting(meeting) {
-  if (!meeting?.id || !meeting.tracks?.length || !['saved', 'interrupted', 'ready'].includes(meeting.status)) return;
+  if (!automaticTranscriptionEligible(meeting)) return;
   const key = `${meeting.id}:${meeting.tracks.map(track => `${track.id}:${track.bytes}`).join(',')}`;
   if (autoHandled.has(key) || meeting.transcripts?.length) return;
   autoHandled.add(key);
+  const token=automaticGeneration;pendingAutomatic.add(meeting.id);
   const skipped = (reason, message) => emit('echo-auto-transcription-skipped', { meetingId: meeting.id, reason, message });
   try {
     const settings = await request('/settings');
     if (!settings.autoTranscribe) return;
-    const model = meeting.speechModel || settings.speechModel;
+    const model = resolveSpeechModel(meeting.speechModel || settings.speechModel);
+    assertModel(model);
     if (!(await window.echoInference.getDownloadedModels()).includes(model)) {
       skipped('model-not-downloaded', 'Recording saved. Download its speech model in Models, then choose Transcribe.');
       return;
     }
-    const job = automaticQueue.catch(() => {}).then(() => window.echoInference.transcribeMeeting(meeting.id, model));
+    const job = automaticQueue.catch(() => {}).then(async () => {
+      if(token!==automaticGeneration) return;
+      const current=await request(`/meetings/${encodeURIComponent(meeting.id)}`);
+      if(token!==automaticGeneration || !automaticTranscriptionEligible(current)) return;
+      return window.echoInference.transcribeMeeting(meeting.id, model, undefined, {automatic:true});
+    });
     automaticQueue = job;
     await job;
   } catch (error) { skipped('processing-unavailable', `Recording saved. ${error.message}`); }
+  finally {pendingAutomatic.delete(meeting.id);}
 }
 
+window.addEventListener('echo-transcription-cancelled',()=>{
+  automaticGeneration++;
+  void window.echoInference.suppressAutomaticTranscription([...pendingAutomatic]);
+});
+
 window.addEventListener('echo-recording-saved', event => { void autoTranscribeMeeting(event.detail); });
+window.addEventListener('echo-extension-import-ready', event => { void autoTranscribeMeeting(event.detail); });
 window.addEventListener('beforeunload', event => { if (imports.size || startingImports.size) { event.preventDefault(); event.returnValue = ''; } });
 window.echo = {
   upload, autoTranscribeMeeting,
@@ -175,3 +197,6 @@ window.echo = {
   },
   date(value, options = { month: 'short', day: 'numeric' }) { return new Date(value).toLocaleDateString(undefined, options); },
 };
+
+import {installExtensionLive} from './extension-live.js';
+installExtensionLive();

@@ -1,15 +1,17 @@
 /**
  * Real REST + Dioxus review checks, using an isolated running server.
- * ECHO_DATA_DIR=/tmp/echo-review-data ECHO_BIND=127.0.0.1:3013 target/debug/echo-server
+ * ECHO_DATA_DIR="$PWD/tmp/echo-review-data" ECHO_BIND=127.0.0.1:3013 target/debug/echo-server
  * ECHO_TEST_URL=http://127.0.0.1:3013 node tests/review.e2e.mjs
  * Build current WASM/assets first. This test creates and removes only its own fixture.
  */
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 
 const base = process.env.ECHO_TEST_URL || 'http://127.0.0.1:3013';
-const artifacts = process.env.ECHO_TEST_ARTIFACTS || '/tmp/echo-review-e2e';
+const artifacts = process.env.ECHO_TEST_ARTIFACTS || path.resolve('tmp/echo-review-e2e');
 const request = async (path, method = 'GET', body) => {
   const response = await fetch(`${base}/api${path}`, { method, headers: body instanceof FormData ? undefined : body ? { 'Content-Type': 'application/json' } : undefined, body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined });
   const data = await response.json();
@@ -37,18 +39,19 @@ try {
   form.append('file', new Blob([wav(70)], { type: 'audio/wav' }), 'review-fixture.wav');
   form.append('trackId', 'review-fixture-track'); form.append('sequence', '0'); form.append('mimeType', 'audio/wav'); form.append('label', 'Original test recording');
   await request(`/meetings/${meeting.id}/audio`, 'POST', form);
-  await request(`/meetings/${meeting.id}`, 'PATCH', { duration: 70, status: 'saved' });
+  await request(`/meetings/${meeting.id}`, 'PATCH', { duration: 70, status: 'saved', speechModel: 'onnx-community/whisper-base' });
   const passages = Array.from({ length: 65 }, (_, index) => ({ id: `review-p${index + 1}`, start: index, end: index + 1, speaker: index % 2 ? 'Speaker 2' : 'Speaker 1', text: index === 0 ? 'Project Aurora has old wording to correct.' : index === 64 ? 'The final evidence appears after the initial transcript section.' : `Review passage ${index + 1}: the team discussed the release plan.` }));
   meeting = await request(`/meetings/${meeting.id}/transcripts`, 'POST', { model: 'test-fixture', passages, vocabulary: [], label: 'Original fixture transcript' });
   const originalTranscript = meeting.activeTranscriptId;
   meeting = await request(`/meetings/${meeting.id}/notes`, 'POST', { model: 'test-fixture', transcriptVersionId: originalTranscript, summary: [{ id: 'summary-review', text: 'The release plan is ready for review.', passageIds: ['review-p65'] }], decisions: [{ id: 'decision-review', text: 'Review the release plan together.', passageIds: ['review-p2'] }], actions: [{ id: 'action-review', text: 'Prepare the rollout checklist.', owner: 'Speaker 1', dueDate: '2026-10-09', passageIds: ['review-p3'] }] });
 
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-  page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  page = await context.newPage();
   page.on('pageerror', error => pageErrors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.goto(base, { waitUntil: 'networkidle' });
-  await expect(page.getByRole('heading', { name: 'Good conversations start here.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
   await page.getByRole('button', { name: new RegExp(meetingTitle) }).first().click();
   await expect(page.getByRole('heading', { name: meetingTitle, exact: true })).toBeVisible();
   await expect(page.locator('.review-tab[aria-current="page"]')).toHaveText('Notes');
@@ -71,6 +74,27 @@ try {
   await expect(page.locator('#passage-review-p65')).toBeVisible();
   await expect(page.locator('#passage-review-p65')).toHaveClass(/review-passage-selected/);
   await expect.poll(() => page.locator('#review-audio').evaluate(audio => Math.round(audio.currentTime))).toBe(64);
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => window.echoTheme.set(theme), theme);
+    assert.ok(await page.locator('#passage-review-p65').evaluate(passage => {
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--surface)'; passage.append(probe);
+      const distinct = getComputedStyle(passage).backgroundColor !== getComputedStyle(probe).backgroundColor;
+      probe.remove(); return distinct;
+    }), theme + ' selected passage has a distinct background');
+    const button = page.getByRole('button', { name: 'Bookmark current playback time', exact: true });
+    await page.keyboard.press('Tab');
+    await button.focus();
+    assert.ok(await button.evaluate(element => {
+      const style = getComputedStyle(element);
+      const probe = document.createElement('div');
+      probe.style.color = 'var(--focus)'; element.append(probe);
+      const visible = style.outlineStyle === 'solid' && parseFloat(style.outlineWidth) >= 2
+        && style.outlineColor === getComputedStyle(probe).color;
+      probe.remove(); return visible;
+    }), theme + ' keyboard focus is visible');
+    await page.screenshot({ path: artifacts + '/transcript-' + theme + '.png', fullPage: true });
+  }
 
   // Corrections create versions and preserve the original evidence IDs.
   await page.getByRole('textbox', { name: 'Search transcript' }).fill('old wording');
@@ -150,6 +174,11 @@ try {
     return rect.left >= 0 && rect.right <= innerWidth && rect.height >= 44;
   })), 'Every mobile review tab must be fully visible with a comfortable touch target');
   await page.locator('.review-tab').filter({ hasText: 'Details' }).click();
+  await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeDisabled();
+  await page.getByRole('combobox', { name: /^Speech recognition/ }).selectOption('onnx-community/whisper-large-v3');
+  await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeEnabled();
+  await page.getByRole('combobox', { name: /^Speech recognition/ }).selectOption('onnx-community/whisper-large-v3-turbo');
+  await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeDisabled();
   const transcriptHistory = page.locator('.review-detail-card').filter({ has: page.getByRole('heading', { name: /Transcript history/ }) });
   await transcriptHistory.getByRole('button', { name: 'Restore', exact: true }).last().click();
   await expect.poll(async () => (await request(`/meetings/${meeting.id}`)).activeTranscriptId).toBe(originalTranscript);
@@ -159,12 +188,17 @@ try {
   const deleteDialog = page.getByRole('dialog', { name: 'Delete this meeting?' });
   await expect(deleteDialog).toBeVisible();
   await expect(deleteDialog.getByRole('button', { name: 'Keep meeting', exact: true })).toBeFocused();
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => window.echoTheme.set(theme), theme);
+    const audit = await new AxeBuilder({ page }).include('#review-delete-dialog').withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    assert.deepEqual(audit.violations.map(v => ({ id: v.id, nodes: v.nodes.map(n => n.target) })), [], theme + ' delete dialog accessibility');
+  }
   await page.keyboard.press('Escape');
   await expect(deleteDialog).not.toBeVisible();
   assert.equal((await request(`/meetings/${meeting.id}`)).id, meeting.id);
   await page.getByRole('button', { name: 'Delete meeting', exact: true }).click();
   await deleteDialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Every conversation, remembered.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All meetings', exact: true })).toBeVisible();
   assert.equal((await fetch(`${base}/api/meetings/${meeting.id}`)).status, 404);
   assert.deepEqual(pageErrors, [], `Browser runtime errors: ${pageErrors.join('\n')}`);
   assert.deepEqual(consoleErrors, [], `Browser console errors: ${consoleErrors.join('\n')}`);

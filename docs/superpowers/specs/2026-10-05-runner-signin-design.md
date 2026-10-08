@@ -1,0 +1,13 @@
+# Saved Google Meet runner session
+
+> Historical design, superseded by the [browser extension design](2026-10-05-browser-extension.md). The meeting runner was removed; current recording uses the user's existing meeting tab. See [installation](../../browser-extension.md) and [migration](../../extension-migration.md).
+
+The approved product flow connects Calendar, signs into the same account in a separate local runner browser, saves that session for future meetings, and exposes connection management in Echo. Live testing is restricted to sublimeinnovationtechnologies@gmail.com. Camera and microphone remain denied throughout login and recording.
+
+Calendar OAuth identifies the expected account but does not authenticate Chromium. A private Chromium profile under the active library's credentials directory stores the runner session. It is excluded from backups and Git. Echo never imports the user's everyday browser profile or handles Calendar tokens as Meet cookies.
+
+The Calendar runner panel distinguishes runtime availability, signed out, signing in, account mismatch, saved session, and expired session. Sign in opens an Echo dialog showing the runner browser; the user completes Google's login directly. Save session verifies the active Meet account exactly matches Calendar before certifying the profile. Sign out removes this dedicated session. A saved session is checked again before each join; missing, ambiguous, mismatched, or expired identity fails closed. An authenticated participant uses the Google account's identity; Echo must not promise a separate "Echo Voice - Recording" display name, and participant recording consent remains required.
+
+Docker runs Chromium on a private virtual display. Screenshots and narrowly validated input events travel through the existing authenticated local runner API and Echo's same-origin proxy. No new public port, arbitrary script execution endpoint, browser-profile export, or input/screenshot logging is introduced. The login dialog scales to mobile and desktop, supports keyboard interaction, cancels on close, and does not run concurrently with recording. A per-profile file lock prevents a second process from opening the same profile. Login sessions use random IDs, bounded queues and timeouts; closing a tab cannot leave an indefinite interactive login browser.
+
+The user's Google sign-in, passkey/2FA, or CAPTCHA is a handoff. Google's automation/browser restrictions remain authoritative; no security-warning bypass or automation concealment is part of this feature. Successful live admission and audio capture must be qualified separately from local transport tests.

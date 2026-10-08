@@ -1,0 +1,281 @@
+{
+  "source": "tests/fixtures/ami/ES2002a-60-210.wav",
+  "qualification": "Real Large V3 result persisted after cancel/retry, navigation, reload, and cancellation of regeneration. Speaker grouping is approximate; this does not score speaker identity or word accuracy.",
+  "meeting": {
+    "activeTranscriptId": "1ae495ae-a361-49fa-b564-0749971a82dd",
+    "consent": true,
+    "createdAt": "2026-10-05T04:51:32.235Z",
+    "duration": 150,
+    "error": "Local processing was cancelled. Your saved audio is unchanged.",
+    "gaps": [],
+    "id": "9e68c6d7-4f6c-4101-8f8d-bad63e475b2f",
+    "liveTranscription": false,
+    "mode": "import",
+    "moments": [],
+    "notes": [],
+    "notesModel": "qwen2.5:3b",
+    "speechModel": "onnx-community/whisper-large-v3",
+    "status": "ready",
+    "title": "ES2002a-60-210",
+    "tracks": [
+      {
+        "bytes": 4800044,
+        "id": "6f93bbc6-d51b-4a92-b2de-3f0cddc0db24",
+        "label": "Original recording",
+        "mimeType": "audio/wav",
+        "url": "/api/meetings/9e68c6d7-4f6c-4101-8f8d-bad63e475b2f/audio/6f93bbc6-d51b-4a92-b2de-3f0cddc0db24"
+      }
+    ],
+    "transcripts": [
+      {
+        "createdAt": "2026-10-05T04:53:17.187Z",
+        "id": "1ae495ae-a361-49fa-b564-0749971a82dd",
+        "model": "onnx-community/whisper-large-v3",
+        "passages": [
+          {
+            "end": 5.06,
+            "id": "4524132b-e4d3-463c-a819-a9ca08c2ac2b",
+            "speaker": "Speaker 1",
+            "start": 0,
+            "text": "And this is just what we're",
+            "uncertain": false
+          },
+          {
+            "end": 5.06,
+            "id": "bbabf028-67ac-4fd8-a4e0-50754b05bdb5",
+            "speaker": "Unknown speaker",
+            "start": 5.06,
+            "text": "going",
+            "uncertain": true
+          },
+          {
+            "end": 17.22,
+            "id": "7b723985-fad7-44ca-a3b7-efc9bcee7f99",
+            "speaker": "Speaker 1",
+            "start": 5.06,
+            "text": "to be doing over the next 25 minutes. So first of all, just to kind of make sure that we all know each other, I'm Laura, and I'm the project manager. Great. Do you want to introduce yourself again?",
+            "uncertain": false
+          },
+          {
+            "end": 20.42,
+            "id": "af291b15-fdf3-4a2e-9fd1-4e85d3f7dc3f",
+            "speaker": "Speaker 2",
+            "start": 17.4,
+            "text": "Hi, I'm David, and I'm supposed to be an industrial designer.",
+            "uncertain": false
+          },
+          {
+            "end": 22.1,
+            "id": "f8914aa5-7b7c-427a-9673-60d61fb9877a",
+            "speaker": "Speaker 1",
+            "start": 20.7,
+            "text": "Okay. And",
+            "uncertain": true
+          },
+          {
+            "end": 28.34,
+            "id": "f0c4e340-0dfb-4da8-8005-0e363bc47af3",
+            "speaker": "Speaker 3",
+            "start": 22.1,
+            "text": "I'm Andrew, Andrew and I'm a marketing expert. - I'm Craig and I'm user interface.",
+            "uncertain": false
+          },
+          {
+            "end": 29.44,
+            "id": "b8914403-b4e6-43c2-a2b4-ee45475ec949",
+            "speaker": "Speaker 1",
+            "start": 28.72,
+            "text": "- Great,",
+            "uncertain": true
+          },
+          {
+            "end": 41.58,
+            "id": "fd470516-45cf-48aa-816a-fc3b95080e78",
+            "speaker": "Speaker 1",
+            "start": 29.7,
+            "text": "okay. So we're designing a new remote control and, oh, I have to record, he's here actually. So that's David, Andrew and Craig, isn't it?",
+            "uncertain": false
+          },
+          {
+            "end": 44.94,
+            "id": "9abcac7c-7037-4faf-b6e2-9c0b476176ca",
+            "speaker": "Speaker 1",
+            "start": 41.7,
+            "text": "And",
+            "uncertain": true
+          },
+          {
+            "end": 45.96,
+            "id": "f2267651-7d80-41fc-9dd2-f53669b82944",
+            "speaker": "Speaker 1",
+            "start": 44.94,
+            "text": "you all arrived on time.",
+            "uncertain": false
+          },
+          {
+            "end": 49.82,
+            "id": "57c79872-3161-4bb5-ab93-1cb3edcc5273",
+            "speaker": "Speaker 1",
+            "start": 46.78,
+            "text": "Yeah,",
+            "uncertain": true
+          },
+          {
+            "end": 71.94,
+            "id": "702f2366-05ac-4631-be20-2769b7fe99ac",
+            "speaker": "Speaker 1",
+            "start": 49.82,
+            "text": "so design and remote control, as you can see, it's supposed to be original, trendy and user-friendly. So that's kind of our brief. And so there are three different stages to the design. I'm not really sure what you guys have already received in your emails. What did you get?",
+            "uncertain": false
+          },
+          {
+            "end": 73.14,
+            "id": "ad5a9c28-5366-4746-8364-e8f3ab2944cb",
+            "speaker": "Unknown speaker",
+            "start": 72.36,
+            "text": "I",
+            "uncertain": true
+          },
+          {
+            "end": 77.26,
+            "id": "4075bd4c-fc7a-4b69-afab-1c44a52bb62f",
+            "speaker": "Speaker 4",
+            "start": 73.14,
+            "text": "just got the project announcement. Yeah,",
+            "uncertain": false
+          },
+          {
+            "end": 80.98,
+            "id": "6bca8e91-a16d-4df2-a26e-02f155ad6f97",
+            "speaker": "Unknown speaker",
+            "start": 79.68,
+            "text": "that's... Is that what everybody got?",
+            "uncertain": true
+          },
+          {
+            "end": 81.64,
+            "id": "432d1e9c-9f2c-47df-8cf8-3b9f80571b8d",
+            "speaker": "Speaker 1",
+            "start": 81.2,
+            "text": "Okay.",
+            "uncertain": true
+          },
+          {
+            "end": 84.64,
+            "id": "8648beb5-1be2-4a96-a7d2-0e6e6f39416e",
+            "speaker": "Speaker 1",
+            "start": 81.82,
+            "text": "So we're",
+            "uncertain": false
+          },
+          {
+            "end": 84.64,
+            "id": "2c30055c-9e91-4d76-bdce-567060090909",
+            "speaker": "Unknown speaker",
+            "start": 84.64,
+            "text": "going",
+            "uncertain": true
+          },
+          {
+            "end": 90.8,
+            "id": "dcb8dacf-ee65-406c-b224-367718e6209c",
+            "speaker": "Speaker 1",
+            "start": 84.64,
+            "text": "to have individual work and then a meeting about it and repeat that process three times.",
+            "uncertain": false
+          },
+          {
+            "end": 94.5,
+            "id": "711dcba1-fe3b-4ebb-bdde-c222376aafd4",
+            "speaker": "Speaker 1",
+            "start": 92.2,
+            "text": "And",
+            "uncertain": true
+          },
+          {
+            "end": 106.64,
+            "id": "50f2331a-45fa-4827-bbe4-1d902dc53834",
+            "speaker": "Speaker 1",
+            "start": 94.5,
+            "text": "at this point, we get to try out the whiteboard over there. So you get to draw your favorite animal and sum up your favorite characteristics of it. So who would like to go",
+            "uncertain": false
+          },
+          {
+            "end": 107.02,
+            "id": "554d07b4-7480-491d-83f4-c8b5a3abccac",
+            "speaker": "Speaker 1",
+            "start": 106.64,
+            "text": "first? I",
+            "uncertain": true
+          },
+          {
+            "end": 107.02,
+            "id": "6c7acc14-9379-4366-8a22-de4b4e04742f",
+            "speaker": "Unknown speaker",
+            "start": 107.02,
+            "text": "will",
+            "uncertain": true
+          },
+          {
+            "end": 107.82,
+            "id": "237886e0-f106-4e4c-804b-16fa6e428789",
+            "speaker": "Speaker 1",
+            "start": 107.02,
+            "text": "go. Very",
+            "uncertain": true
+          },
+          {
+            "end": 108.16,
+            "id": "e3c148d7-49e3-4613-9b49-8a30711df172",
+            "speaker": "Speaker 1",
+            "start": 107.82,
+            "text": "good.",
+            "uncertain": false
+          },
+          {
+            "end": 114.2,
+            "id": "b84f7635-a7f5-42a3-a5be-c09c6f86f9e3",
+            "speaker": "Speaker 1",
+            "start": 108.46,
+            "text": "All",
+            "uncertain": true
+          },
+          {
+            "end": 116.22,
+            "id": "b4fa853a-af2e-4fcd-8b1e-b660f6242bb5",
+            "speaker": "Speaker 5",
+            "start": 114.2,
+            "text": "right. So",
+            "uncertain": false
+          },
+          {
+            "end": 142.84,
+            "id": "bef69732-fd6e-4417-817e-42c058bfb71f",
+            "speaker": "Speaker 5",
+            "start": 116.22,
+            "text": "this one here,",
+            "uncertain": true
+          },
+          {
+            "end": 142.84,
+            "id": "bd235885-dc98-4771-b5ec-306741ffaf27",
+            "speaker": "Unknown speaker",
+            "start": 142.84,
+            "text": "right? Mm-hmm. Okay. Very nice. Alright, my favorite animal is like...",
+            "uncertain": true
+          },
+          {
+            "end": 149.94,
+            "id": "34bfddb8-22ec-477e-94e0-c2088bea6a74",
+            "speaker": "Unknown speaker",
+            "start": 149.94,
+            "text": "A beagle.",
+            "uncertain": true
+          }
+        ],
+        "vocabulary": []
+      }
+    ],
+    "updatedAt": "2026-10-05T04:56:06.177Z"
+  }
+}

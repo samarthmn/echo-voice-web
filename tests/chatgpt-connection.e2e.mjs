@@ -7,7 +7,6 @@
  */
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
@@ -16,7 +15,7 @@ assert.ok(process.env.ECHO_TEST_URL, 'Set ECHO_TEST_URL to an isolated temporary
 const base = process.env.ECHO_TEST_URL.replace(/\/$/, '');
 const origin = new URL(base).origin;
 assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(base).hostname), 'Connection tests require a loopback server.');
-const artifacts = process.env.ECHO_CONNECTION_TEST_ARTIFACTS || path.resolve('artifacts/chatgpt-connection');
+const artifacts = process.env.ECHO_CONNECTION_TEST_ARTIFACTS || path.resolve('tmp/chatgpt-connection-e2e');
 const request = async (endpoint, method = 'GET', body) => {
   const response = await fetch(`${base}/api${endpoint}`, {
     method,
@@ -61,7 +60,7 @@ await mkdir(artifacts, { recursive: true });
 try {
   const storage = await request('/storage');
   const dataPath = path.resolve(storage.path);
-  assert.ok(dataPath.startsWith(`${path.resolve(tmpdir())}${path.sep}`) && !dataPath.split(path.sep).includes('.echo-data'), 'Refusing to change settings outside an isolated temporary data directory.');
+  assert.ok(dataPath.startsWith(`${path.resolve('tmp')}${path.sep}`) && !dataPath.split(path.sep).includes('.echo-data'), 'Refusing to change settings outside an isolated temporary data directory.');
   initialSettings = await request('/settings');
   await request('/settings', 'PATCH', { onboardingComplete: true, notesProvider: 'ollama', chatgptModel: '' });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
@@ -128,7 +127,7 @@ try {
   });
   const panel = page.getByRole('region', { name: 'ChatGPT connection', exact: true });
   const signIn = panel.getByRole('button', { name: 'Sign in with ChatGPT', exact: true });
-  const refresh = panel.getByRole('button', { name: 'Refresh ChatGPT connection', exact: true });
+  const refresh = panel.getByRole('button', { name: 'Refresh connection', exact: true });
   const cancel = panel.getByRole('button', { name: 'Cancel sign-in', exact: true });
   const loginLink = panel.getByRole('link', { name: 'Open ChatGPT sign-in', exact: true });
   const model = panel.getByRole('combobox', { name: 'Notes model', exact: true });
@@ -136,8 +135,10 @@ try {
   const count = key => calls.filter(value => value === key).length;
   const openModels = async () => {
     await page.goto(base);
+    await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
     const menu = page.getByRole('button', { name: 'Open navigation', exact: true });
     if (await menu.isVisible()) await menu.click();
+    await expect(page.locator('.sidebar')).toBeVisible();
     await page.locator('.sidebar').getByRole('button', { name: 'Models', exact: true }).click();
     await expect(panel).toBeVisible();
     await expect(refresh).toBeEnabled();
@@ -167,8 +168,8 @@ try {
 
   await openModels();
   await expect(signIn).toBeEnabled();
-  await expect(panel).toContainText('transcript text and speaker labels go to OpenAI');
-  await expect(panel).toContainText('Recording and speech transcription stay on this device.');
+  await expect(panel).toContainText('asks permission to send transcript text and speaker labels to OpenAI');
+  await expect(panel).toContainText('Audio and transcription stay on this device.');
   await expect(panel).toContainText('No API key is required.');
   assert.equal(count('POST /api/chatgpt/login'), 0, 'Opening Models must not start sign-in.');
   assert.deepEqual(settingsWrites, [], 'Opening Models must not change saved preferences.');

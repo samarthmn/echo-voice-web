@@ -55,7 +55,7 @@ If your file manager doesn't have **Open in Terminal**, open the Terminal app, t
 
 Open **[http://localhost:3000](http://localhost:3000)** in Chrome or Chromium. Put the address in the browser's address bar. `localhost` means your own computer.
 
-You should see **“Good conversations start here.”** You can open the labeled sample meeting to explore the interface. Its text is an example; it doesn't have recorded audio.
+You should see **Overview**. You can open the labeled sample meeting to explore the interface. Its text is an example; it doesn't have recorded audio.
 
 ### Close Echo and return later
 
@@ -78,10 +78,10 @@ Already have an audio file? Choose **Upload a recording** on the Overview page i
 
 ## Turn the recording into text
 
-Echo needs a **speech model** to recognize words. This is a set of files you download once. It runs on your computer and is saved in your browser's storage.
+Echo needs a **speech model** to recognize words. This is a set of files you download once. Turbo and speaker detection run in your browser. Full Large V3 uses a native local engine and stores its speech files in Echo's data folder.
 
 1. Open **Models → Speech models**.
-2. For English, choose **Whisper Tiny** and **Download model**. It's about 75 MB. For other languages, choose **Whisper Base**, which is about 145 MB.
+2. Choose **Whisper Large V3 Turbo** (the default, about 1.2 GB including speaker models) or **Whisper Large V3** (about 1.7 GB). Both support multiple languages. Choose **Download model**. If an older download needs word timestamps, choose **Download update**. Large models need substantial free memory and disk space. Full Large V3 also requires Node.js 22 or newer: install it, then run `npm ci --ignore-scripts` in the Echo folder before downloading the model. Turbo does not require Node.js at runtime. See [native engine setup](docs/native-speech.md).
 3. Keep the tab open until you see **Downloaded · ready to use**.
 4. Open **Settings → General**, select that speech model and your recording language, and save your changes.
 5. Return to the saved meeting and choose **Create transcript**.
@@ -89,6 +89,8 @@ Echo needs a **speech model** to recognize words. This is a set of files you dow
 A transcript is the written version of your recording. Check it for mistakes. You can edit the text and speaker labels, then use timestamps to listen to the original audio.
 
 Transcription happens after recording. If automatic transcription is enabled and your selected model is already downloaded, Echo can start it when you save a recording.
+
+Use the sun/moon button in the top bar to switch between light and dark mode. Echo remembers this preference in your browser; until you choose, it follows your system appearance.
 
 ## Create meeting notes
 
@@ -122,13 +124,11 @@ Whichever option you use, check the notes before sharing them. Names, decisions,
 
 ## Connect online meetings
 
-Google Calendar and Google Meet need extra setup. This version doesn't provide a one-click hosted meeting bot.
+The Echo browser extension records the meeting you attend in your existing Brave or Chrome session. It captures call audio and, with microphone permission, your voice while the meeting identifies your microphone as unmuted. It never requests camera access. Google Calendar is optional and read-only; **Open meeting** opens a link without recording it.
 
-The Calendar connection brings your meeting details into Echo. A separate Linux recording program can join a selected Google Meet as a visible guest. The host may need to let it in. After stopping the guest, choose **Save recording** to bring its audio into Echo.
+Follow the [extension installation guide](docs/browser-extension.md). The extension stores recordings in its browser profile even when Echo is closed, then transfers them into your paired local library. Optional live text requires a running Echo workspace with Turbo already downloaded. Final transcription and notes use your existing selected models. No Docker, separate meeting browser or meeting runner is required.
 
-You'll need to [configure Google Calendar](docs/integrations.md#google-calendar-connection) and [set up the meeting recording program](runner/README.md). These steps involve Google developer settings and additional software; ask someone comfortable with those tools to help if needed. Keep both programs running during the meeting.
-
-Zoom, Teams, and unattended scheduled joining aren't available. Echo also doesn't record sound directly from another browser tab in this version.
+Compatibility qualification for each browser, OS and meeting service is tracked separately. An unpacked development package is not a store release. See [qualification and Ubuntu handoff](docs/extension-qualification.md) and [migration and recovery](docs/extension-migration.md).
 
 ## Save a backup and update Echo
 
@@ -218,6 +218,6 @@ The [developer guide](docs/development.md) covers OS prerequisites, configuratio
 
 ## What to expect from this version
 
-Linux with desktop Chromium is the tested environment. Other operating systems, browsers, and real microphone setups need their own checks. Real model downloads and output, ChatGPT account usage, and live Google meeting connections haven't all been verified in this development environment. Try a short complete recording, transcript, and notes flow on your computer before relying on Echo.
+The packaged runtime targets Linux x64. Source builds and bounded recording workflows have also been tested in Brave on macOS, including real Meet tab audio, microphone mute/exclusion, offline transfer recovery and final Turbo transcription. Chrome, Ubuntu meeting capture, Zoom Web and Teams Web still need live qualification. See the [qualification matrix](docs/extension-qualification.md) for the precise boundaries. ChatGPT account usage remains separately unqualified. Try a short complete recording, transcript, and notes flow on your computer before relying on Echo.
 
-Echo is for one local user. Transcripts aren't live, and speaker labels aren't assigned automatically. Audio cleanup, seamless microphone switching, permanent passage/audio redaction, and migration from the desktop app aren't available. Large recordings can take substantial memory and processing time. See the [feature coverage](docs/feature-coverage.md) and [verification record](docs/verification.md) for details.
+Echo is for one local user. Final transcripts and notes remain saved versions; optional extension live text is a provisional draft. Speakers are grouped automatically after transcription. Select a speaker label to rename it throughout that transcript. Overlapping or unclear speech is marked for review. Audio cleanup, seamless in-person microphone switching, permanent passage/audio redaction, and migration from the desktop app aren't available. Large recordings can take substantial memory and processing time. See the [feature coverage](docs/feature-coverage.md) and [verification record](docs/verification.md) for details.

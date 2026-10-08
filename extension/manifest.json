@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Echo Meeting Recorder",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "description": "Record your meeting tab locally and send it to your paired Echo library.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzDwSA0Wnr+xf8y51FpsPUJXJZTjIbyNFLEfSrAS8FNKBGvhpIHE9xKsf73Zv1bM35XiaVIgDlyUGNBVEHKrM+ibTyciLJcN4QvXKN5xZxjxHF/P4v0dct43UVvRZQ8bk2WO70CufH3MNgtdv/kd+/qIoxrTQtKKjLBBtvSNQlCCrFgtoV//wto9zccSgKg2dKJIl8xbfoGiT2kGoKkyhbxkH+knfx638K93wHbtx3/jbHGbNbHRxDp0XeE7CzjHkQsd+aaLbBpSDdqVnawjoiQMfUGpbLLz8878kodvctcxZ7qCnYii1oIv4qN3mdFc96D0oqHCVsZWAmHN7Yhdt/QIDAQAB",
+  "permissions": [
+    "activeTab",
+    "tabCapture",
+    "scripting",
+    "offscreen",
+    "storage",
+    "unlimitedStorage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "http://[::1]/*"
+  ],
+  "optional_host_permissions": [
+    "https://meet.google.com/*",
+    "https://*.zoom.us/*",
+    "https://teams.microsoft.com/*",
+    "https://teams.live.com/*",
+    "https://app.zoom.com/*",
+    "https://teams.cloud.microsoft/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Echo recorder",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "options_page": "setup.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://localhost:* http://127.0.0.1:* http://[::1]:*"
+  }
+}

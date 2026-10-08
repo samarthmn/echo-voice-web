@@ -1,9 +1,12 @@
 mod api;
 mod chatgpt;
 mod config;
+mod extensions;
 mod integrations;
+mod legacy;
 mod notes;
 mod security;
+mod speech;
 mod store;
 use axum::{
     http::{header, HeaderValue},
@@ -28,8 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &std::env::var("ECHO_BIND").unwrap_or_else(|_| config::get().bind.clone()),
     )?;
     store::init()?;
-    config::runner_token(&store::data_dir())?;
-    integrations::recover_bot_starts().await;
+    speech::recover_spools()?;
     let router = Router::new()
         .nest(
             "/api",
@@ -37,6 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .merge(integrations::routes())
                 .merge(notes::routes())
                 .merge(chatgpt::routes())
+                .merge(speech::routes())
+                .merge(extensions::workspace_routes())
+                .merge(legacy::routes())
                 .route(
                     "/demo",
                     axum::routing::get(|| async {
@@ -50,9 +55,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .layer(axum::middleware::from_fn(security::local_access)),
         )
+        .nest("/extension/v1", extensions::extension_routes())
         .fallback_service(
             ServeDir::new("public").not_found_service(ServeFile::new("public/index.html")),
         )
+        .layer(axum::middleware::from_fn(security::browser_isolation))
+        // Fixed asset URLs must revalidate after a local rebuild or packaged update.
+        // API responses already specify no-store in the local-access middleware.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache"),
+        ))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
@@ -70,8 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, router)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
+            speech::shutdown().await;
         })
         .await?;
+    speech::shutdown().await;
     chatgpt::shutdown().await;
     Ok(())
 }

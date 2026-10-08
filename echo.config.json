@@ -2,10 +2,5 @@
   "bind": "127.0.0.1:3000",
   "dataDir": ".echo-data",
   "googleRedirectUri": "http://localhost:3000/api/integrations/google/callback",
-  "codexBinary": null,
-  "runner": {
-    "url": "http://127.0.0.1:8765",
-    "headless": true,
-    "admissionTimeoutSeconds": 300
-  }
+  "codexBinary": null
 }

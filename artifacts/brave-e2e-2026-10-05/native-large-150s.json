@@ -1,0 +1,1768 @@
+{
+  "source": "tests/fixtures/ami/ES2002a-60-210.wav",
+  "model": "onnx-community/whisper-large-v3",
+  "engine": "native CPU; q8; pinned Xenova revision 67bf02d92b7754a1ff82a7f8545f8b8c378b2ef0",
+  "qualification": "Uploaded and started through Brave. Initial run cancelled; this is the successful retry. Text accuracy not scored in this qualification.",
+  "result": {
+    "duration": 150.0,
+    "words": [
+      {
+        "text": " And",
+        "timestamp": [
+          0,
+          2.22
+        ]
+      },
+      {
+        "text": " this",
+        "timestamp": [
+          2.22,
+          3.8
+        ]
+      },
+      {
+        "text": " is",
+        "timestamp": [
+          3.8,
+          4.4
+        ]
+      },
+      {
+        "text": " just",
+        "timestamp": [
+          4.4,
+          4.6
+        ]
+      },
+      {
+        "text": " what",
+        "timestamp": [
+          4.6,
+          4.88
+        ]
+      },
+      {
+        "text": " we're",
+        "timestamp": [
+          4.88,
+          5.06
+        ]
+      },
+      {
+        "text": " going",
+        "timestamp": [
+          5.06,
+          5.06
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          5.06,
+          5.16
+        ]
+      },
+      {
+        "text": " be",
+        "timestamp": [
+          5.16,
+          5.26
+        ]
+      },
+      {
+        "text": " doing",
+        "timestamp": [
+          5.26,
+          5.44
+        ]
+      },
+      {
+        "text": " over",
+        "timestamp": [
+          5.44,
+          5.6
+        ]
+      },
+      {
+        "text": " the",
+        "timestamp": [
+          5.6,
+          5.68
+        ]
+      },
+      {
+        "text": " next",
+        "timestamp": [
+          5.68,
+          5.84
+        ]
+      },
+      {
+        "text": " 25",
+        "timestamp": [
+          5.84,
+          6.12
+        ]
+      },
+      {
+        "text": " minutes.",
+        "timestamp": [
+          6.12,
+          6.6
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          7.02,
+          8.6
+        ]
+      },
+      {
+        "text": " first",
+        "timestamp": [
+          8.6,
+          9.32
+        ]
+      },
+      {
+        "text": " of",
+        "timestamp": [
+          9.32,
+          9.52
+        ]
+      },
+      {
+        "text": " all,",
+        "timestamp": [
+          9.52,
+          9.72
+        ]
+      },
+      {
+        "text": " just",
+        "timestamp": [
+          9.72,
+          9.86
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          9.86,
+          10.08
+        ]
+      },
+      {
+        "text": " kind",
+        "timestamp": [
+          10.08,
+          10.24
+        ]
+      },
+      {
+        "text": " of",
+        "timestamp": [
+          10.24,
+          10.42
+        ]
+      },
+      {
+        "text": " make",
+        "timestamp": [
+          10.42,
+          11.14
+        ]
+      },
+      {
+        "text": " sure",
+        "timestamp": [
+          11.14,
+          11.36
+        ]
+      },
+      {
+        "text": " that",
+        "timestamp": [
+          11.36,
+          11.54
+        ]
+      },
+      {
+        "text": " we",
+        "timestamp": [
+          11.54,
+          11.62
+        ]
+      },
+      {
+        "text": " all",
+        "timestamp": [
+          11.62,
+          11.74
+        ]
+      },
+      {
+        "text": " know",
+        "timestamp": [
+          11.74,
+          11.9
+        ]
+      },
+      {
+        "text": " each",
+        "timestamp": [
+          11.9,
+          12.08
+        ]
+      },
+      {
+        "text": " other,",
+        "timestamp": [
+          12.08,
+          12.34
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          12.52,
+          12.94
+        ]
+      },
+      {
+        "text": " Laura,",
+        "timestamp": [
+          12.94,
+          13.2
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          13.28,
+          13.42
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          13.42,
+          13.56
+        ]
+      },
+      {
+        "text": " the",
+        "timestamp": [
+          13.56,
+          13.66
+        ]
+      },
+      {
+        "text": " project",
+        "timestamp": [
+          13.66,
+          13.88
+        ]
+      },
+      {
+        "text": " manager.",
+        "timestamp": [
+          13.88,
+          14.26
+        ]
+      },
+      {
+        "text": " Great.",
+        "timestamp": [
+          14.66,
+          15.04
+        ]
+      },
+      {
+        "text": " Do",
+        "timestamp": [
+          15.28,
+          16
+        ]
+      },
+      {
+        "text": " you",
+        "timestamp": [
+          16,
+          16.1
+        ]
+      },
+      {
+        "text": " want",
+        "timestamp": [
+          16.1,
+          16.16
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          16.16,
+          16.26
+        ]
+      },
+      {
+        "text": " introduce",
+        "timestamp": [
+          16.26,
+          16.56
+        ]
+      },
+      {
+        "text": " yourself",
+        "timestamp": [
+          16.56,
+          16.94
+        ]
+      },
+      {
+        "text": " again?",
+        "timestamp": [
+          16.94,
+          17.22
+        ]
+      },
+      {
+        "text": " Hi,",
+        "timestamp": [
+          17.4,
+          17.56
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          17.56,
+          17.92
+        ]
+      },
+      {
+        "text": " David,",
+        "timestamp": [
+          17.92,
+          18.34
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          18.5,
+          18.7
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          18.7,
+          18.96
+        ]
+      },
+      {
+        "text": " supposed",
+        "timestamp": [
+          18.96,
+          19.3
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          19.3,
+          19.54
+        ]
+      },
+      {
+        "text": " be",
+        "timestamp": [
+          19.54,
+          19.6
+        ]
+      },
+      {
+        "text": " an",
+        "timestamp": [
+          19.6,
+          19.72
+        ]
+      },
+      {
+        "text": " industrial",
+        "timestamp": [
+          19.72,
+          20.02
+        ]
+      },
+      {
+        "text": " designer.",
+        "timestamp": [
+          20.02,
+          20.42
+        ]
+      },
+      {
+        "text": " Okay.",
+        "timestamp": [
+          20.7,
+          20.98
+        ]
+      },
+      {
+        "text": " And",
+        "timestamp": [
+          21.22,
+          22.1
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          22.1,
+          22.36
+        ]
+      },
+      {
+        "text": " Andrew,",
+        "timestamp": [
+          22.36,
+          22.68
+        ]
+      },
+      {
+        "text": " Andrew",
+        "timestamp": [
+          22.36,
+          22.66
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          22.66,
+          22.9
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          22.9,
+          23.26
+        ]
+      },
+      {
+        "text": " a",
+        "timestamp": [
+          23.26,
+          23.38
+        ]
+      },
+      {
+        "text": " marketing",
+        "timestamp": [
+          23.38,
+          24.14
+        ]
+      },
+      {
+        "text": " expert.",
+        "timestamp": [
+          24.14,
+          26.2
+        ]
+      },
+      {
+        "text": " - I'm",
+        "timestamp": [
+          26.48,
+          27.28
+        ]
+      },
+      {
+        "text": " Craig",
+        "timestamp": [
+          27.28,
+          27.46
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          27.46,
+          27.7
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          27.7,
+          27.86
+        ]
+      },
+      {
+        "text": " user",
+        "timestamp": [
+          27.86,
+          28.06
+        ]
+      },
+      {
+        "text": " interface.",
+        "timestamp": [
+          28.06,
+          28.34
+        ]
+      },
+      {
+        "text": " - Great,",
+        "timestamp": [
+          28.72,
+          29.44
+        ]
+      },
+      {
+        "text": " okay.",
+        "timestamp": [
+          29.7,
+          30.14
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          30.52,
+          32.82
+        ]
+      },
+      {
+        "text": " we're",
+        "timestamp": [
+          32.82,
+          33
+        ]
+      },
+      {
+        "text": " designing",
+        "timestamp": [
+          33,
+          33.36
+        ]
+      },
+      {
+        "text": " a",
+        "timestamp": [
+          33.36,
+          33.52
+        ]
+      },
+      {
+        "text": " new",
+        "timestamp": [
+          33.52,
+          33.58
+        ]
+      },
+      {
+        "text": " remote",
+        "timestamp": [
+          33.58,
+          33.86
+        ]
+      },
+      {
+        "text": " control",
+        "timestamp": [
+          33.86,
+          34.24
+        ]
+      },
+      {
+        "text": " and,",
+        "timestamp": [
+          34.24,
+          35.12
+        ]
+      },
+      {
+        "text": " oh,",
+        "timestamp": [
+          35.2,
+          36.36
+        ]
+      },
+      {
+        "text": " I",
+        "timestamp": [
+          36.5,
+          36.72
+        ]
+      },
+      {
+        "text": " have",
+        "timestamp": [
+          36.72,
+          36.86
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          36.86,
+          36.9
+        ]
+      },
+      {
+        "text": " record,",
+        "timestamp": [
+          36.9,
+          37.2
+        ]
+      },
+      {
+        "text": " he's",
+        "timestamp": [
+          37.32,
+          37.5
+        ]
+      },
+      {
+        "text": " here",
+        "timestamp": [
+          37.5,
+          37.64
+        ]
+      },
+      {
+        "text": " actually.",
+        "timestamp": [
+          37.64,
+          37.94
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          38.22,
+          38.68
+        ]
+      },
+      {
+        "text": " that's",
+        "timestamp": [
+          38.68,
+          39.08
+        ]
+      },
+      {
+        "text": " David,",
+        "timestamp": [
+          39.08,
+          40.38
+        ]
+      },
+      {
+        "text": " Andrew",
+        "timestamp": [
+          40.46,
+          40.76
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          40.76,
+          40.88
+        ]
+      },
+      {
+        "text": " Craig,",
+        "timestamp": [
+          40.88,
+          41.26
+        ]
+      },
+      {
+        "text": " isn't",
+        "timestamp": [
+          41.26,
+          41.46
+        ]
+      },
+      {
+        "text": " it?",
+        "timestamp": [
+          41.46,
+          41.58
+        ]
+      },
+      {
+        "text": " And",
+        "timestamp": [
+          41.7,
+          44.94
+        ]
+      },
+      {
+        "text": " you",
+        "timestamp": [
+          44.94,
+          45.06
+        ]
+      },
+      {
+        "text": " all",
+        "timestamp": [
+          45.06,
+          45.18
+        ]
+      },
+      {
+        "text": " arrived",
+        "timestamp": [
+          45.18,
+          45.48
+        ]
+      },
+      {
+        "text": " on",
+        "timestamp": [
+          45.48,
+          45.68
+        ]
+      },
+      {
+        "text": " time.",
+        "timestamp": [
+          45.68,
+          45.96
+        ]
+      },
+      {
+        "text": " Yeah,",
+        "timestamp": [
+          46.78,
+          49.82
+        ]
+      },
+      {
+        "text": " so",
+        "timestamp": [
+          49.82,
+          49.9
+        ]
+      },
+      {
+        "text": " design",
+        "timestamp": [
+          49.9,
+          50.76
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          50.76,
+          51.02
+        ]
+      },
+      {
+        "text": " remote",
+        "timestamp": [
+          51.02,
+          51.16
+        ]
+      },
+      {
+        "text": " control,",
+        "timestamp": [
+          51.16,
+          51.64
+        ]
+      },
+      {
+        "text": " as",
+        "timestamp": [
+          51.94,
+          52.94
+        ]
+      },
+      {
+        "text": " you",
+        "timestamp": [
+          52.94,
+          53.12
+        ]
+      },
+      {
+        "text": " can",
+        "timestamp": [
+          53.12,
+          53.22
+        ]
+      },
+      {
+        "text": " see,",
+        "timestamp": [
+          53.22,
+          53.36
+        ]
+      },
+      {
+        "text": " it's",
+        "timestamp": [
+          53.4,
+          53.5
+        ]
+      },
+      {
+        "text": " supposed",
+        "timestamp": [
+          53.5,
+          53.64
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          53.64,
+          53.76
+        ]
+      },
+      {
+        "text": " be",
+        "timestamp": [
+          53.76,
+          53.82
+        ]
+      },
+      {
+        "text": " original,",
+        "timestamp": [
+          53.82,
+          54.1
+        ]
+      },
+      {
+        "text": " trendy",
+        "timestamp": [
+          54.26,
+          54.7
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          54.7,
+          54.92
+        ]
+      },
+      {
+        "text": " user",
+        "timestamp": [
+          54.92,
+          55.16
+        ]
+      },
+      {
+        "text": "-friendly.",
+        "timestamp": [
+          55.16,
+          55.56
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          56.02,
+          58.18
+        ]
+      },
+      {
+        "text": " that's",
+        "timestamp": [
+          58.18,
+          58.64
+        ]
+      },
+      {
+        "text": " kind",
+        "timestamp": [
+          58.64,
+          58.78
+        ]
+      },
+      {
+        "text": " of",
+        "timestamp": [
+          58.78,
+          58.98
+        ]
+      },
+      {
+        "text": " our",
+        "timestamp": [
+          58.98,
+          59.12
+        ]
+      },
+      {
+        "text": " brief.",
+        "timestamp": [
+          59.12,
+          59.72
+        ]
+      },
+      {
+        "text": " And",
+        "timestamp": [
+          60,
+          61.7
+        ]
+      },
+      {
+        "text": " so",
+        "timestamp": [
+          61.7,
+          63.4
+        ]
+      },
+      {
+        "text": " there",
+        "timestamp": [
+          63.4,
+          63.62
+        ]
+      },
+      {
+        "text": " are",
+        "timestamp": [
+          63.62,
+          63.76
+        ]
+      },
+      {
+        "text": " three",
+        "timestamp": [
+          63.76,
+          63.98
+        ]
+      },
+      {
+        "text": " different",
+        "timestamp": [
+          63.98,
+          64.26
+        ]
+      },
+      {
+        "text": " stages",
+        "timestamp": [
+          64.26,
+          64.6
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          64.6,
+          64.94
+        ]
+      },
+      {
+        "text": " the",
+        "timestamp": [
+          64.94,
+          65.04
+        ]
+      },
+      {
+        "text": " design.",
+        "timestamp": [
+          65.04,
+          65.44
+        ]
+      },
+      {
+        "text": " I'm",
+        "timestamp": [
+          65.66,
+          66.36
+        ]
+      },
+      {
+        "text": " not",
+        "timestamp": [
+          66.36,
+          66.48
+        ]
+      },
+      {
+        "text": " really",
+        "timestamp": [
+          66.48,
+          66.6
+        ]
+      },
+      {
+        "text": " sure",
+        "timestamp": [
+          66.6,
+          66.8
+        ]
+      },
+      {
+        "text": " what",
+        "timestamp": [
+          66.8,
+          67.06
+        ]
+      },
+      {
+        "text": " you",
+        "timestamp": [
+          67.06,
+          67.5
+        ]
+      },
+      {
+        "text": " guys",
+        "timestamp": [
+          67.5,
+          67.72
+        ]
+      },
+      {
+        "text": " have",
+        "timestamp": [
+          67.72,
+          67.86
+        ]
+      },
+      {
+        "text": " already",
+        "timestamp": [
+          67.86,
+          68.08
+        ]
+      },
+      {
+        "text": " received",
+        "timestamp": [
+          68.08,
+          68.66
+        ]
+      },
+      {
+        "text": " in",
+        "timestamp": [
+          68.66,
+          69.44
+        ]
+      },
+      {
+        "text": " your",
+        "timestamp": [
+          69.44,
+          70.74
+        ]
+      },
+      {
+        "text": " emails.",
+        "timestamp": [
+          70.74,
+          71.06
+        ]
+      },
+      {
+        "text": " What",
+        "timestamp": [
+          71.2,
+          71.42
+        ]
+      },
+      {
+        "text": " did",
+        "timestamp": [
+          71.42,
+          71.56
+        ]
+      },
+      {
+        "text": " you",
+        "timestamp": [
+          71.56,
+          71.72
+        ]
+      },
+      {
+        "text": " get?",
+        "timestamp": [
+          71.72,
+          71.94
+        ]
+      },
+      {
+        "text": " I",
+        "timestamp": [
+          72.36,
+          73.14
+        ]
+      },
+      {
+        "text": " just",
+        "timestamp": [
+          73.14,
+          73.38
+        ]
+      },
+      {
+        "text": " got",
+        "timestamp": [
+          73.38,
+          73.6
+        ]
+      },
+      {
+        "text": " the",
+        "timestamp": [
+          73.6,
+          73.78
+        ]
+      },
+      {
+        "text": " project",
+        "timestamp": [
+          73.78,
+          74.14
+        ]
+      },
+      {
+        "text": " announcement.",
+        "timestamp": [
+          74.14,
+          74.42
+        ]
+      },
+      {
+        "text": " Yeah,",
+        "timestamp": [
+          75,
+          77.26
+        ]
+      },
+      {
+        "text": " that's...",
+        "timestamp": [
+          79.68,
+          80.02
+        ]
+      },
+      {
+        "text": " Is",
+        "timestamp": [
+          80.02,
+          80.24
+        ]
+      },
+      {
+        "text": " that",
+        "timestamp": [
+          80.24,
+          80.24
+        ]
+      },
+      {
+        "text": " what",
+        "timestamp": [
+          80.24,
+          80.4
+        ]
+      },
+      {
+        "text": " everybody",
+        "timestamp": [
+          80.4,
+          80.64
+        ]
+      },
+      {
+        "text": " got?",
+        "timestamp": [
+          80.64,
+          80.98
+        ]
+      },
+      {
+        "text": " Okay.",
+        "timestamp": [
+          81.2,
+          81.64
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          81.82,
+          84.28
+        ]
+      },
+      {
+        "text": " we're",
+        "timestamp": [
+          84.28,
+          84.64
+        ]
+      },
+      {
+        "text": " going",
+        "timestamp": [
+          84.64,
+          84.64
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          84.64,
+          84.74
+        ]
+      },
+      {
+        "text": " have",
+        "timestamp": [
+          84.74,
+          84.88
+        ]
+      },
+      {
+        "text": " individual",
+        "timestamp": [
+          84.88,
+          85.46
+        ]
+      },
+      {
+        "text": " work",
+        "timestamp": [
+          85.46,
+          86.08
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          86.08,
+          86.26
+        ]
+      },
+      {
+        "text": " then",
+        "timestamp": [
+          86.26,
+          86.36
+        ]
+      },
+      {
+        "text": " a",
+        "timestamp": [
+          86.36,
+          86.46
+        ]
+      },
+      {
+        "text": " meeting",
+        "timestamp": [
+          86.46,
+          86.64
+        ]
+      },
+      {
+        "text": " about",
+        "timestamp": [
+          86.64,
+          86.84
+        ]
+      },
+      {
+        "text": " it",
+        "timestamp": [
+          86.84,
+          87.06
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          87.06,
+          87.94
+        ]
+      },
+      {
+        "text": " repeat",
+        "timestamp": [
+          87.94,
+          88.98
+        ]
+      },
+      {
+        "text": " that",
+        "timestamp": [
+          88.98,
+          89.24
+        ]
+      },
+      {
+        "text": " process",
+        "timestamp": [
+          89.24,
+          89.76
+        ]
+      },
+      {
+        "text": " three",
+        "timestamp": [
+          89.76,
+          90.36
+        ]
+      },
+      {
+        "text": " times.",
+        "timestamp": [
+          90.36,
+          90.8
+        ]
+      },
+      {
+        "text": " And",
+        "timestamp": [
+          92.2,
+          94.5
+        ]
+      },
+      {
+        "text": " at",
+        "timestamp": [
+          94.5,
+          94.78
+        ]
+      },
+      {
+        "text": " this",
+        "timestamp": [
+          94.78,
+          94.96
+        ]
+      },
+      {
+        "text": " point,",
+        "timestamp": [
+          94.96,
+          95.22
+        ]
+      },
+      {
+        "text": " we",
+        "timestamp": [
+          95.22,
+          95.3
+        ]
+      },
+      {
+        "text": " get",
+        "timestamp": [
+          95.3,
+          95.44
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          95.44,
+          95.56
+        ]
+      },
+      {
+        "text": " try",
+        "timestamp": [
+          95.56,
+          95.78
+        ]
+      },
+      {
+        "text": " out",
+        "timestamp": [
+          95.78,
+          95.96
+        ]
+      },
+      {
+        "text": " the",
+        "timestamp": [
+          95.96,
+          96.12
+        ]
+      },
+      {
+        "text": " whiteboard",
+        "timestamp": [
+          96.12,
+          96.58
+        ]
+      },
+      {
+        "text": " over",
+        "timestamp": [
+          96.58,
+          96.98
+        ]
+      },
+      {
+        "text": " there.",
+        "timestamp": [
+          96.98,
+          97.22
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          97.88,
+          99.68
+        ]
+      },
+      {
+        "text": " you",
+        "timestamp": [
+          99.66,
+          100.52
+        ]
+      },
+      {
+        "text": " get",
+        "timestamp": [
+          100.52,
+          101.54
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          101.54,
+          101.64
+        ]
+      },
+      {
+        "text": " draw",
+        "timestamp": [
+          101.64,
+          101.78
+        ]
+      },
+      {
+        "text": " your",
+        "timestamp": [
+          101.78,
+          101.9
+        ]
+      },
+      {
+        "text": " favorite",
+        "timestamp": [
+          101.9,
+          102.12
+        ]
+      },
+      {
+        "text": " animal",
+        "timestamp": [
+          102.12,
+          102.48
+        ]
+      },
+      {
+        "text": " and",
+        "timestamp": [
+          102.48,
+          102.76
+        ]
+      },
+      {
+        "text": " sum",
+        "timestamp": [
+          102.76,
+          103.74
+        ]
+      },
+      {
+        "text": " up",
+        "timestamp": [
+          103.74,
+          103.92
+        ]
+      },
+      {
+        "text": " your",
+        "timestamp": [
+          103.92,
+          104.1
+        ]
+      },
+      {
+        "text": " favorite",
+        "timestamp": [
+          104.1,
+          104.34
+        ]
+      },
+      {
+        "text": " characteristics",
+        "timestamp": [
+          104.34,
+          104.92
+        ]
+      },
+      {
+        "text": " of",
+        "timestamp": [
+          104.92,
+          105.28
+        ]
+      },
+      {
+        "text": " it.",
+        "timestamp": [
+          105.28,
+          105.46
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          105.58,
+          105.94
+        ]
+      },
+      {
+        "text": " who",
+        "timestamp": [
+          105.94,
+          106.08
+        ]
+      },
+      {
+        "text": " would",
+        "timestamp": [
+          106.08,
+          106.24
+        ]
+      },
+      {
+        "text": " like",
+        "timestamp": [
+          106.24,
+          106.42
+        ]
+      },
+      {
+        "text": " to",
+        "timestamp": [
+          106.42,
+          106.54
+        ]
+      },
+      {
+        "text": " go",
+        "timestamp": [
+          106.54,
+          106.64
+        ]
+      },
+      {
+        "text": " first?",
+        "timestamp": [
+          106.64,
+          107
+        ]
+      },
+      {
+        "text": " I",
+        "timestamp": [
+          107,
+          107.02
+        ]
+      },
+      {
+        "text": " will",
+        "timestamp": [
+          107.02,
+          107.02
+        ]
+      },
+      {
+        "text": " go.",
+        "timestamp": [
+          107.02,
+          107.08
+        ]
+      },
+      {
+        "text": " Very",
+        "timestamp": [
+          107.2,
+          107.82
+        ]
+      },
+      {
+        "text": " good.",
+        "timestamp": [
+          107.82,
+          108.16
+        ]
+      },
+      {
+        "text": " All",
+        "timestamp": [
+          108.46,
+          114.2
+        ]
+      },
+      {
+        "text": " right.",
+        "timestamp": [
+          114.2,
+          114.44
+        ]
+      },
+      {
+        "text": " So",
+        "timestamp": [
+          114.56,
+          116.22
+        ]
+      },
+      {
+        "text": " this",
+        "timestamp": [
+          116.22,
+          118.88
+        ]
+      },
+      {
+        "text": " one",
+        "timestamp": [
+          118.88,
+          121.62
+        ]
+      },
+      {
+        "text": " here,",
+        "timestamp": [
+          121.62,
+          142.84
+        ]
+      },
+      {
+        "text": " right?",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " Mm",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": "-hmm.",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " Okay.",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " Very",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " nice.",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " Alright,",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " my",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " favorite",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " animal",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " is",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " like...",
+        "timestamp": [
+          142.84,
+          142.84
+        ]
+      },
+      {
+        "text": " A",
+        "timestamp": [
+          149.94,
+          149.94
+        ]
+      },
+      {
+        "text": " beagle.",
+        "timestamp": [
+          149.94,
+          149.94
+        ]
+      }
+    ]
+  }
+}
