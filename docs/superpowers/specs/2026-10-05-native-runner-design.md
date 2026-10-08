@@ -1,5 +1,7 @@
 # Native macOS and Linux meeting runner
 
+> Historical design, superseded by the [browser extension design](2026-10-05-browser-extension.md). The meeting runner was removed; current recording uses the user's existing meeting tab. See [installation](../../browser-extension.md) and [migration](../../extension-migration.md).
+
 The user approved a real dedicated browser window on macOS and Linux and explicitly requires complete removal of Docker. Echo's Calendar panel opens installed Google Chrome using a private profile for the meeting runner. Login happens directly in Google's UI; the user returns to Echo to save. No everyday browser profile, cookies, or Calendar OAuth token is imported. The expected account remains the connected Calendar account, restricted to sublimeinnovationtechnologies@gmail.com for live testing.
 
 The native helper retains the runner's authenticated loopback protocol. Its auth status identifies `native_window`; the web UI presents inline Save session and Cancel sign-in controls without screenshots or credential fields. The helper owns the Chrome process and profile lock. Save closes only that owned window, then verifies the same profile's active Meet account before certification. Cancellation, expiration, and account mismatch fail closed. Google security restrictions remain authoritative.

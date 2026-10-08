@@ -2,7 +2,7 @@
 
 Use this guide to build Echo from source, change it, or prepare a package for someone else. For everyday recording and setup, start with the [README](../README.md).
 
-Linux with desktop Chromium is the qualified build and runtime environment. macOS and Windows/WSL instructions below are setup options that still need end-to-end validation.
+The downloadable runtime package targets Linux x64. Source builds and bounded application/Meet recording workflows have also been exercised in Brave on macOS. Build checks do not establish every browser, OS or meeting service as qualified; consult the [extension qualification matrix](extension-qualification.md). Windows/WSL remains an unqualified setup option.
 
 ## Install the build tools
 
@@ -135,7 +135,8 @@ Check **Settings → Storage** for the actual data path. Default locations are:
 | Turbo and speaker models | Browser profile storage for the app's origin |
 | Full Large V3 speech model | `.echo-data/models/native-large-v3/` |
 | Ollama models | Ollama's model folder |
-| Original Meet guest recordings | Runner data folder; copied into Echo when saved |
+| Pending extension recordings | Extension profile IndexedDB; transferred to the paired Echo library after durable acknowledgement |
+| Legacy Meet guest recordings | Existing data folder's `bot/<meeting-id>/meeting.wav`; see [recovery](extension-migration.md) |
 
 Supported library exports include audio and meeting data but exclude credentials, models, and executables. Restoring requires an empty library and vocabulary. Per-meeting data exports exclude audio; use original-track downloads or a full library backup when you need audio too.
 

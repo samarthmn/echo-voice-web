@@ -1,6 +1,6 @@
 # Browser extension implementation review
 
-Status: implementation and review/fix loops are ongoing. Live testing found capture defects, and a plan audit found missing extension library controls. Commits remain local; no release push or CodeRabbit round has started. Live compatibility is not yet qualified. See [qualification matrix and Ubuntu/Codex handoff](extension-qualification.md).
+Status: implementation and review/fix loops are ongoing. The capture defects and missing extension controls identified in earlier loops were fixed and checked as recorded below. The bounded Brave/macOS Meet mute, tab-audio, offline-recovery and final-Turbo scenarios passed; broader live compatibility remains pending. The current source/CodeRabbit cycle is recorded in [the PR review](pr-review-2026-10-08.md). See [qualification matrix and Ubuntu/Codex handoff](extension-qualification.md).
 
 ## Verified evidence
 
@@ -22,13 +22,13 @@ Runtime review found actual wire mismatches in pairing expiry and final import v
 
 Independent controller review also approved conservative Calendar association: only fresh authorized account/library events with one matching provider identity and time range can be associated. Ambiguous, stale or unmatched recordings remain ordinary online meetings. That bounded review was complete; subsequent human testing and plan auditing identified the additional defects and missing controls documented below.
 
-Active microphone exclusion, connection revocation, live preview and local recording controls are being completed in the current review loop. Their source checks are recorded separately from live qualification.
+Active microphone exclusion, connection revocation, live preview and local recording controls were completed in a later loop below. Source checks and bounded human microphone-exclusion verification are recorded separately from remaining live qualification.
 
 Sanitized application overview images are provided in extension-assets. Recording/source-state store screenshots remain pending live qualification.
 
 ## Pending gates
 
-Real provider tab-capture/microphone recording and mute/navigation/offline behavior in Brave and Chrome on macOS; all Ubuntu combinations; real sleep/wake, physical disk-full/power-loss tests; installed Turbo/native Large V3 final inference from an extension meeting; store recording screenshots; and release review.
+Remaining live cases include the rest of Brave/macOS Meet lifecycle coverage, Chrome/macOS, Zoom Web, Teams Web, all Ubuntu combinations, sleep/wake, physical disk-full/power-loss, optional live inference and native Large V3 final inference from an extension recording. Store extension screenshots and release qualification also remain pending. The appended loops establish bounded Brave/macOS Meet tab/microphone capture, mute/exclusion, pause/resume, server-outage transfer recovery, leave-call stop and final Turbo transcription.
 
 Computer Use policy rejects control of chrome-extension: pages and browser-internal extension management. The user loaded the local package manually. Live qualification therefore requires the user to operate extension setup/start/stop controls while the agent tests Echo and the meeting page. Automated unpacked-profile tests are recorded separately and are not substituted for human/live compatibility passes.
 
@@ -41,7 +41,7 @@ Only the approved test identity may be used. Camera permission is never granted.
 - [Controller, migration and Calendar](extension-reviews/controller-task-review.md)
 - [Live processing initial review](extension-reviews/live-task-review.md) and [fix re-review with final integration disposition](extension-reviews/live-rereview.md)
 
-These notes preserve findings and their disposition. Automated tests reviewed the integrated working tree before the local implementation commit; no executable changes were made afterward.
+These notes preserve findings and their disposition at the initial implementation checkpoint. Subsequent executable fixes and their validation are documented in the appended loops and PR review.
 
 ## Local checkpoint and cleanup
 

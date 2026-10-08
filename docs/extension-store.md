@@ -18,7 +18,7 @@ Use the exact scope explanations in docs/browser-extension.md. tabCapture and ac
 
 Production archive: `npm run package:extension`. Inspect its file list and validate Manifest V3/CSP/bundled code and stable development identity separately from the assigned store identity. Icons must include 16, 32, 48 and 128 pixel PNG assets. Use sanitized product screenshots of setup, recording/source indicators, paused recording, pending library and final Echo review. Do not fabricate qualification screenshots or include private account content.
 
-Sanitized application overview assets: [desktop](extension-assets/echo-overview.png) and [320 px mobile](extension-assets/echo-overview-mobile.png). These illustrate Echo layout, not live extension recording qualification. Setup, recording/source, pause, pending-library and final-review screenshots still require the corresponding live scenarios.
+Sanitized application overview assets: [desktop](extension-assets/echo-overview.png) and [320 px mobile](extension-assets/echo-overview-mobile.png). These illustrate Echo layout. A [final Echo transcript](extension-assets/clean-mute-transcript.jpg) records the bounded Brave/macOS Meet test. Extension setup, recording/source, pause and pending-library screenshots still require the corresponding live scenarios; the available images do not establish full browser/service qualification.
 
 Privacy explanation must cover local browser/IndexedDB audio, scoped local server transfer, explicit microphone and participant permission, ungated-mic exclusion, retention/redundant-copy removal, export/delete, browser-profile uninstall loss, and optional existing Echo notes services. No additional analytics or telemetry are introduced by this feature.
 

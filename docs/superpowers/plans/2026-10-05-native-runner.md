@@ -1,5 +1,7 @@
 # Native macOS and Linux Runner Implementation Plan
 
+> Historical plan, superseded by the [browser extension plan](2026-10-05-browser-extension.md). The meeting runner was removed; do not use this document as current setup or implementation guidance. See [migration](../../extension-migration.md).
+
 **Goal:** Open and reuse a dedicated native Google browser on macOS and Linux, with Docker completely removed.
 
 **Architecture:** A native auth manager owns installed Chrome and a private profile. Existing loopback APIs expose native-window actions. A separate Swift helper captures only the dedicated browser application's playback.

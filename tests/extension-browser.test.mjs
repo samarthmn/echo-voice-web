@@ -18,7 +18,9 @@ test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through in
   await access(executablePath);
   let context;
   try {
-    context = await chromium.launchPersistentContext(path.join(scratch,'profile'),{executablePath,headless:true,args:[`--disable-extensions-except=${output.outdir}`,`--load-extension=${output.outdir}`,'--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream'],env:{...process.env,TMPDIR:scratch}});
+    // Chromium's Unix singleton socket must fit sun_path. Keep its random temp
+    // directory directly under project tmp rather than this deeper fixture path.
+    context = await chromium.launchPersistentContext(path.join(scratch,'profile'),{executablePath,headless:true,args:[`--disable-extensions-except=${output.outdir}`,`--load-extension=${output.outdir}`,'--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream'],env:{...process.env,TMPDIR:path.join(project,'tmp')}});
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker',{timeout:20000}); assert.ok(worker.url().endsWith('/background.js'));
     const page = await context.newPage(); const errors = []; page.on('pageerror',error => errors.push(error.message));
     await page.goto(`chrome-extension://${output.extensionId}/setup.html`); await page.locator('#paired').getByText('Not paired.').waitFor();
@@ -79,7 +81,7 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
   try {
     let ready=false;for(let i=0;i<100;i++){if(serverError)throw serverError;if(server.exitCode!==null)throw new Error(`Isolated server exited: ${logs}`);try{const storage=await api('/api/storage');assert.equal(path.resolve(storage.path),path.resolve(data),'refuse a different server data folder');ready=true;break}catch(error){if(error.message.includes('different server'))throw error;await delay(100)}}assert.equal(ready,true,`Isolated server did not start: ${logs}`);
     const executablePath=process.env.CHROMIUM_PATH || (process.platform==='darwin' ? '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser':'/usr/bin/chromium');
-    context=await chromium.launchPersistentContext(path.join(runRoot,'profile'),{executablePath,headless:true,args:[`--disable-extensions-except=${output.outdir}`,`--load-extension=${output.outdir}`],env:{...process.env,TMPDIR:runRoot}});const networkErrors=[];context.on('response',async response => {if(response.url().includes('/extension/v1/')&&!response.ok()){const headers=await response.request().allHeaders();networkErrors.push({method:response.request().method(),status:response.status(),origin:headers.origin,error:await response.json().catch(() => null)})}});
+    context=await chromium.launchPersistentContext(path.join(runRoot,'profile'),{executablePath,headless:true,args:[`--disable-extensions-except=${output.outdir}`,`--load-extension=${output.outdir}`],env:{...process.env,TMPDIR:path.join(project,'tmp')}});const networkErrors=[];context.on('response',async response => {if(response.url().includes('/extension/v1/')&&!response.ok()){const headers=await response.request().allHeaders();networkErrors.push({method:response.request().method(),status:response.status(),origin:headers.origin,error:await response.json().catch(() => null)})}});
     const worker=context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker',{timeout:20000});const page=await context.newPage();await page.goto(`chrome-extension://${output.extensionId}/setup.html`);await page.locator('#paired').getByText('Not paired.').waitFor();
     const pairCode=await api('/api/extensions/pairing','POST',{});assert.equal(pairCode.protocolVersion,1);assert.equal(typeof pairCode.expiresAt,'number');
     await page.locator('#endpoint').fill(base);await page.locator('#code').fill(pairCode.code);await page.locator('#request').click();await page.locator('#status').getByText('Pairing request sent.',{exact:false}).waitFor({timeout:10000});

@@ -1,5 +1,7 @@
 # Runner Sign-in Implementation Plan
 
+> Historical plan, superseded by the [browser extension plan](2026-10-05-browser-extension.md). The meeting runner was removed; do not use this document as current setup or implementation guidance. See [migration](../../extension-migration.md).
+
 > **For agentic workers:** Execute the explicitly authorized parallel subtasks below, then perform independent review and human Brave verification before pushing.
 
 **Goal:** Persist a dedicated Google Meet browser session with account-matched UI sign-in.

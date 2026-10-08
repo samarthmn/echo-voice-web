@@ -60,23 +60,44 @@ try {
   assert.equal(fullAudio.length, 17 * 1024 * 1024 + 44); assert.equal(new TextDecoder().decode(fullAudio.slice(0, 4)), 'RIFF');
   const library = await (await fetch(`${origin}/api/meetings`)).json(); assert.equal(library.meetings.length, 1);
   console.log('PASS: 17 MB import uses ordered 8 MB chunks; failure preserves status and acknowledged bytes; retry resumes one meeting/track; full byte count and duration match.');
+  await page.unroute('**/api/meetings/*/audio');
 
   const auto = await page.evaluate(async () => {
     const request = async enabled => fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoTranscribe: enabled }) });
-    let calls = 0; const skipped = [];
+    const speechModel = 'onnx-community/whisper-large-v3-turbo';
+    // Queue execution rechecks the durable meeting to honor cancellation. Use
+    // real saved fixtures so that check exercises the API rather than a 404.
+    const meeting = async title => {
+      const created = await fetch('/api/meetings', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,mode:'import',consent:true,speechModel})});
+      if(!created.ok) throw new Error(`Fixture meeting failed (${created.status}).`);
+      const row = await created.json();
+      const header = await window.__importFile.slice(0,44).arrayBuffer(); const view = new DataView(header);
+      view.setUint32(4,100,true); view.setUint32(40,64,true);
+      const form = new FormData(); form.append('audio',new Blob([header,new Uint8Array(64)],{type:'audio/wav'}),'auto-fixture.wav');
+      form.append('trackId','auto-fixture'); form.append('sequence','0'); form.append('label',title);
+      const uploaded = await fetch(`/api/meetings/${row.id}/audio`,{method:'POST',body:form});
+      if(!uploaded.ok) throw new Error(`Fixture audio failed (${uploaded.status}).`);
+      const saved = await fetch(`/api/meetings/${row.id}`);
+      if(!saved.ok) throw new Error(`Fixture read failed (${saved.status}).`);
+      return saved.json();
+    };
+    const disabled = await meeting('Automatic disabled');
+    const missing = await meeting('Automatic missing model');
+    const ready = await meeting('Automatic ready');
+    let calls = 0; const calledIds = []; const skipped = [];
     window.addEventListener('echo-auto-transcription-skipped', event => skipped.push(event.detail));
-    window.echoInference.transcribeMeeting = async () => { calls++; };
+    window.echoInference.transcribeMeeting = async id => { calls++; calledIds.push(id); };
     window.echoInference.getDownloadedModels = async () => ['onnx-community/whisper-large-v3-turbo'];
-    const meeting = id => ({ id, status: 'saved', speechModel: 'onnx-community/whisper-large-v3-turbo', tracks: [{ id: 'track', bytes: 128 }], transcripts: [] });
-    await window.echo.autoTranscribeMeeting(meeting('disabled')); const disabledCalls = calls;
+    await window.echo.autoTranscribeMeeting(disabled); const disabledCalls = calls;
     await request(true);
     window.echoInference.getDownloadedModels = async () => [];
-    await window.echo.autoTranscribeMeeting(meeting('missing-model')); const noModelCalls = calls;
+    await window.echo.autoTranscribeMeeting(missing); const noModelCalls = calls;
     window.echoInference.getDownloadedModels = async () => ['onnx-community/whisper-large-v3-turbo'];
-    await Promise.all([window.echo.autoTranscribeMeeting(meeting('ready')), window.echo.autoTranscribeMeeting(meeting('ready'))]);
-    return { disabledCalls, noModelCalls, totalCalls: calls, skipped };
+    await Promise.all([window.echo.autoTranscribeMeeting(ready), window.echo.autoTranscribeMeeting(ready)]);
+    return { disabledCalls, noModelCalls, totalCalls: calls, calledIds, readyId:ready.id, skipped };
   });
   assert.equal(auto.disabledCalls, 0); assert.equal(auto.noModelCalls, 0); assert.equal(auto.totalCalls, 1);
+  assert.deepEqual(auto.calledIds,[auto.readyId]);
   assert.ok(auto.skipped.some(event => event.reason === 'model-not-downloaded'));
   console.log('PASS: auto-transcription honors disabled setting, skips missing models without download, and runs once for a ready saved recording.');
 } finally {

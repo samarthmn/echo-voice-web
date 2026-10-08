@@ -38,15 +38,39 @@ test('original top-frame pagehide stops capture and excludes microphone before s
   const h=harness();h.pagehide();await settle();const stop=h.sent.findIndex(message=>message.type==='CONTROL');assert.ok(stop>0);assert.equal(h.sent[stop].interruptionReason,'document-changed');assert.ok(h.sent.slice(0,stop).some(message=>message.type==='GATE'&&!message.allowed));
 });
 for(const patch of [{frameId:1},{id:'another-extension'},{documentId:'unrelated-document'},{url:'https://private.invalid/'}]) test(`untrusted/subframe/stale document pagehide cannot stop the original capture: ${JSON.stringify(patch)}`,async () => {const h=harness();h.pagehide(patch);await settle();assert.equal(h.sent.some(message=>message.type==='CONTROL'),false);});
-test('content observer only forwards browser-trusted pagehide events',async () => {
-  const result=await build({entryPoints:['extension/src/content.ts'],bundle:true,format:'iife',write:false});let pagehide;const sent=[];
-  vm.runInNewContext(result.outputFiles[0].text,{URL,Date,location:{href:'https://meet.google.com/abc-defg-hij'},document:{documentElement:{},querySelectorAll:()=>[]},MutationObserver:class {observe(){}},setInterval(){},window:{addEventListener(name,callback){if(name==='pagehide')pagehide=callback}},chrome:{runtime:{sendMessage:async message=>{sent.push(message)}}}});
-  sent.length=0;pagehide({isTrusted:false});assert.equal(sent.length,0);pagehide({isTrusted:true});assert.equal(sent.length,1);assert.equal(sent[0].type,'MEETING_PAGEHIDE');assert.equal(sent[0].state,'unknown');
+const contentBuilt = await build({entryPoints:['extension/src/content.ts'],bundle:true,format:'iife',write:false});
+function contentHarness() {
+  let now=1000;let nextTimer=0;let label='Turn off microphone';let scans=0;let failSend;
+  const sent=[];const observers=[];const timers=new Map();const handlers=new Set();
+  const addTimer=(callback,ms,repeat=false) => {const id=++nextTimer;timers.set(id,{callback,due:now+ms,interval:repeat?ms:0});return id;};
+  const context=vm.createContext({__echoMuteObserverV1:true,URL,Date:class extends Date {static now(){return now;}},location:{href:'https://meet.google.com/abc-defg-hij'},document:{documentElement:{},querySelectorAll(selector){if(selector==='button,[role="button"]'){scans++;return [{getBoundingClientRect:()=>({width:40,height:40}),getAttribute:name=>name==='aria-label'?label:null,textContent:''}];}return [];}},getComputedStyle:()=>({visibility:'visible',display:'block'}),MutationObserver:class {constructor(callback){this.callback=callback;observers.push(this);}disconnected=false;observe(){}disconnect(){this.disconnected=true;}},setTimeout:(callback,ms)=>addTimer(callback,ms),clearTimeout:id=>timers.delete(id),setInterval:(callback,ms)=>addTimer(callback,ms,true),clearInterval:id=>timers.delete(id),window:{addEventListener(name,callback){handlers.add(callback);},removeEventListener(name,callback){handlers.delete(callback);}},chrome:{runtime:{sendMessage(message){if(failSend==='sync')throw new Error('extension invalidated');if(failSend==='async')return Promise.reject(new Error('extension invalidated'));sent.push(message);return Promise.resolve();}}}});
+  const inject=()=>vm.runInContext(contentBuilt.outputFiles[0].text,context);inject();
+  const advance=ms=>{const end=now+ms;for(;;){let first;for(const [id,timer] of timers)if(timer.due<=end&&(!first||timer.due<first[1].due))first=[id,timer];if(!first)break;const [id,timer]=first;now=timer.due;if(timer.interval)timer.due+=timer.interval;else timers.delete(id);timer.callback();}now=end;};
+  return {sent,observers,timers,handlers,inject,advance,scans:()=>scans,label:value=>{label=value;},fail:value=>{failSend=value;},mutate:()=>{for(const observer of observers)if(!observer.disconnected)observer.callback();},pagehide:isTrusted=>{for(const handler of [...handlers])handler({isTrusted});}};
+}
+test('mutation bursts scan once per 100 ms and report the latest mute state without stale caching',() => {
+  const h=contentHarness();assert.equal(h.scans(),1);assert.equal(h.sent[0].state,'unmuted');
+  for(let i=0;i<1000;i++)h.mutate();assert.equal(h.scans(),1);assert.equal(h.timers.size,2);
+  h.advance(50);h.label('Turn on microphone');h.mutate();h.advance(49);assert.equal(h.sent.length,1);
+  h.advance(1);assert.equal(h.scans(),2);assert.equal(h.sent.at(-1).state,'muted');assert.equal(h.sent.at(-1).observedAt,1100);
+  h.label('Unrecognized microphone control');
+  for(let i=0;i<100;i++){h.advance(10);h.mutate();}
+  assert.equal(h.sent.at(-1).state,'unknown');
+  assert.equal(h.scans(),h.sent.length);assert.ok(h.sent.length<=12);
+  for(let i=1;i<h.sent.length;i++)assert.ok(h.sent[i].observedAt-h.sent[i-1].observedAt>=100);
 });
-test('reinjecting content replaces its observer, timer and lifecycle handler without resetting sequence; legacy marker does not block migration',async()=> {
-  const result=await build({entryPoints:['extension/src/content.ts'],bundle:true,format:'iife',write:false});const sent=[];const observers=[];const timers=new Map();const handlers=new Set();let nextTimer=0;
-  const context=vm.createContext({__echoMuteObserverV1:true,URL,Date,location:{href:'https://meet.google.com/abc-defg-hij'},document:{documentElement:{},querySelectorAll:()=>[]},MutationObserver:class {constructor(){observers.push(this)}disconnected=false;observe(){}disconnect(){this.disconnected=true}},setInterval(callback){const id=++nextTimer;timers.set(id,callback);return id},clearInterval(id){timers.delete(id)},window:{addEventListener(name,callback){handlers.add(callback)},removeEventListener(name,callback){handlers.delete(callback)}},chrome:{runtime:{sendMessage:async message=>{sent.push(message)}}}});
-  vm.runInContext(result.outputFiles[0].text,context);vm.runInContext(result.outputFiles[0].text,context);
-  assert.equal(observers.length,2);assert.equal(observers[0].disconnected,true);assert.equal(observers[1].disconnected,false);assert.equal(timers.size,1);assert.equal(handlers.size,1);assert.deepEqual(sent.map(message=>message.seq),[0,1]);
-  [...handlers][0]({isTrusted:true});assert.equal(sent.at(-1).type,'MEETING_PAGEHIDE');assert.equal(sent.at(-1).seq,2);
+test('the independent 500 ms heartbeat scans fresh controls without mutation events',() => {
+  const h=contentHarness();h.label('Turn on microphone');h.advance(500);assert.equal(h.sent.length,2);assert.equal(h.sent[1].state,'muted');assert.equal(h.sent[1].observedAt,1500);h.advance(500);assert.equal(h.sent.length,3);assert.equal(h.sent[2].observedAt,2000);
+});
+test('trusted pagehide sends unknown immediately and cancels pending scans; forged events do neither',() => {
+  const h=contentHarness();h.advance(50);h.mutate();h.pagehide(false);assert.equal(h.sent.length,1);assert.equal(h.timers.size,2);
+  h.pagehide(true);assert.equal(h.sent.length,2);assert.equal(h.sent[1].type,'MEETING_PAGEHIDE');assert.equal(h.sent[1].state,'unknown');assert.equal(h.sent[1].observedAt,1050);assert.equal(h.scans(),1);assert.equal(h.timers.size,0);assert.equal(h.handlers.size,0);assert.equal(h.observers[0].disconnected,true);h.advance(1000);assert.equal(h.sent.length,2);
+});
+test('reinjecting content cancels pending scans and preserves sequence across observer replacement',() => {
+  const h=contentHarness();h.advance(50);h.mutate();assert.equal(h.timers.size,2);h.inject();
+  assert.equal(h.observers.length,2);assert.equal(h.observers[0].disconnected,true);assert.equal(h.observers[1].disconnected,false);assert.equal(h.timers.size,1);assert.equal(h.handlers.size,1);assert.deepEqual(h.sent.map(message=>message.seq),[0,1]);
+  h.advance(100);assert.equal(h.sent.length,2,'old trailing scan was cancelled');h.pagehide(true);assert.equal(h.sent.at(-1).seq,2);
+});
+for(const failure of ['sync','async']) test(`observer ${failure} runtime disconnect disposes heartbeat and pending mutation timer`,async () => {
+  const h=contentHarness();h.advance(50);h.mutate();h.fail(failure);h.advance(50);await settle();assert.equal(h.observers[0].disconnected,true);assert.equal(h.timers.size,0);assert.equal(h.handlers.size,0);const scans=h.scans();h.advance(1000);h.mutate();assert.equal(h.scans(),scans);
 });

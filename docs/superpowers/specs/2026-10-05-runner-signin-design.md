@@ -1,5 +1,7 @@
 # Saved Google Meet runner session
 
+> Historical design, superseded by the [browser extension design](2026-10-05-browser-extension.md). The meeting runner was removed; current recording uses the user's existing meeting tab. See [installation](../../browser-extension.md) and [migration](../../extension-migration.md).
+
 The approved product flow connects Calendar, signs into the same account in a separate local runner browser, saves that session for future meetings, and exposes connection management in Echo. Live testing is restricted to sublimeinnovationtechnologies@gmail.com. Camera and microphone remain denied throughout login and recording.
 
 Calendar OAuth identifies the expected account but does not authenticate Chromium. A private Chromium profile under the active library's credentials directory stores the runner session. It is excluded from backups and Git. Echo never imports the user's everyday browser profile or handles Calendar tokens as Meet cookies.

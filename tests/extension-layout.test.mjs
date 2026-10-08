@@ -21,7 +21,8 @@ test('popup has an intrinsic width, reachable controls at zoom, and responsive s
     await cp(path.join(project,'public/favicon.svg'),path.join(scratch,'icons/echo.svg'));
     for(const name of ['inter-400.woff2','inter-500.woff2','inter-600.woff2']) await cp(path.join(project,'public/fonts',name),path.join(scratch,'fonts',name));
     const executablePath = process.env.CHROMIUM_PATH || (process.platform === 'darwin' ? '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser':'/usr/bin/chromium');
-    browser = await chromium.launch({executablePath,headless:true,env:{...process.env,TMPDIR:scratch}});
+    // Use the shorter project temp root for Chromium's bounded Unix socket path.
+    browser = await chromium.launch({executablePath,headless:true,env:{...process.env,TMPDIR:path.join(project,'tmp')}});
     const page = await browser.newPage({viewport:{width:190,height:600}}); await page.goto(pathToFileURL(path.join(scratch,'popup.html')).href);
     await page.evaluate(() => document.fonts.ready);
     assert.equal(await page.evaluate(() => document.documentElement.getBoundingClientRect().width),390,'intrinsic width must not collapse to the initial 190px host viewport');
