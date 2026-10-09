@@ -1,5 +1,7 @@
 # Echo Voice — fresh design review
 
+> Historical design evidence from October 4. Screenshots and runner references reflect that build; use [current feature coverage](feature-coverage.md) and [extension setup](browser-extension.md) for today's behavior.
+
 Reviewed on 4 October 2026 by a separate reviewer given only the product brief, the running URL, and permission to use disposable fixtures. Previous audit reports, screenshots, and recommendations were not used as evidence.
 
 The interface has a coherent visual identity and a useful evidence-first meeting review experience. The largest weaknesses were in navigation and state transitions: optional cloud setup obscured local setup, the closed mobile drawer accepted keyboard focus, and the account setup route discarded settings edits. Five concrete findings were sent to the implementation agent during review. All five received changes; the relevant outcomes were independently rechecked below.

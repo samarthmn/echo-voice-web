@@ -1,5 +1,7 @@
 # PR review fixes — 2026-10-04
 
+> Historical review of an earlier build. Runner behavior below has since been retired. Use the [current PR review](pr-review-2026-10-08.md), [architecture](architecture.md), and [extension qualification](extension-qualification.md) for current implementation and test status.
+
 Reviewed all CodeRabbit comments on [PR #1](https://github.com/samarthmn/echo-voice-web/pull/1), including nitpicks, security architecture concerns, and verification warnings.
 
 | Review note | Change and qualification |

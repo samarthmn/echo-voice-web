@@ -1,5 +1,7 @@
 # Verification record — 4 October 2026
 
+> Historical baseline. Later changes and test results are recorded in the [October 8 PR review](pr-review-2026-10-08.md), [extension review](extension-review.md), and [current qualification matrix](extension-qualification.md). The results below apply to the dated implementation; they are not the current release checklist.
+
 Implementation: Dioxus 0.7.10 browser WASM, Rust/Axum REST server, SQLite, browser media/inference bridges. Tests use isolated temporary libraries and controlled recording fixtures. No real user meeting or Google account was used.
 
 The subsequent [macOS Brave verification](brave-local-verification.md) records two full visible-browser passes, a rebuilt dependency fix, real Whisper/Ollama processing, and cached transcription after a server/browser restart with external HTTP blocked. The Linux checks and earlier qualification limits below describe the original run; the linked record extends local coverage without claiming live cloud or meeting integrations.

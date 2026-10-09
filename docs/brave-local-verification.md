@@ -1,5 +1,7 @@
 # Local Brave verification — 4 October 2026
 
+> Historical baseline. Test counts and runner references describe this earlier build. See [current PR verification](pr-review-2026-10-08.md) and [extension qualification](extension-qualification.md) for the current architecture and remaining checks.
+
 Tested the source build on macOS 27.0.1 / Apple Silicon with visible, isolated Brave sessions (Brave 1.96.61, Chromium 154.0.8037.98). Built the release server and Dioxus/WebAssembly assets locally. Test libraries, generated speech, browser profiles, screenshots, and logs stayed under the project's ignored `tmp/` directory; existing user meetings and browser profiles were not used for test mutations.
 
 ## Test and restart loop

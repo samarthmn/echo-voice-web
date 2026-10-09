@@ -1,57 +1,97 @@
 # Echo browser extension
 
-The extension records a meeting you attend in an existing Brave or Chrome tab. Join the meeting normally with your usual browser account. It does not join unattended meetings or bypass admission. Google Calendar is optional and only opens meeting links. Echo associates a recording with an event only when a freshly loaded Calendar view contains one matching meeting near the recording time; stale, ambiguous, disconnected or different-account views leave it as a normal online recording.
+Use Echo to record a meeting you attend in your existing desktop Brave or Chrome tab. Join normally with your usual account. The extension captures audio; it never requests your camera or joins a meeting for you.
+
+You need the local [Echo app](../README.md#set-up-echo) for transcripts, notes, and the meeting library. You can record while that app is closed and transfer the audio later. Google Calendar is optional.
 
 ## Development installation
 
-1. Build the app and extension with `bash scripts/build.sh`, or run `npm ci --ignore-scripts` followed by `npm run build:extension` for the extension alone.
-2. Open `brave://extensions` in Brave or `chrome://extensions` in Chrome. Enable Developer mode, choose **Load unpacked**, and select this repository's `extension/dist` directory.
-3. Pin Echo to the toolbar. Open its setup page, enable the meeting service you will use, and grant microphone permission if you want your own voice included. No camera permission is requested.
-4. To transfer recordings, start Echo and open Calendar or Settings → General. Choose **Connect an extension**. Enter the five-minute code in the extension setup page with Echo's exact loopback address (usually `http://localhost:3000`). Return to Echo and approve the named installation. Finish connecting in the extension.
-5. Return to the meeting tab before starting. Permission setup or switching to another tab requires a fresh **Start recording** action in the meeting tab.
+The extension currently uses a development installation. There is no published store-installation path documented for this build.
 
-The Manifest V3 API floor is Chromium 120. Current Brave/Chrome must still be qualified with your meeting service and operating system. Loading an unpacked package trusts code from this checkout; inspect/review it before installing. Do not load random copies or share a package containing browser-profile files.
+1. Get the built extension folder from the person supplying Echo. If they supplied `echo-extension-<version>.zip`, extract it first. Keep the extracted folder somewhere permanent. GitHub's source ZIP is different and needs [building](#for-developers).
+2. In Brave, type `brave://extensions` in the address bar. In Chrome, use `chrome://extensions`.
+3. Turn on **Developer mode**, choose **Load unpacked**, and select the folder containing `manifest.json`. For a source build, this is `extension/dist`.
+4. Use the browser's Extensions menu to pin Echo to the toolbar. Open Echo's popup, then **Setup**.
+5. Follow the recovery, connection, service and microphone steps in Setup below.
+
+Use a build from a source you trust; loading an unpacked extension grants its requested browser access. Actual browser, operating-system, and meeting-service results are tracked in the [qualification matrix](extension-qualification.md), which remains incomplete.
+
+## Connect to the Echo app
+
+The development candidate uses **Connect to Echo → approve once → Connected**. It does not require a copied code in the normal flow. Final release qualification is tracked in the [readiness record](production-readiness-status.md).
+
+1. In extension Setup, choose **Create recovery phrase**. Save its 24 words privately and confirm the requested words. This phrase protects the browser's pending recordings and is separate from the Echo library phrase.
+2. Start the local Echo app.
+3. Choose **Connect to Echo** in extension Setup. Echo opens an approval page in this browser.
+4. Check the requesting browser and destination library, then approve. Setup finishes automatically and shows the connection status.
+5. Enable your meeting service and choose **Allow microphone** or **Record call audio only**.
+6. Return to the meeting tab and open Echo from the toolbar. Setup does not start recording.
+
+You can close Setup while approval is pending and return later. **Open approval page** returns to the request; **Cancel connection** cancels it. Start a new attempt if it expires. An unavailable or incompatible Echo app produces a specific next step. The server address defaults to `http://localhost:3000`; a different loopback address and legacy code pairing are under **Advanced connection settings**.
+
+Changing libraries asks you to confirm the destination. Recordings already assigned to one library retain that assignment; confirmation does not silently move them. Keep the original connection until pending audio is accounted for. **Record without Echo** allows capture after protection setup; transfer and automatic history unlock need the paired app.
 
 ## Recording
 
-Open the Echo toolbar popup while the meeting is active. Set a title, microphone choice and device, and optional **Live transcript**. Confirm participant permission and choose **Start recording**. Live text is off by default. If microphone permission is denied, explicitly choose call-audio-only recording.
+1. Join the meeting normally, then open Echo from the toolbar while that meeting tab is selected.
+2. Set a recording title. Choose **Include my microphone** and its device if you want your voice recorded. Leave it unchecked for call audio only.
+3. Choose whether to enable **Live transcript**; it is off by default and needs the setup described below.
+4. Confirm that participants have agreed to recording, then choose **Start recording**. If microphone permission is denied, choose **Record call audio only** explicitly.
 
-Call audio keeps playing normally. The extension never plays your microphone through your speakers. Your microphone is recorded only when the provider adapter sees an active call and a fresh, positively unmuted state. Meeting mute, an unknown interface, a missing control, a disconnected device, or a stale observation excludes your microphone. A warning means call audio can continue but your voice may be missing. Clear **Include my microphone** before starting for call audio only. During recording, **Exclude my microphone** further mutes a microphone stream acquired at Start. Clearing it still requires a fresh unmuted meeting state. It cannot add a microphone to a call-audio-only recording or unmute the meeting.
+Call audio keeps playing. Echo never plays your microphone through your speakers. It includes your voice only while it can confirm that the call is active and your meeting microphone is unmuted. If it cannot read that state, or your microphone disconnects, it excludes your voice and shows a warning. Current meeting controls must be in English; an unrecognized interface can prevent microphone recording.
 
-**Pause** stops adding both audio sources; call playback continues. **Resume** continues the same recording. Saved duration excludes paused time and the recording records timeline gaps. Switching tabs or closing the popup does not switch the audio source. Closing the captured tab, leaving the call, cross-document navigation, or choosing **Stop** finalizes recording. Closing the entire browser interrupts capture. A new call requires a new Start action and consent.
+During recording, **Exclude my microphone** can additionally exclude your voice. Turning it off still respects the meeting's mute state. It cannot unmute the meeting or add your microphone to a recording started with call audio only.
 
-One recording may be active per browser profile. The maximum is eight hours; the extension warns before finalization. Pending audio is limited to two GiB. Storage failure stops capture safely and keeps the last committed audio. It never deletes older unsynchronized recordings to make space.
+**Pause** stops saving both audio sources while call playback continues. **Resume** continues the same recording; its saved duration excludes paused time. Switching tabs or closing the popup keeps the original meeting as the audio source. **Stop**, leaving the call, closing its tab, or navigating to another page ends capture. Closing the entire browser interrupts it. Every new call needs a new Start action and consent.
+
+Limits are one active recording per browser profile, eight hours per recording, and 2 GiB of pending audio. Echo warns before the time limit. If storage runs out or saving fails, capture stops and retains audio already saved. It does not delete older pending recordings to make room.
 
 ## Offline recording and recovery
 
-Echo may be closed before or during recording. Audio is journaled locally in the extension's IndexedDB database as mono 16 kHz PCM16, about 115 MB per recorded hour. Transfer resumes from Echo's acknowledged progress when it returns. Closing Echo or its processing tab does not stop the extension recording.
+The extension saves audio in your browser while recording, using about 115 MB per recorded hour. Echo can be closed before or during capture. When the paired app returns, transfer continues from where it was last confirmed.
 
-The extension library distinguishes **Saved in this browser**, **Transferring to Echo**, **Saved in Echo**, **Interrupted — saved audio available**, and **Needs attention**. Only full durable import acknowledgement means saved in Echo. Interrupted capture recovers the committed prefix after browser restart; it never resumes microphone or tab capture automatically.
+| Status | What to do |
+|---|---|
+| **Saved in this browser** | Open the paired Echo app to transfer, or export the audio from the extension. |
+| **Transferring to Echo** | Keep Echo available until transfer finishes. |
+| **Saved in Echo** | Choose **Open in Echo** to review the imported recording. |
+| **Interrupted — saved audio available** | Review or export the saved portion. Capture will not restart automatically. |
+| **Needs attention** | Read the accompanying error. Keep the local recording until transfer or export succeeds. |
 
-Pending recordings can be exported without Echo. Exports are sequential WAV parts of at most 30 minutes, representing one continuous timeline. Delete unsynchronized audio only after checking the warning and making your own backup. **Uninstalling the extension or deleting its browser profile can remove pending audio. Export or synchronize it first.** Browser disk space is finite despite the unlimitedStorage permission.
+Pending recordings can be exported without Echo after unlocking saved history with the extension recovery phrase. After a browser restart, authorized Echo normally unlocks history automatically when available. New offline recording uses the stored public encryption material and does not require unlocking older history. Longer exports contain numbered WAV files of up to 30 minutes each; play them in order. **Uninstalling the extension or deleting its browser profile can remove pending audio. Export or synchronize it first.** Browser storage still depends on available disk space.
 
-After complete import, redundant local PCM is removed and **Open in Echo** opens the saved recording in its original library. **Remove receipt** removes only the browser receipt; the imported Echo recording remains. **Delete local audio** requires confirmation and is unavailable for an active recording. Ambiguous or missing acknowledgements retain local audio. Pairing to another library requires explicit confirmation before transferring pending recordings there; verify the destination carefully.
+Echo confirms the complete import before the extension removes its duplicate audio. **Remove receipt** only removes the extension's record of that transfer; the meeting remains in Echo. **Delete local audio** permanently removes an untransferred recording after confirmation and is unavailable while recording. Export a backup before deleting audio you still need. A failed or uncertain transfer keeps the local copy.
 
 ## Live and final transcription
 
-Live processing runs in an open Echo workspace using its existing local Turbo model. Download Turbo deliberately in Models before using live text. The extension never installs models, runs inference, or selects a cloud provider automatically.
+For live text, download **Turbo** in the Echo app's **Models** page and leave an Echo workspace tab open. The extension does not download a model or choose a cloud provider automatically.
 
-If Echo or the model is unavailable, recording continues. Live text reports paused, model needed, processing busy, catching up, or live. Processing lag depends on the computer. Closing the processing tab pauses live text; reopening Echo resumes from saved progress. Two Echo tabs use a fenced processing lease so only one writes the draft.
+Recording continues if Echo or its model is unavailable. Live text reports whether it is paused, needs a model, is busy, is catching up, or is live. It may lag behind speech on slower computers. Closing the processing tab pauses live text; reopening Echo resumes from saved progress.
 
-The popup shows a short live preview and processing status while recording. **Open Echo** opens the recording’s paired workspace. Live text is provisional. Final transcription takes priority after import and uses the recording's selected speech model and normal speaker-recognition workflow. Generate notes from the final transcript. The draft is retained until final processing succeeds. Speaker grouping does not guarantee verified identities or accurate overlap separation.
+The popup shows a short preview. **Open Echo** opens the paired workspace. Live text is provisional: after import, final transcription takes priority and uses the selected speech model and speaker grouping. Generate notes from the final transcript. The draft remains until final processing succeeds. Review words and speaker labels for mistakes, especially where people speak over one another.
 
 ## Permissions and privacy
 
-- **activeTab/tabCapture/scripting:** capture the chosen meeting's audio after an explicit user action and read only meeting call/mute controls.
-- **offscreen:** keep audio resources running when the popup closes.
-- **storage/unlimitedStorage:** store settings, trusted connection credentials and durable local audio. This does not guarantee unlimited free disk space.
-- **alarms:** coordinate transfer/recovery while the service worker can suspend.
-- **Optional provider host access:** enable supported meeting state observations for the selected service. No chat, attendee profiles, credentials or meeting transcripts are scraped.
-- **Loopback host access:** transfer to the configured Echo installation on this computer. A revocable scoped credential authorizes only this extension's recording ingest, status, controls and live drafts.
-- **Microphone:** runtime permission only when you enable your voice; video is always disabled.
+- Meeting-service access lets Echo read call and mute controls. It does not read chat, participant profiles, account credentials, or page transcripts.
+- Tab and microphone permission enable the audio sources you choose. The camera is never requested or captured.
+- Authenticated encryption protects pending audio and sensitive recording details. Saved history unlocks through authorized Echo or the extension recovery phrase. Non-identifying counters and status remain visible while locked.
+- Connection secrets use a browser device key. This does not protect a runnable stolen browser profile or an already-unlocked browser. WAV and timeline exports are unencrypted.
+- Local-app access transfers recordings into the library you approve. The extension cannot browse existing meetings, delete them, change app settings, or retrieve Calendar credentials.
 
-No cookies, browsing history, debugger, native messaging, desktop capture, camera, or all-site access is requested. Code is bundled locally. The extension cannot list existing Echo meetings, delete them, change settings, or retrieve Calendar credentials. Use **Disconnect** in extension Setup or revoke the installation in Echo to stop future access. Setup confirms server revocation before removing the local connection; if Echo is unavailable, it retains the connection and asks you to retry. Pending local audio is retained. Audio remains local unless you explicitly choose an existing cloud notes workflow in Echo after final transcription.
+Audio stays local. If you explicitly confirm a ChatGPT notes request in Echo, the selected final transcript version, including speaker labels, is sent to OpenAI; audio is not sent. Selecting passages does not narrow that transcript. See [ChatGPT data handling](chatgpt.md).
+
+To end the connection, use **Disconnect from Echo** in extension Setup or revoke the installation in Echo. If Echo is unavailable, Setup retains the connection and asks you to retry so it can confirm revocation. Pending audio remains available locally.
+
+## For developers
+
+Build the app and extension with `bash scripts/build.sh`. For the extension alone, run `npm ci --ignore-scripts` followed by `npm run build:extension`. The output is `extension/dist`. See the [developer guide](development.md#develop-the-extension) for rebuilds and isolated testing.
+
+The extension uses Manifest V3 with a Chromium 120 API floor. Audio is journaled as encrypted mono 16 kHz PCM16 in IndexedDB, with roughly one-second durable chunks and a bounded saving backlog. Transfer deletes local PCM only after a separate complete-import acknowledgement check. Export/processing parts represent one sequential timeline. Browser restart recovers committed audio without resuming capture.
+
+Microphone inclusion needs a fresh positive observation of an active, unmuted meeting. Missing, conflicting, disconnected, or stale observations close the microphone gate. Live inference uses a fenced server lease to prevent two Echo tabs from overwriting the same draft. Calendar association requires one unambiguous, recently loaded matching event; otherwise the recording remains an ordinary online meeting.
+
+All executable code is bundled. The manifest requests no cookies, history, debugger, native messaging, desktop capture, camera, or all-site access. The [permission table](extension-publishing.md#permission-explanations) explains each API and host permission. See [architecture](architecture.md) and [qualification](extension-qualification.md) for technical boundaries and tests.
 
 ## Preparing a store package
 
-Run `npm run package:extension` after the build and tests. The archive contains only the production manifest, bundled extension code, styles, pages and icons. It must exclude test fixtures, recordings, credentials, local libraries and logs. See [store preparation](extension-store.md). Store submission, developer agreements and publishing require separate user approval.
+Run `npm run package:extension` after verification. The archive contains only allowlisted extension assets, with no test fixtures, recordings, credentials, local libraries, or logs. Follow the [publishing guide](extension-publishing.md) and [store materials](extension-store.md). Packaging does not submit or publish the extension; those actions and developer agreements need the owner's approval.

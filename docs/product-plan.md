@@ -1,5 +1,7 @@
 # Echo Voice web product plan
 
+> Historical product brief. This records the original proposal, including features and privacy choices that later changed. For current behavior and limits, use [feature coverage](feature-coverage.md), [architecture](architecture.md), and the [documentation index](README.md). Do not use this proposal as installation guidance or a statement of shipped capabilities.
+
 This is a proposed product plan for a web version of Echo Voice, based on the current app's documented features and visible user controls. It describes what users should be able to do, without prescribing technologies or implementation. Features below are planned web behavior, not claims that a web product already exists.
 
 ## 1. Product purpose

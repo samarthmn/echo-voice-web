@@ -1,0 +1,62 @@
+{
+  "capturedAt": "2026-10-09T15:48:06.888Z",
+  "extensionVersion": "0.1.0",
+  "browserVersion": "154.0.8037.98",
+  "extensionId": "poonbmodjfijfbfiopememgfijahgbag",
+  "source": "Unmodified buildExtension output; fresh isolated profile; all HTTP(S) denied by local proxy.",
+  "states": {
+    "initial": "Unpaired, no recordings, no recovery phrase generated, no provider permissions.",
+    "choices": "Same initial setup, scrolled to meeting-service and microphone choices; no permissions granted."
+  },
+  "assets": {
+    "setup-protection-1280x800.png": {
+      "width": 1280,
+      "height": 800,
+      "sha256": "9cfe537c1fe23356e5ceb30a72323d3289cbeaabf05c764f76919b18d34eac13"
+    },
+    "setup-choices-1280x800.png": {
+      "width": 1280,
+      "height": 800,
+      "sha256": "b134c8486651e8d9b96d8e87e56e9fa3e894a22d3a9030a0ee52ec7d8418be3b"
+    },
+    "promo-440x280.png": {
+      "width": 440,
+      "height": 280,
+      "sha256": "0dc406f082326af2d10c6861ff2fed8df6841f9c44883d8d7f6f2c21ef90c48e"
+    }
+  },
+  "bundleHashes": {
+    "manifest.json": "6d7300f853efbdc0b9f4c186ea3f9bdb141c056840f457056f4851313bdaa56a",
+    "background.js": "f96f558d7ef2fed697c09b01c89aa687fb99ffdfab4277eeb20b80bbca3f6f01",
+    "offscreen.js": "cf8d7ccc0f4c1e8f63195b7c98c4152829c13e1960d3bc570f0da7dcc0ac4253",
+    "popup.js": "a257e01b14d5c2a9faee29fd4015553c1066f1ef8a253baf52fa27b6c2c0d0eb",
+    "setup.js": "5c9cce52230f9d69f3eb15ada472dbb63a372c005a0fd525255ed8b556f33b26",
+    "content.js": "49232cc5f5358b0de6fbdf2702b99aebf71d1600e7dc0eb3ed66911708acb7f6",
+    "worklet.js": "74d64d128075e3e8d3b86ec3ddcd58c06e92d5e6c2eafef2ffbf784c409955ba",
+    "popup.html": "82f8e72b442923dcdf2f11e51c0f91cbc7fe443a4cd37b334bcb869e8dda53e8",
+    "setup.html": "c7ca99ab502b65acfe74e5686a4eeaafe4d4e11ad2c4e97bdd104dc7fd12f01c",
+    "offscreen.html": "f274d51b3ffd0a5df34e76c07ffb1f40688bb13b70f74a703319e8fc7577abf9",
+    "ui.css": "f3bd10dedd54b70777e50f1b6e0ef6959318e5b0f6e5a3a837a81eeb5878d7c3",
+    "design-tokens.css": "c773b8b1c4a9f447f1b15e01e6cc4fee00597e93bc765cd8f111b58a9e0c573f",
+    "icons/echo.svg": "6ebecb27e2ffed9270fba10bc00bf21ce3762f80f65bb12d77b4179c21a872e7",
+    "icons/16.png": "5d66185a9a3d2689ec8dc0faaab7a0f183f2cc20cf30e0bea2e983c2451cb132",
+    "icons/32.png": "8bc7bb3e3fdfcaa89aff5be764ca0c42872725cb6024d79097a8d57394039a3c",
+    "icons/48.png": "32707965cebb729be5e35322f36dd24c89ab926b778243350735246f01ac059b",
+    "icons/128.png": "f3cc2bbd5a7fd8dde3e107e3343bbcadc512a86fb341bc1e53efbbb5ff7b968a",
+    "fonts/inter-400.woff2": "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc",
+    "fonts/inter-500.woff2": "f3779f1efccc4bdcdf9c0a02ab95bf6bd092ed09c48c08cedc725889edd1d19f",
+    "fonts/inter-600.woff2": "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a",
+    "fonts/LICENSE": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3"
+  },
+  "sourceHashes": {
+    "scripts/capture-extension-assets.mjs": "fa8e6ebb40973a33fa85110fa5a5f536cc36a4d5cf56783d90125a6e0dc679f1",
+    "docs/extension-assets/promo.html": "4d7db545549d1047271041617aa67b1ca728b42bedcc52ca01a4c2f47d8daf2d",
+    "public/fonts/inter.css": "93e64ea07b9d0cff3853346e59f1d1a71804e06ce33d2f48c0397c71d5186245"
+  },
+  "pending": [
+    "Approved connected destination",
+    "Actual qualified recording and pause",
+    "Saved recording and recovery history",
+    "Current companion workspace"
+  ]
+}

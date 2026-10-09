@@ -1,5 +1,7 @@
 # Echo Voice Implementation Plan
 
+> Historical implementation plan, superseded by the browser extension. The meeting runner described below has been removed. Use [current architecture](architecture.md), [developer instructions](development.md), and the [documentation index](README.md) for current work. Historical tasks are retained as context, not current setup instructions.
+
 **Goal:** Build a usable local browser meeting workspace from the attached plan and requested calendar/bot amendment.
 **Architecture:** Dioxus + Axum REST application; local SQLite/files; browser speech worker; optional local notes and meeting runner.
 **Tech Stack:** Dioxus 0.7, Rust, Axum, rusqlite, Transformers.js, Playwright.
