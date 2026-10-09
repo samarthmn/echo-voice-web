@@ -12,7 +12,7 @@ const data = await mkdtemp(join(process.cwd(), 'tmp', 'echo-import-browser-'));
 const reservation=createPortReservation();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const freePort=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
 const port = process.env.ECHO_IMPORT_TEST_PORT || String(freePort);
 const origin = `http://127.0.0.1:${port}`;
-const server = spawn(process.env.ECHO_TEST_BINARY || './target/debug/echo-server', [], { env: { ...process.env, ECHO_BIND: `127.0.0.1:${port}`, ECHO_DATA_DIR: data }, stdio: 'pipe' });
+const server = spawn(process.env.ECHO_TEST_BINARY || './target/debug/echo-server', [], { env: { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), ECHO_BIND: `127.0.0.1:${port}`, ECHO_DATA_DIR: data }, stdio: 'pipe' });
 let browser;
 try {
   for (let attempt = 0; attempt < 100; attempt++) { if(server.exitCode !== null)throw new Error('The isolated test server could not bind. Refusing to use any existing workspace.'); try { if ((await fetch(`${origin}/api/health`)).ok) break; } catch {} if (attempt === 99) throw new Error('Test server did not start.'); await delay(100); }

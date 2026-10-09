@@ -11,11 +11,15 @@
     "build:extension": "node scripts/build-extension.mjs",
     "package:extension": "node scripts/package-extension.mjs",
     "test:extension": "node --test tests/extension*.test.mjs",
-    "test:extension:unit": "node --test tests/extension-runtime.test.mjs tests/extension-capture.test.mjs tests/extension-live.test.mjs tests/extension-workspace.test.mjs tests/inference-live.test.mjs tests/extension-settings.test.mjs tests/extension-interruption.test.mjs tests/extension-library.test.mjs tests/extension-controls.test.mjs",
-    "test:extension:integration": "node --test tests/extension-browser.test.mjs"
+    "test:extension:unit": "node --test tests/extension-runtime.test.mjs tests/extension-capture.test.mjs tests/extension-live.test.mjs tests/extension-workspace.test.mjs tests/inference-live.test.mjs tests/extension-settings.test.mjs tests/extension-interruption.test.mjs tests/extension-library.test.mjs tests/extension-controls.test.mjs tests/extension-pairing-runtime.test.mjs tests/extension-onboarding.test.mjs tests/extension-vault.test.mjs tests/extension-vault-session.test.mjs",
+    "test:extension:integration": "node --test tests/extension-browser.test.mjs tests/extension-storage-protection.test.mjs",
+    "package:desktop": "node scripts/package-desktop.mjs",
+    "test:desktop-package": "node --test tests/package-desktop.test.mjs tests/sign-macos.test.mjs tests/desktop-status.test.mjs",
+    "test:runtime-paths": "node --test tests/runtime-paths.test.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",
+    "@scure/bip39": "2.2.0",
     "onnxruntime-node": "1.21.0"
   },
   "overrides": {

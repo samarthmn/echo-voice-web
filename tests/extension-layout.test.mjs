@@ -44,6 +44,12 @@ test('popup has an intrinsic width, reachable controls at zoom, and responsive s
     }
     await page.goto(pathToFileURL(path.join(scratch,'setup.html')).href);await page.setViewportSize({width:320,height:600});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth),320,'setup stays responsive at 320px');
+    for(const theme of ['light','dark']) {
+      await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),320,`${theme} setup stays responsive`);
+      const colors=await page.locator('#connect').evaluate(button=>({ink:getComputedStyle(button).color,background:getComputedStyle(button).backgroundColor}));
+      assert.notEqual(colors.ink,colors.background,`${theme} primary control has distinct text and background`);
+    }
     console.log(`Popup layout: ${normal.titleWidth}px input; one-line heading; Start bottom ${normal.startBottom}px; 150%/200% zoom reachable; setup 320px.`);
   } finally {if(browser)await browser.close();await rm(scratch,{recursive:true,force:true,maxRetries:3});}
 });

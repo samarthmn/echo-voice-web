@@ -1,4 +1,5 @@
-// Initialize the real pinned helper with managed config, without signing in or sending data.
+// Validate pinned helper protocol/config without touching a real account or OS keyring.
+// Production uses strict keyring; this no-account parser smoke overrides only the credential backend.
 import { spawn, execFileSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
@@ -30,7 +31,7 @@ if (!available) {
     if (version !== 'codex-cli 0.160.0') throw new Error(`Unexpected helper version: ${version}`);
     await writeFile(path.join(home, 'config.toml'), await readFile('server/src/chatgpt-config.toml'), { mode: 0o600 });
     const work = path.join(home, 'work'); await mkdir(path.join(work, '.git'), { recursive: true });
-    child = spawn(helper, ['app-server', '--stdio', '--strict-config'], { cwd: work, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawn(helper, ['app-server', '--stdio', '--strict-config', '-c', 'cli_auth_credentials_store="ephemeral"'], { cwd: work, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let diagnostic = ''; child.stderr.on('data', chunk => { diagnostic += chunk; });
     const lines = createInterface({ input: child.stdout });
     let timer;
@@ -48,7 +49,7 @@ if (!available) {
       child.stdin.write(JSON.stringify({ id: 1, method: 'initialize', params: { clientInfo: { name: 'echo_voice_config_smoke', version: '0.1.0' }, capabilities: { experimentalApi: true } } }) + '\n');
     }).finally(() => { clearTimeout(timer); lines.close(); });
     child.stdin.write('{"method":"initialized"}\n');
-    console.log('PASS: Codex 0.160.0 accepted the final managed config with --strict-config.');
+    console.log('PASS: Codex 0.160.0 accepted managed configuration with --strict-config (ephemeral no-account credential override).');
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit'); child.kill();

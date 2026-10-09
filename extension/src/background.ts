@@ -1,9 +1,10 @@
-import {endpointURL, meetingFor, microphoneAllowed, Observation, Provider, validObservation, unixSecondsToMilliseconds, InterruptionReason} from './core';
-import {allRecordings} from './storage';
-import {jsonRequest} from './protocol';
+import {meetingFor, microphoneAllowed, Observation, Provider, validObservation, InterruptionReason} from './core';
+import {allRecordings,migrateRecordings,protectionMigrationPending} from './storage';
+import {beginVaultSetup,confirmVaultSetup,recoverVault,vaultStatus,syncVaultWithEcho,lockVault,trustedVaultIdentity} from './vault-manager';
 import {settings, saveSettings} from './settings';
 import {openEcho, deleteLocalRecording} from './library-actions';
-import {connectionAction, connectionStatus, disconnect, livePreview} from './connection';
+import {connectionAction, connectionStatus, livePreview} from './connection';
+import {beginPairing, resumePairing, cancelPairing, confirmPairingLibrary, openPairingApproval, requestManualPairing, pairingView, disconnectPairing} from './pairing';
 declare const chrome: any;
 type Owner = {tabId: number; identity: string; recordingId: string; documentId?: string; gateRevision: number; departing?: boolean};
 let owner: Owner | undefined; let starting = false; let makingOffscreen: Promise<void> | undefined;
@@ -66,6 +67,7 @@ async function start(message: any) {
     await restoreOwner(); if(owner) {if(await hasOffscreen() && (await send({type:'STATUS'})).active) throw new Error('A recording is already active. Stop it before starting another.'); await clearOwner();}
     if(message.consent !== true) throw new Error('Confirm that meeting participants consent before starting.');
     const tab = await chrome.tabs.get(message.tabId); const meeting = meetingFor(tab.url ?? ''); if(!meeting) throw new Error('Open a supported Google Meet, Zoom Web or Teams Web meeting tab.');
+    if(!(await vaultStatus()).ready) throw new Error('Save your recovery phrase in Setup before recording.');
     const prefs = await settings(); if(!prefs.enabledProviders.includes(meeting.provider)) throw new Error('Enable this meeting provider in Echo extension setup.');
     if(message.micEnabled === true && !prefs.micGranted) throw new Error('Grant microphone permission in setup, or explicitly choose tab audio only.');
     if(!(await chrome.permissions.contains({origins:[meeting.originPattern]}))) throw new Error('This meeting provider needs permission in setup.');
@@ -87,39 +89,16 @@ async function start(message: any) {
     } catch(error) {await clearOwner(); throw error;}
   } finally {starting = false;}
 }
-async function pairRequest(message: any) {
-  const current = await settings(); const endpoint = endpointURL(message.endpoint);
-  const code = String(message.code ?? '').trim(); if(!code || code.length > 128) throw new Error('Enter the pairing code shown in Echo settings.');
-  const request = await jsonRequest(endpoint,'/pairing/request',{method:'POST',body:JSON.stringify({code,installationId:current.installationId,name:String(message.name ?? 'Echo browser extension').slice(0,100)})});
-  if(typeof request.requestId !== 'string' || typeof request.libraryId !== 'string') throw new Error('Echo returned an invalid pairing request.');
-  const expiresAtMs = unixSecondsToMilliseconds(request.expiresAt);
-  await chrome.storage.session.set({pairRequest:{...request,code,endpoint}}); return {requestId:request.requestId,expiresAtMs};
-}
-function claimPair(confirmLibrary = false) {return connectionAction(() => claimPairLocked(confirmLibrary));}
-async function claimPairLocked(confirmLibrary = false) {
-  const prefs = await settings(); const stored = await chrome.storage.session.get(['pairRequest','pendingPair']);
-  let pair = stored.pendingPair;
-  if(!pair) {
-    if(!stored.pairRequest) throw new Error('Enter a pairing code first.');
-    const request = stored.pairRequest;
-    const claim = await jsonRequest(request.endpoint,'/pairing/claim',{method:'POST',body:JSON.stringify({requestId:request.requestId,installationId:prefs.installationId,code:request.code})});
-    if(claim.status === 'pending') return {status:'pending'};
-    if(claim.status !== 'approved' || typeof claim.credential !== 'string' || !claim.credential || claim.libraryId !== request.libraryId) throw new Error('Echo returned an invalid pairing claim.');
-    pair = {endpoint:request.endpoint,libraryId:claim.libraryId,credential:claim.credential};
-  }
-  const pending = (await allRecordings()).filter(row => !row.receipt && row.chunkCount);
-  if(prefs.activeLibraryId && prefs.activeLibraryId !== pair.libraryId && pending.length && !confirmLibrary) {
-    await chrome.storage.session.set({pendingPair:pair}); return {status:'confirm-library',pendingCount:pending.length};
-  }
-  // Retain old library credentials while their audio is pending. Recordings keep their original ownership.
-  const approvedPair = pair;
-  await saveSettings(current => ({activeLibraryId:approvedPair.libraryId,endpoint:approvedPair.endpoint,pairs:{...current.pairs,[approvedPair.libraryId]:approvedPair}}));
-  await chrome.storage.session.remove(['pairRequest','pendingPair']); void send({type:'SYNC'}); return {status:'approved',libraryId:pair.libraryId};
+let migrating:Promise<void>|undefined;let migrationError:string|undefined;
+function migrateProtectedHistory() {
+  if(!migrating) migrating=(async()=>{if((await vaultStatus()).unlocked && await protectionMigrationPending()){await migrateRecordings();migrationError=undefined;}})().catch(error=>{migrationError=(error as Error).message;}).finally(()=>{migrating=undefined;});
+  return migrating;
 }
 async function state() {
+  await syncVaultWithEcho();void migrateProtectedHistory();
   const prefs = await settings(); let active = null; let recoveryError: string | undefined;
   if(await hasOffscreen()) {const status = await send({type:'STATUS'}); active = status.active; recoveryError = status.error;}
-  return {settings:{endpoint:prefs.endpoint,installationId:prefs.installationId,activeLibraryId:prefs.activeLibraryId,enabledProviders:prefs.enabledProviders,micGranted:prefs.micGranted,micDeviceId:prefs.micDeviceId},active,recoveryError,recordings:await allRecordings()};
+  return {vault:{...await vaultStatus(),migrationPending:await protectionMigrationPending(),migrationError},pairing:await pairingView(),settings:{endpoint:prefs.endpoint,installationId:prefs.installationId,activeLibraryId:prefs.activeLibraryId,enabledProviders:prefs.enabledProviders,micGranted:prefs.micGranted,micDeviceId:prefs.micDeviceId},active,recoveryError,recordings:await allRecordings()};
 }
 chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => {
   if(sender.id !== chrome.runtime.id) return false;
@@ -150,6 +129,7 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
     run().catch(() => {}); return false;
   }
   if(message.target === 'offscreen') return false;
+  if(sender.url === chrome.runtime.getURL('offscreen.html') && message.type === 'TRUSTED_VAULT_IDENTITY') {trustedVaultIdentity().then(value => respond({ok:true,value}),error => respond({ok:false,error:(error as Error).message}));return true;}
   if(sender.url === chrome.runtime.getURL('offscreen.html') && message.type === 'TRUSTED_SETTINGS') {settings().then(value => respond({ok:true,value}),error => respond({ok:false,error:(error as Error).message})); return true;}
   if(sender.url === chrome.runtime.getURL('offscreen.html') && message.type === 'CAPTURE_STATUS') {
     void setBadge(message.active); if(!message.active && message.endedRecordingId) void restoreOwner().then(() => {if(owner?.recordingId === message.endedRecordingId) void clearOwner();}); return false;
@@ -158,7 +138,11 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
   const run = async () => {
     if(message.type === 'STATE') return state();
     if(message.type === 'CONNECTION_STATUS') return connectionStatus();
-    if(message.type === 'DISCONNECT') return disconnect(message.confirmed === true);
+    if(message.type === 'DISCONNECT') {const value=await disconnectPairing(message.confirmed === true);await lockVault();return value;}
+    if(message.type === 'VAULT_BEGIN') return beginVaultSetup();
+    if(message.type === 'VAULT_CONFIRM') {await confirmVaultSetup(message.words);await migrateProtectedHistory();return vaultStatus();}
+    if(message.type === 'VAULT_UNLOCK') {await recoverVault(message.phrase);await migrateProtectedHistory();return vaultStatus();}
+    if(message.type === 'VAULT_RETRY') {await syncVaultWithEcho(true);await migrateProtectedHistory();return vaultStatus();}
     if(message.type === 'LIVE_PREVIEW') return livePreview(message.recordingId);
     if(message.type === 'MIC_EXCLUSION') {
       await restoreOwner(); if(!owner || owner.recordingId !== message.recordingId) throw new Error('That recording is no longer active.');
@@ -175,9 +159,14 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
       await restoreOwner(); if(!owner || owner.recordingId !== message.recordingId) throw new Error('That recording is no longer active.');
       const id = owner.recordingId; const response = await send({type:'CONTROL',recordingId:id,action:message.action}); if(message.action === 'stop') await clearOwner(id); return response;
     }
-    if(message.type === 'PAIR_REQUEST') return pairRequest(message);
-    if(message.type === 'PAIR_CLAIM') return claimPair(message.confirmLibrary === true);
-    if(message.type === 'SAVE_ENDPOINT') return saveSettings({endpoint:message.endpoint}).then(() => ({}));
+    if(message.type === 'PAIR_BEGIN') return beginPairing(message.endpoint,message.name);
+    if(message.type === 'PAIR_STATUS') return resumePairing();
+    if(message.type === 'PAIR_CANCEL') return cancelPairing();
+    if(message.type === 'PAIR_CONFIRM_LIBRARY') return confirmPairingLibrary(message.requestId);
+    if(message.type === 'PAIR_OPEN_APPROVAL') return openPairingApproval(message.requestId);
+    if(message.type === 'PAIR_REQUEST') return requestManualPairing(message.endpoint,message.name,message.code);
+    if(message.type === 'PAIR_CLAIM') return message.confirmLibrary === true ? confirmPairingLibrary((await pairingView()).requestId ?? '') : resumePairing();
+    if(message.type === 'SAVE_ENDPOINT') return connectionAction(() => saveSettings({endpoint:message.endpoint})).then(() => ({}));
     if(message.type === 'MIC_GRANTED') return saveSettings({micGranted:message.granted === true}).then(() => ({}));
     if(message.type === 'PROVIDER_ENABLED' && ['meet','zoom','teams'].includes(message.provider)) {
       await saveSettings(current => {
@@ -186,7 +175,7 @@ chrome.runtime.onMessage.addListener((message: any,sender: any,respond: any) => 
         return {enabledProviders:providers};
       }); return {};
     }
-    if(message.type === 'SYNC') {void send({type:'SYNC'}); return {};}
+    if(message.type === 'SYNC') {await syncVaultWithEcho(true);await migrateProtectedHistory();void send({type:'SYNC'}); return {};}
     throw new Error('Unsupported extension action.');
   };
   run().then(value => respond({ok:true,value}),error => respond({ok:false,error:(error as Error).message})); return true;
@@ -198,8 +187,8 @@ chrome.tabs.onUpdated.addListener((tabId: number,change: any,tab: any) => {void 
   if(change.status === 'loading') {observations.delete(tabId); void gate().catch(() => {});}
   if(change.status === 'loading' || change.status === 'complete') void verifyOwnerDocument(tabId).catch(() => {});
 });});
-chrome.alarms.onAlarm.addListener((alarm: any) => {if(alarm.name === 'echo-transfer') void allRecordings().then(rows => {if(rows.some(row => !row.receipt && row.chunkCount)) void send({type:'SYNC'});});});
-chrome.runtime.onInstalled.addListener(() => {void settings(); void chrome.alarms.create('echo-transfer',{periodInMinutes:0.5});});
-chrome.runtime.onStartup.addListener(() => {void clearOwner(); void send({type:'SYNC'});});
+chrome.alarms.onAlarm.addListener((alarm: any) => {if(alarm.name === 'echo-transfer') {void resumePairing().then(()=>syncVaultWithEcho()).then(()=>migrateProtectedHistory()).catch(() => {}); void allRecordings().then(rows => {if(rows.some(row => !row.receipt && row.chunkCount)) void send({type:'SYNC'});});}});
+chrome.runtime.onInstalled.addListener((details: any) => {void settings(); void chrome.alarms.create('echo-transfer',{periodInMinutes:0.5}); if(details.reason === 'install') void chrome.runtime.openOptionsPage();});
+chrome.runtime.onStartup.addListener(() => {void clearOwner(); void resumePairing().then(()=>syncVaultWithEcho(true)).then(()=>migrateProtectedHistory()).then(()=>send({type:'SYNC'})).catch(()=>{});});
 setInterval(() => {void gate().catch(() => {});},1000);
 void chrome.storage.session.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});

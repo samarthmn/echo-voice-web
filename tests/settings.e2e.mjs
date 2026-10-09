@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFile, mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
+import {decodeBackup} from './helpers/encrypted-backup.mjs';
 
 // Run against a fresh local data directory, for example:
 // ECHO_DATA_DIR="$PWD/tmp/echo-settings-e2e" ECHO_BIND=127.0.0.1:3011 ./target/debug/echo-server
@@ -182,11 +183,33 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       await page.getByRole('button', { name: 'Storage', exact: true }).click();
       await expect(page.getByText('Library location on this computer')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Choose library file' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Export library', exact:true })).toBeDisabled();
+      await page.getByRole('button', { name:'Save recovery phrase', exact:true }).click();
+      await expect(page.locator('.recovery-words li')).toHaveCount(24);
+      // Synthetic test-library phrase stays in memory and never enters screenshots/logs.
+      const phraseWords=await page.locator('.recovery-words li').allTextContents();
+      await page.setViewportSize({width:320,height:740});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Recovery words fit at 320px');
+      await page.getByRole('button',{name:'I saved the phrase',exact:true}).click();
+      await expect(page.locator('.recovery-words')).toHaveCount(0);
+      await page.getByLabel('Word 3',{exact:true}).fill('incorrect');
+      await page.getByLabel('Word 11',{exact:true}).fill(phraseWords[10]);
+      await page.getByLabel('Word 20',{exact:true}).fill(phraseWords[19]);
+      await page.getByRole('button',{name:'Confirm recovery phrase',exact:true}).click();
+      await expect(page.getByRole('alert')).toBeVisible();
+      await expect(page.getByRole('button',{name:'Export library',exact:true})).toBeDisabled();
+      await page.getByLabel('Word 3',{exact:true}).fill(phraseWords[2]);
+      await page.getByRole('button',{name:'Confirm recovery phrase',exact:true}).click();
+      await expect(page.getByText('Recovery phrase saved',{exact:true})).toBeVisible();
+      await page.setViewportSize({width:1440,height:1060});
       const downloadPromise = page.waitForEvent('download');
       await page.getByRole('button', { name: 'Export library' }).click();
       const backup = await downloadPromise;
       const backupPath = await backup.path();
-      const exported = JSON.parse(await readFile(backupPath, 'utf8'));
+      const envelope = JSON.parse(await readFile(backupPath, 'utf8'));
+      assert.equal(envelope.format, 'echo-voice-encrypted');
+      assert.ok(!JSON.stringify(envelope).includes('Echo Labs'));
+      const exported=decodeBackup(envelope,phraseWords.join(' '));
       assert.equal(exported.format, 'echo-voice-web');
       assert.equal(exported.vocabulary.length, 2);
       assert.equal(exported.settings.ollamaUrl, undefined);
@@ -200,7 +223,7 @@ test('Settings persist local preferences, vocabulary, backups, and explicit micr
       const wrongChooser = page.waitForEvent('filechooser');
       await page.getByRole('button', { name: 'Choose library file' }).click();
       await (await wrongChooser).setFiles({ name: 'wrong.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ entries: [] })) });
-      await expect(page.getByRole('alert')).toContainText('supported Echo Voice Web');
+      await expect(page.getByRole('alert')).toContainText('supported Echo library backup');
       const restoreChooser = page.waitForEvent('filechooser');
       await page.getByRole('button', { name: 'Choose library file' }).click();
       await (await restoreChooser).setFiles({ name: 'backup.json', mimeType: 'application/json', buffer: await readFile(backupPath) });

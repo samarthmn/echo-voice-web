@@ -1,6 +1,15 @@
 //! Shared workspace controls keep action hierarchy and accessibility consistent.
 use dioxus::prelude::*;
 
+/// Presentation only: unknown capability checks never become a ready claim.
+/// These values are recomputed from the browser/runtime, not saved preferences.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct SetupReadiness {
+    pub recording_ready: Option<bool>,
+    pub selected_speech_model_ready: Option<bool>,
+    pub optional_notes_ready: Option<bool>,
+}
+
 /// Use singular count labels only for one item.
 pub fn count_label(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {}", if count == 1 { singular } else { plural })

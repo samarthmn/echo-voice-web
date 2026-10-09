@@ -17,7 +17,7 @@ const port = socket.address().port;
 await new Promise(resolve => socket.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
-  env: { ...process.env, TMPDIR: scratch, ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' },
+  env: { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), TMPDIR: scratch, ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' },
   stdio: 'inherit',
 });
 let serverError, serverExited = false;
@@ -95,6 +95,8 @@ try {
     'tests/review.e2e.mjs',
     'tests/review-chatgpt.e2e.mjs',
     'tests/chatgpt-connection.e2e.mjs',
+    'tests/calendar-connection.e2e.mjs',
+    'tests/onboarding.e2e.mjs',
   ]) await run(script);
   passed = true;
 } finally { await shutdown(); }

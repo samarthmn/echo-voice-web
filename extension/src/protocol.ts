@@ -1,3 +1,4 @@
+import {protectedCompanion,UPDATE_ECHO_MESSAGE} from './compatibility';
 import {endpointURL, Pair, Recording, Settings} from './core';
 import {allRecordings, getChunk, recording, retainReceiptAndRemovePCM, updateRecording} from './storage';
 import {withRecordingLock} from './recording-lock';
@@ -33,6 +34,9 @@ export async function transferOne(row: Recording, pair: Pair, onControl: (id: st
 async function transferLocked(row: Recording, pair: Pair, onControl: (id: string, action: string) => Promise<void>): Promise<void> {
   if(row.receipt) return;
   if(row.libraryId && row.libraryId !== pair.libraryId) throw new ProtocolError('This recording belongs to a different Echo library.');
+  const companion=await jsonRequest(pair.endpoint,'/connection',{},pair.credential);
+  if(companion.libraryId!==pair.libraryId)throw new ProtocolError('Echo returned an inconsistent library acknowledgement. Audio is retained.');
+  if(!protectedCompanion(companion))throw new ProtocolError(UPDATE_ECHO_MESSAGE,426);
   if(!row.libraryId) row = await updateRecording(row.recordingId,{libraryId:pair.libraryId});
   const path = `/recordings/${row.recordingId}`;
   const metadata = {title:row.title,provider:row.provider,meetingUrl:row.meetingUrl,consent:row.consent,liveTranscription:row.liveTranscription,sampleRate:row.sampleRate,channels:row.channels,createdAt:row.createdAt};
@@ -78,12 +82,12 @@ export async function transferPending(settings: Settings, onControl: (id: string
   try {
     const rows = await allRecordings(); rows.sort((a,b) => Number(['recording','paused'].includes(b.captureState)) - Number(['recording','paused'].includes(a.captureState)) || (lastAttempt.get(a.recordingId) ?? 0) - (lastAttempt.get(b.recordingId) ?? 0) || b.createdAt.localeCompare(a.createdAt));
     for(const row of rows) {
-      if(row.receipt || !row.chunkCount) continue;
+      if(row.receipt || row.locked || !row.chunkCount) continue;
       const pair = settings.pairs[row.libraryId ?? settings.activeLibraryId ?? '']; if(!pair) continue;
       if((retryAfterLibrary.get(pair.libraryId) ?? 0) > Date.now()) continue;
       lastAttempt.set(row.recordingId,++attemptCounter);
       if(!(await updateTransferState(row.recordingId,{transferState:'transferring'}))) continue; notify();
-      try {await transferOne(row,pair,onControl); retryAfterLibrary.delete(pair.libraryId);} catch(error) {if(error instanceof ProtocolError && (error.status === 0 || error.status === 401)) retryAfterLibrary.set(pair.libraryId,Date.now() + (error.status === 401 ? 60000:10000)); await updateTransferState(row.recordingId,{transferState:error instanceof ProtocolError && error.status >= 400 ? 'attention':'saved-local',error:(error as Error).message});}
+      try {await transferOne(row,pair,onControl); retryAfterLibrary.delete(pair.libraryId);} catch(error) {if(error instanceof ProtocolError && (error.status === 0 || error.status === 401 || error.status === 426)) retryAfterLibrary.set(pair.libraryId,Date.now() + (error.status === 401 || error.status === 426 ? 60000:10000)); await updateTransferState(row.recordingId,{transferState:error instanceof ProtocolError && error.status >= 400 ? 'attention':'saved-local',error:(error as Error).message});}
       notify();
       if(Date.now() - passStarted >= 5000) break;
     }

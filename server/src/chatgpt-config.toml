@@ -1,6 +1,7 @@
 # Pinned Codex 0.160.0 configuration. No host configuration or login is inherited.
 forced_login_method = "chatgpt"
-cli_auth_credentials_store = "file"
+cli_auth_credentials_store = "keyring"
+mcp_oauth_credentials_store = "keyring"
 approval_policy = "never"
 sandbox_mode = "read-only"
 web_search = "disabled"
@@ -11,6 +12,8 @@ plugins = {}
 allow_login_shell = false
 check_for_update_on_startup = false
 suppress_unstable_features_warning = true
+[history]
+persistence = "none"
 [feedback]
 enabled = false
 [agents]
@@ -32,6 +35,7 @@ inherit = "none"
 [analytics]
 enabled = false
 [features]
+secret_auth_storage = false
 skip_host_skill_discovery = true
 shell_tool = false
 unified_exec = false

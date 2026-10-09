@@ -1,6 +1,8 @@
-/** Fixed, local CPU speech helper. Rust owns the private request file and stdin lease. */
-import { readFile, writeFile, stat, lstat, mkdir, readdir, rename, rm } from 'node:fs/promises';
+/** Fixed local CPU speech helper. Rust owns encrypted PCM and the private stdin lease. */
+import { open, readFile, writeFile, stat, lstat, mkdir, readdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { constants } from 'node:fs';
+import { createDecipheriv } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { inspect } from 'node:util';
 import { correctWhisperAlignment, validatedWhisperWords } from '../web/whisper-alignment.js';
@@ -42,8 +44,9 @@ async function cacheEntry(cache, relative) {
 
 export function validateRequest(request) {
   if (!request || !['download', 'transcribe'].includes(request.operation) || typeof request.cacheDir !== 'string' || !path.isAbsolute(request.cacheDir)) throw new Error('Invalid private native speech request.');
-  if (Object.keys(request).some(key => !['operation', 'cacheDir', 'audioPath', 'language'].includes(key))) throw new Error('Unsupported native speech request field.');
-  if (request.operation === 'transcribe' && (typeof request.audioPath !== 'string' || !path.isAbsolute(request.audioPath))) throw new Error('Native transcription requires a private PCM file.');
+  if (Object.keys(request).some(key => !['operation', 'cacheDir', 'audioPath', 'audioBytes', 'audioKey', 'language'].includes(key))) throw new Error('Unsupported native speech request field.');
+  if (request.operation === 'transcribe' && (typeof request.audioPath !== 'string' || !path.isAbsolute(request.audioPath) || !Number.isSafeInteger(request.audioBytes) || request.audioBytes <= 0 || request.audioBytes % 4 || request.audioBytes > MAX_SAMPLES * 4 || typeof request.audioKey !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(request.audioKey))) throw new Error('Native transcription requires encrypted private PCM and its stdin key.');
+  if (request.operation === 'download' && ['audioPath', 'audioBytes', 'audioKey'].some(key => key in request)) throw new Error('A model download does not accept audio.');
   if (request.language !== undefined && request.language !== 'auto' && !Object.hasOwn(LANGUAGES, request.language)) throw new Error('Unsupported recording language.');
   return request;
 }
@@ -57,6 +60,77 @@ export function decodePCM(bytes) {
     audio[index] = sample;
   }
   return audio;
+}
+
+/** Authenticate every bounded record before exposing PCM to the model. The owner
+ * supplies the expected length through its private pipe, so truncation, record
+ * reordering and trailing records all fail closed. No plaintext file is created. */
+export async function readEncryptedPCM(request) {
+  validateRequest(request);
+  const key = Buffer.from(request.audioKey, 'base64');
+  delete request.audioKey;
+  let file, audio;
+  try {
+    file = await open(request.audioPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const entry = await file.stat();
+    if (!entry.isFile() || entry.size < 8 || entry.size > 8 + request.audioBytes * 21) throw new Error('Invalid encrypted native audio.');
+    let position = 0;
+    const exact = async bytes => {
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, position);
+        if (!bytesRead) throw new Error('Encrypted native audio is incomplete.');
+        offset += bytesRead; position += bytesRead;
+      }
+    };
+    const header = Buffer.alloc(8); await exact(header);
+    if (header.toString('ascii') !== 'ECHOPCM1') throw new Error('Native audio must be encrypted.');
+    audio = new Float32Array(request.audioBytes / 4);
+    const output = Buffer.from(audio.buffer), length = Buffer.alloc(4);
+    let count = 0, index = 0n;
+    while (count < request.audioBytes) {
+      await exact(length);
+      const size = length.readUInt32LE();
+      if (size <= 0 || size > 65536 || count + size > request.audioBytes) throw new Error('Invalid encrypted native audio record.');
+      const sealed = Buffer.alloc(size + 16); await exact(sealed);
+      const nonce = Buffer.alloc(12); nonce.writeBigUInt64LE(index, 4);
+      const binding = Buffer.alloc(12); binding.writeBigUInt64LE(index); length.copy(binding, 8);
+      const decipher = createDecipheriv('aes-256-gcm', key, nonce);
+      decipher.setAAD(binding); decipher.setAuthTag(sealed.subarray(size));
+      const plain = decipher.update(sealed.subarray(0, size));
+      try { decipher.final(); plain.copy(output, count); } finally { plain.fill(0); }
+      count += size; index++;
+    }
+    if (position !== entry.size) throw new Error('Encrypted native audio has trailing data.');
+    // The wire encoding is little-endian regardless of the host architecture.
+    for (let index = 0; index < audio.length; index++) {
+      const sample = output.readFloatLE(index * 4);
+      if (!Number.isFinite(sample)) throw new Error('The decoded audio contains a non-finite sample.');
+      audio[index] = sample;
+    }
+    return audio;
+  } catch (error) { audio?.fill(0); throw error; }
+  finally { key.fill(0); await file?.close(); }
+}
+
+/** Read one bounded request without ending the stdin lifetime lease. */
+export function readPrivateRequest(input) {
+  return new Promise((resolve, reject) => {
+    const bytes = Buffer.alloc(4096); let count = 0;
+    const cleanup = () => { input.off('data', data); input.off('error', failed); input.off('end', ended); bytes.fill(0); };
+    const failed = error => { cleanup(); reject(error); };
+    const ended = () => failed(new Error('The native speech owner disconnected.'));
+    const data = chunk => {
+      if (count + chunk.length > bytes.length) return failed(new Error('Native request exceeded its limit.'));
+      chunk.copy(bytes, count); count += chunk.length;
+      const newline = bytes.subarray(0, count).indexOf(10);
+      if (newline < 0) return;
+      if (newline !== count - 1) return failed(new Error('Unsupported native request data.'));
+      try { const value = JSON.parse(bytes.subarray(0, newline).toString('utf8')); cleanup(); resolve(value); }
+      catch { failed(new Error('Invalid private native speech request.')); }
+    };
+    input.on('data', data); input.once('error', failed); input.once('end', ended);
+  });
 }
 
 export const validatedWords = validatedWhisperWords;
@@ -121,9 +195,7 @@ export async function runNative(request, emit) {
   } else { await validateReady(request.cacheDir); }
   let audio;
   if (!downloading) {
-    const entry = await lstat(request.audioPath);
-    if (!entry.isFile() || !entry.size || entry.size > MAX_SAMPLES * 4) throw new Error('Invalid private PCM audio file.');
-    audio = decodePCM(await readFile(request.audioPath));
+    audio = await readEncryptedPCM(request);
   }
   const { env, pipeline } = await import('@huggingface/transformers');
   env.cacheDir = request.cacheDir;
@@ -170,23 +242,20 @@ export async function runNative(request, emit) {
     const output = await transcriber(audio, { return_timestamps: 'word', chunk_length_s: 29, stride_length_s: 5, ...(request.language && request.language !== 'auto' ? { language: LANGUAGES[request.language], task: 'transcribe' } : {}) });
     const duration = audio.length / 16000;
     return { words: validatedWords(output, duration), duration };
-  } finally { await transcriber?.dispose(); }
+  } finally { audio?.fill(0); await transcriber?.dispose(); }
 }
 
 async function main() {
   // Keep stdout exclusively for the protocol, including third-party diagnostics.
   for (const level of ['log', 'info', 'warn', 'error', 'debug']) console[level] = (...args) => process.stderr.write(`${args.map(value => typeof value === 'string' ? value : inspect(value, { depth: 1, maxArrayLength: 4 })).join(' ').slice(0, 2048)}\n`);
-  process.stdin.resume();
   // Avoid native ORT destructor races while a thread is creating/running a session.
   const terminate = () => process.kill(process.pid, 'SIGKILL');
   process.stdin.once('end', terminate);
   process.on('SIGTERM', terminate); process.on('SIGINT', terminate);
   const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
   try {
-    if (process.argv.length !== 4 || process.argv[2] !== '--request' || !path.isAbsolute(process.argv[3])) throw new Error('Use the fixed helper with one private request file.');
-    const requestFile = await lstat(process.argv[3]);
-    if (!requestFile.isFile() || requestFile.size > 4096) throw new Error('Invalid private request file.');
-    const result = await runNative(JSON.parse(await readFile(process.argv[3], 'utf8')), emit);
+    if (process.argv.length !== 3 || process.argv[2] !== '--stdin-request') throw new Error('Use the fixed helper with its private stdin request.');
+    const result = await runNative(await readPrivateRequest(process.stdin), emit);
     emit({ type: 'result', result });
   } catch (error) {
     emit({ type: 'error', error: String(error?.message || error).split('\n')[0].slice(0, 1000) });

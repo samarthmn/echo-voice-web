@@ -26,7 +26,7 @@ export type Recording = {
   liveTranscription: boolean; sampleRate: 16000; channels: 1; createdAt: string;
   libraryId: string | null; chunkCount: number; totalFrames: number; captureState: CaptureState;
   transferState: TransferState; gaps: {atFrame: number; pauseMs: number}[]; interrupted: boolean;
-  error?: string; interruption?: ReturnType<typeof interruption>; receipt?: {libraryId: string; meetingId: string; verifiedAt: string};
+  locked?: boolean; protectionError?: string; error?: string; interruption?: ReturnType<typeof interruption>; receipt?: {libraryId: string; meetingId: string; verifiedAt: string};
 };
 export type Chunk = {recordingId: string; sequence: number; frames: number; sha256: string; pcm: ArrayBuffer};
 export type Pair = {libraryId: string; credential: string; endpoint: string};

@@ -1,8 +1,10 @@
+import {protectedCompanion} from './compatibility';
 import {Pair} from './core';
+import {lockEchoIdentity} from './vault-manager';
 import {settings, saveSettings} from './settings';
 import {recording} from './storage';
 import {jsonRequest, ProtocolError} from './protocol';
-export type ConnectionStatus = 'connected' | 'not-connected' | 'unavailable' | 'revoked';
+export type ConnectionStatus = 'connected' | 'not-connected' | 'unavailable' | 'revoked' | 'update-needed';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const liveStates = new Set(['live','catching-up','waiting-audio','model-missing','processing-busy','paused-open-echo','finalizing','final-transcript-needed','complete','disabled']);
 let actions: Promise<unknown> = Promise.resolve();
@@ -17,16 +19,20 @@ export async function connectionStatus(): Promise<{status: ConnectionStatus}> {
   if(connectionPending && samePair(pair,connectionPending.pair)) return connectionPending.promise;
   const promise = (async () => {
     let status: ConnectionStatus;
-    try {const body = await jsonRequest(pair.endpoint,'/connection',{signal:AbortSignal.timeout(3000)},pair.credential); if(body.libraryId !== pair.libraryId || body.installationId !== prefs.installationId) throw new Error('Invalid connection response.'); status = 'connected';}
+    try {const body = await jsonRequest(pair.endpoint,'/connection',{signal:AbortSignal.timeout(3000)},pair.credential); if(body.libraryId !== pair.libraryId || body.installationId !== prefs.installationId) throw new Error('Invalid connection response.'); status = protectedCompanion(body) ? 'connected':'update-needed';}
     catch(error) {status = error instanceof ProtocolError && error.status === 401 ? 'revoked':'unavailable';}
     const current = await settings(); const currentPair = current.pairs[current.activeLibraryId ?? ''];
     if(!currentPair) status = 'not-connected'; else if(!samePair(currentPair,pair)) status = 'unavailable';
+    if(status === 'revoked') await lockEchoIdentity();
     const value = {status}; connectionCache = {pair,at:Date.now(),value}; return value;
   })();
   connectionPending = {pair,promise}; try {return await promise;} finally {if(connectionPending?.promise === promise) connectionPending = undefined;}
 }
 export function disconnect(confirmed: boolean): Promise<{status: 'disconnected'}> {
-  return connectionAction(async () => {
+  return connectionAction(() => disconnectLocked(confirmed));
+}
+// Called only while holding connectionAction, including pairing reconciliation.
+export async function disconnectLocked(confirmed: boolean): Promise<{status: 'disconnected'}> {
     if(!confirmed) throw new Error('Confirm disconnect first. Pending local audio will remain on this device.');
     const prefs = await settings(); const pair = prefs.pairs[prefs.activeLibraryId ?? ''];
     if(!pair) return {status:'disconnected'};
@@ -38,7 +44,6 @@ export function disconnect(confirmed: boolean): Promise<{status: 'disconnected'}
       return {pairs,activeLibraryId:current.activeLibraryId === pair.libraryId ? null:current.activeLibraryId};
     });
     connectionCache = undefined; return {status:'disconnected'};
-  });
 }
 const livePending = new Map<string,Promise<any>>();
 export async function livePreview(id: string): Promise<any> {

@@ -9,7 +9,6 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 type ApiResult<T> = Result<T, ApiError>;
 type Payload = Result<Json<Value>, JsonRejection>;
 /// Convert extractor failures into actionable JSON errors shared by API clients.
@@ -165,16 +164,36 @@ async fn storage() -> ApiResult<Json<Value>> {
 }
 /// Download a portable library backup that excludes integration credentials.
 async fn backup() -> ApiResult<Response> {
-    let backup = store::export_library()?;
+    let backup = crate::recovery::encrypt_backup(store::export_library()?)?;
     download(
         serde_json::to_string(&backup)?,
         "application/json",
-        "echo-voice-library.json",
+        "echo-voice-encrypted-library.json",
     )
 }
 /// Validate and import a portable library backup.
 async fn restore(value: Payload) -> ApiResult<Json<Value>> {
-    Ok(Json(store::import_library(payload(value)?)?))
+    let value = payload(value)?;
+    let backup = if value["format"] == "echo-voice-encrypted" {
+        crate::recovery::decrypt_backup(value, None)?
+    } else if let Some(encrypted) = value.get("backup") {
+        if value
+            .as_object()
+            .is_none_or(|v| v.keys().any(|k| k != "backup" && k != "recoveryPhrase"))
+        {
+            return Err(ApiError::bad("Invalid encrypted backup request."));
+        }
+        crate::recovery::decrypt_backup(
+            encrypted.clone(),
+            value
+                .get("recoveryPhrase")
+                .and_then(Value::as_str)
+                .filter(|v| !v.trim().is_empty()),
+        )?
+    } else {
+        value
+    };
+    Ok(Json(store::import_library(backup)?))
 }
 /// Download a meeting in the requested supported document format.
 async fn export(
@@ -344,14 +363,21 @@ async fn audio(
         }
     };
     let stream = async_stream::stream! {
-        let mut offset=0u64;
+        let mut offset = 0u64;
         for part in parts {
-            let chunk_start=offset;let chunk_end=offset+part.bytes;offset=chunk_end;
-            if chunk_end<=start||chunk_start>end{continue;}
-            let local_start=start.saturating_sub(chunk_start);let local_end=(end+1).min(chunk_end)-chunk_start;let mut remaining=local_end-local_start;
-            let mut file=match tokio::fs::File::open(&part.path).await{Ok(file)=>file,Err(error)=>{yield Err::<Vec<u8>,std::io::Error>(error);break;}};
-            if let Err(error)=file.seek(std::io::SeekFrom::Start(local_start)).await{yield Err(error);break;}
-            while remaining>0{let mut buffer=vec![0u8;remaining.min(64*1024)as usize];match file.read(&mut buffer).await{Ok(0)=>{yield Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof,"A saved audio chunk is incomplete."));return;},Ok(count)=>{buffer.truncate(count);remaining-=count as u64;yield Ok(buffer);},Err(error)=>{yield Err(error);return;}}}
+            let chunk_start = offset; let chunk_end = offset+part.bytes; offset = chunk_end;
+            if chunk_end <= start || chunk_start > end { continue; }
+            let local_start = start.saturating_sub(chunk_start);
+            let local_end = (end+1).min(chunk_end)-chunk_start;
+            let mut cursor = local_start;
+            let mut file = match store::protected_reader(&part.path) { Ok(file)=>file, Err(error)=>{ yield Err::<Vec<u8>,std::io::Error>(error); return; } };
+            while cursor < local_end {
+                let length = (local_end-cursor).min(65536) as usize;
+                match file.read_range(cursor,length) {
+                    Ok(bytes)=>{cursor+=bytes.len() as u64; yield Ok(bytes);},
+                    Err(error)=>{yield Err(error); return;}
+                }
+            }
         }
     };
     let mut response = Response::builder()

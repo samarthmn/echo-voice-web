@@ -3,6 +3,7 @@
 Sparse model files and a synthetic marker exercise request/lifecycle checks only;
 they are isolated protocol fixtures and never become product qualification data.
 """
+import base64
 import hashlib
 import http.client
 import json
@@ -46,7 +47,7 @@ class Server:
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             self.port = listener.getsockname()[1]
-        env = {**os.environ, "ECHO_BIND": f"127.0.0.1:{self.port}", "ECHO_DATA_DIR": str(self.root / "data"), "TMPDIR": str(self.root / "tmp")}
+        env = {**os.environ, "ECHO_TEST_MODE": "1", "ECHO_TEST_STORAGE_KEY": base64.b64encode(bytes([42]) * 32).decode(), "ECHO_BIND": f"127.0.0.1:{self.port}", "ECHO_DATA_DIR": str(self.root / "data"), "TMPDIR": str(self.root / "tmp")}
         env.pop("ECHO_CONFIG_FILE", None)
         if not native:
             env["PATH"] = ""
@@ -254,9 +255,11 @@ class NativeSpeechHTTP(unittest.TestCase):
         (other_job / "audio.f32").write_bytes(b"other live library")
         try:
             deadline = time.monotonic() + 2
-            while time.monotonic() < deadline and not (orphan / "audio.f32").exists():
+            while time.monotonic() < deadline and not (orphan / "audio.enc").exists():
                 time.sleep(0.01)
-            self.assertTrue((orphan / "audio.f32").exists())
+            self.assertTrue((orphan / "audio.enc").exists())
+            self.assertEqual((orphan / "audio.enc").read_bytes()[:8], b"ECHOPCM1")
+            self.assertFalse((orphan / "request.json").exists())
             # A competing server must fail the library lock before touching spools.
             contender = subprocess.run([str(BINARY)], cwd=self.server.root, env={**self.server.env, "ECHO_BIND": "127.0.0.1:0"}, capture_output=True, timeout=5)
             self.assertNotEqual(contender.returncode, 0)

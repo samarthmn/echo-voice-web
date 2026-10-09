@@ -1,5 +1,5 @@
 [workspace]
-members = ["app", "server"]
+members = ["app", "server", "desktop"]
 resolver = "2"
 
 [workspace.package]
@@ -12,3 +12,8 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# Proc-macro dylibs execute on the build host; stripping can invalidate their
+# Mach-O load commands on newer macOS. Shipped runtime binaries stay stripped.
+[profile.release.build-override]
+strip = false

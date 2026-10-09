@@ -24,7 +24,7 @@ await mkdir(resolve(project, 'tmp'), { recursive: true });
 const dataDirectory = await mkdtemp(resolve(project, 'tmp', 'echo-recorder-e2e-'));
 const server = spawn(binary, [], {
   cwd: project,
-  env: { ...process.env, ECHO_BIND: `127.0.0.1:${port}`, ECHO_DATA_DIR: dataDirectory },
+  env: { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), ECHO_BIND: `127.0.0.1:${port}`, ECHO_DATA_DIR: dataDirectory },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverOutput = '';

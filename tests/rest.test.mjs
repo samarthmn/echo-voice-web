@@ -1,3 +1,4 @@
+import {decodeBackup,prepareRecovery} from './helpers/encrypted-backup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -15,8 +16,8 @@ async function freePort() {
   const server = createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
-async function launch(directory, port) {
-  const env = { ...process.env, ECHO_DATA_DIR: directory, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' };
+async function launch(directory, port, key=Buffer.alloc(32,42).toString('base64')) {
+  const env = { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:key, ECHO_DATA_DIR: directory, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' };
   const child = spawn(executable, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = ''; let failure; child.on('error', error => { failure = error; });
   child.stdout.on('data', chunk => { logs += chunk; }); child.stderr.on('data', chunk => { logs += chunk; });
@@ -37,6 +38,25 @@ async function stop(server) {
 function wavFixture() {
   const data = Buffer.alloc(64); data.write('RIFF'); data.writeUInt32LE(56, 4); data.write('WAVE', 8); data.write('fmt ', 12); data.writeUInt32LE(16, 16); data.writeUInt16LE(1, 20); data.writeUInt16LE(1, 22); data.writeUInt32LE(16000, 24); data.writeUInt32LE(32000, 28); data.writeUInt16LE(2, 32); data.writeUInt16LE(16, 34); data.write('data', 36); data.writeUInt32LE(20, 40); return data;
 }
+
+test('encrypted backup moves to a different library key only with its recovery phrase',async()=>{
+  const scratch=resolve('tmp');await mkdir(scratch,{recursive:true});const first=await mkdtemp(join(scratch,'recovery-from-'));const second=await mkdtemp(join(scratch,'recovery-to-'));let source;let destination;
+  function client(server){return async(path,{method='GET',body,status=200}={})=>{const response=await fetch(server.base+'/api'+path,{method,headers:{Origin:server.base,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});const value=await response.json();assert.equal(response.status,status,'Recovery request status mismatch');return value;};}
+  try{
+    source=await launch(first,await freePort());destination=await launch(second,await freePort(),Buffer.alloc(32,43).toString('base64'));
+    const from=client(source);const to=client(destination);
+    await from('/meetings',{method:'POST',status:201,body:{title:'Recovered on another computer',mode:'import',consent:false}});
+    const phrase=await prepareRecovery(from);const backup=await from('/storage/export');
+    assert.equal((await readFile(join(first,'recovery.json'),'utf8')).includes(phrase),false);
+    await to('/storage/import',{method:'POST',body:backup,status:409});
+    await to('/storage/import',{method:'POST',body:{backup,recoveryPhrase:'incorrect words'},status:400});
+    assert.equal((await to('/meetings')).meetings.length,0);
+    const corrupt=structuredClone(backup);corrupt.id=crypto.randomUUID();await to('/storage/import',{method:'POST',body:{backup:corrupt,recoveryPhrase:phrase},status:400});
+    assert.equal((await to('/meetings')).meetings.length,0);
+    assert.equal((await to('/storage/import',{method:'POST',body:{backup,recoveryPhrase:phrase}})).meetings,1);
+    assert.equal((await to('/meetings')).meetings[0].title,'Recovered on another computer');
+  }finally{await stop(source);await stop(destination);await rm(first,{recursive:true,force:true});await rm(second,{recursive:true,force:true});}
+});
 
 test('real Rust REST server preserves meeting lifecycle, audio, history, privacy and backups', { timeout: 60000 }, async () => {
   await access(executable);
@@ -82,7 +102,7 @@ test('real Rust REST server preserves meeting lifecycle, audio, history, privacy
     await api(`/meetings/${id}`, { method: 'PATCH', body: { liveTranscription: true }, status: 409 });
     const markdown = await (await fetch(`${server.base}/api/meetings/${id}/export?format=md`)).text(); assert.match(markdown, /earlier transcript version/); assert.match(markdown, /Verify release date/); assert.match(markdown, /Microphone muted/);
     const srt = await (await fetch(`${server.base}/api/meetings/${id}/export?format=srt`)).text(); assert.match(srt, /00:00:00,000 --> 00:00:02,000/); assert.match(srt, /Asha: We will ship next Friday/);
-    const backup = await api('/storage/export'); assert.equal(backup.format, 'echo-voice-web'); assert.equal(backup.audio.length, 2); assert.equal(backup.settings.ollamaUrl, undefined);
+    await api('/storage/export',{status:409}); const recoveryPhrase=await prepareRecovery(api); const encryptedBackup=await api('/storage/export'); assert.equal(encryptedBackup.format,'echo-voice-encrypted'); assert.equal(JSON.stringify(encryptedBackup).includes('We will ship'),false); const backup=decodeBackup(encryptedBackup,recoveryPhrase); assert.equal(backup.format, 'echo-voice-web'); assert.equal(backup.audio.length, 2); assert.equal(backup.settings.ollamaUrl, undefined);
     await api('/storage/import', { method: 'POST', body: backup, status: 409 });
     await api(`/meetings/${id}`, { method: 'PATCH', body: { status: 'recording' } }); await api(`/meetings/${id}`, { method: 'DELETE', status: 409 });
     await assert.rejects(() => launch(directory, port + 1), /Another Echo Voice server/);
@@ -98,7 +118,7 @@ test('real Rust REST server preserves meeting lifecycle, audio, history, privacy
     const credentials = structuredClone(backup); credentials.credentials = { oauthToken: 'never-import' }; await api('/storage/import', { method: 'POST', body: credentials, status: 400 });
     const executable = structuredClone(backup); executable.audio[0].data = Buffer.from('#!/bin/sh\ncommand').toString('base64'); await api('/storage/import', { method: 'POST', body: executable, status: 415 });
     assert.equal((await api('/meetings')).meetings.length, 0);
-    const imported = await api('/storage/import', { method: 'POST', body: backup }); assert.equal(imported.meetings, 1); assert.equal(imported.vocabulary, 1);
+    const imported = await api('/storage/import', { method: 'POST', body: encryptedBackup }); assert.equal(imported.meetings, 1); assert.equal(imported.vocabulary, 1);
     const restored = await api(`/meetings/${id}`); assert.equal(restored.transcripts.length, 2); assert.equal(restored.notes.length, 1); assert.equal(restored.moments.length, 1);
     const restoredAudio = await fetch(`${server.base}${track.url}`); assert.deepEqual(Buffer.from(await restoredAudio.arrayBuffer()), Buffer.concat([wav, tail]));
     const storage = await api('/storage'); assert.equal(storage.meetings, 1); assert.ok(storage.bytes > track.bytes); assert.ok(storage.availableBytes > 0); assert.equal(storage.path, directory);
@@ -128,7 +148,9 @@ test('real Rust REST server preserves meeting lifecycle, audio, history, privacy
     const recoveredOld = await api(`/extensions/legacy-recordings/${oldMeeting.id}/recover`,{method:'POST',body:{}});
     assert.equal(recoveredOld.meeting.tracks.length,1);assert.equal(recoveredOld.meeting.tracks[0].bytes,oldWav.length);assert.equal(recoveredOld.meeting.status,'saved');
     const retriedOld = await api(`/extensions/legacy-recordings/${oldMeeting.id}/recover`,{method:'POST',body:{}});assert.deepEqual(retriedOld.meeting.tracks,recoveredOld.meeting.tracks);
-    assert.deepEqual(await readFile(join(oldFolder,'meeting.wav')),oldWav);
-    assert.equal((await readFile(join(directory, 'workspace.sqlite'))).subarray(0, 15).toString(), 'SQLite format 3');
+    assert.equal((await readFile(join(oldFolder,'meeting.wav'))).subarray(0,8).toString(),'ECHOENC1');
+    assert.equal((await readFile(join(oldFolder,'session.json'))).subarray(0,8).toString(),'ECHOENC1');
+    const legacyPlayback = await fetch(`${server.base}${recoveredOld.meeting.tracks[0].url}`); assert.equal(legacyPlayback.status,200); assert.deepEqual(Buffer.from(await legacyPlayback.arrayBuffer()),oldWav);
+    assert.notEqual((await readFile(join(directory, 'workspace.sqlite'))).subarray(0, 15).toString(), 'SQLite format 3');
   } finally { await stop(server); await rm(directory, { recursive: true, force: true }); }
 });

@@ -1,18 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
 import {build} from 'esbuild';
 
-const built = await build({entryPoints:['extension/src/settings.ts'],bundle:true,write:false,format:'iife',globalName:'settingsAPI'});
+const built = await build({entryPoints:['extension/src/settings.ts'],bundle:true,write:false,format:'iife',globalName:'settingsAPI',plugins:[{name:'device-key-storage',setup(builder){builder.onResolve({filter:/^\.\/vault-db$/},()=>({path:'vault-db',namespace:'mock'}));builder.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export async function readMeta(key){return globalThis.deviceMeta.get(key)};export async function writeMeta(key,value){globalThis.deviceMeta.set(key,value)};export const storageLock=(_id,work)=>work();'}));}}]});
 function harness(initial) {
   let stored = initial && structuredClone(initial); let uuidCalls = 0; let failNext = false;
-  const context = {crypto:{randomUUID:() => `installation-${++uuidCalls}`},URL,chrome:{storage:{local:{
+  const deviceMeta=new Map();
+  const context = {TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,btoa,atob,deviceMeta,crypto:{subtle:webcrypto.subtle,getRandomValues:webcrypto.getRandomValues.bind(webcrypto),randomUUID:() => `installation-${++uuidCalls}`},URL,chrome:{storage:{local:{
     async setAccessLevel() {},
     async get() {return {settings:stored && structuredClone(stored)};},
     async set(value) {if(failNext) {failNext = false; throw new Error('write failed');} stored = structuredClone(value.settings);},
   }}}};
   vm.runInNewContext(built.outputFiles[0].text,context);
-  return {api:context.settingsAPI,read:() => stored,uuidCalls:() => uuidCalls,fail:() => {failNext = true;}};
+  return {api:context.settingsAPI,read:() => stored,deviceMeta,uuidCalls:() => uuidCalls,fail:() => {failNext = true;}};
 }
 const defaults = {installationId:'existing-installation',endpoint:'http://localhost:3000',activeLibraryId:'library',pairs:{library:{credential:'existing-credential'}},enabledProviders:[],micGranted:false,micDeviceId:'default'};
 test('concurrent first reads create one durable installation identity',async () => {
@@ -23,7 +25,7 @@ test('concurrent provider and microphone saves preserve both preferences and pai
   const h = harness(defaults);
   await Promise.all([h.api.saveSettings({enabledProviders:['meet']}),h.api.saveSettings({micGranted:true})]);
   assert.deepEqual(h.read().enabledProviders,['meet']); assert.equal(h.read().micGranted,true);
-  assert.deepEqual(h.read().pairs,defaults.pairs); assert.equal(h.read().activeLibraryId,'library');
+  assert.deepEqual(structuredClone((await h.api.settings()).pairs),defaults.pairs);assert.equal(h.read().pairs,undefined);assert.ok(!JSON.stringify(h.read()).includes('existing-credential'));assert.equal(h.deviceMeta.get('credential-device-key').extractable,false); assert.equal(h.read().activeLibraryId,'library');
 });
 test('queued provider updates derive their lists from the latest saved state and recover after a failed write',async () => {
   const h = harness(defaults);
@@ -37,7 +39,7 @@ test('an open popup refreshes provider status without resetting an explicit micr
   let enabled = []; let interval;
   const ui = `export const element=globalThis.element; export async function request(){return {settings:{enabledProviders:globalThis.providers(),micGranted:false},active:null,recordings:[]}}; export const renderRecordings=()=>{}; export const showError=error=>{throw error}; export const action=async fn=>fn(); export const duration=()=>'';`;
   const result = await build({entryPoints:['extension/src/popup.ts'],bundle:true,write:false,format:'iife',plugins:[{name:'popup-state',setup(builder){builder.onResolve({filter:/^\.\/ui$/},() => ({path:'ui',namespace:'mock'}));builder.onLoad({filter:/.*/,namespace:'mock'},() => ({contents:ui}));}}]});
-  const context = {URL,element,providers:() => enabled,setInterval:callback => {interval = callback;},document:{createElement:() => ({})},chrome:{tabs:{query:async () => [{id:1,url:'https://meet.google.com/abc-defg-hij',title:'Meeting'}]}},navigator:{mediaDevices:{enumerateDevices:async () => []}}};
+  const context = {URL,element,providers:() => enabled,setInterval:callback => {interval = callback;},document:{createElement:() => ({})},chrome:{permissions:{contains:async()=>true},tabs:{query:async () => [{id:1,url:'https://meet.google.com/abc-defg-hij',title:'Meeting'}]}},navigator:{permissions:{query:async()=>({state:'granted'})},mediaDevices:{enumerateDevices:async () => []}}};
   vm.runInNewContext(result.outputFiles[0].text,context);
   await new Promise(resolve => setImmediate(resolve)); assert.match(element('meeting').textContent,/Not enabled/);
   element('mic').checked = false; enabled = ['meet']; interval(); await new Promise(resolve => setImmediate(resolve));
@@ -48,7 +50,7 @@ test('overlapping first popup refreshes cannot re-enable a microphone explicitly
   let interval; const queries=[];
   const ui=`export const element=globalThis.element; export async function request(){return {settings:{enabledProviders:['meet'],micGranted:true},active:null,recordings:[]}}; export const renderRecordings=()=>{}; export const showError=error=>{throw error}; export const action=async fn=>fn(); export const duration=()=>'';`;
   const result=await build({entryPoints:['extension/src/popup.ts'],bundle:true,write:false,format:'iife',plugins:[{name:'popup-delayed-init',setup(builder){builder.onResolve({filter:/^\.\/ui$/},() => ({path:'ui',namespace:'mock'}));builder.onLoad({filter:/.*/,namespace:'mock'},() => ({contents:ui}));}}]});
-  vm.runInNewContext(result.outputFiles[0].text,{URL,element,setInterval:callback=>{interval=callback;},document:{createElement:()=>({})},chrome:{tabs:{query:()=>new Promise(resolve=>queries.push(resolve))}},navigator:{mediaDevices:{enumerateDevices:async()=>[]}}});
+  vm.runInNewContext(result.outputFiles[0].text,{URL,element,setInterval:callback=>{interval=callback;},document:{createElement:()=>({})},chrome:{permissions:{contains:async()=>true},tabs:{query:()=>new Promise(resolve=>queries.push(resolve))}},navigator:{permissions:{query:async()=>({state:'granted'})},mediaDevices:{enumerateDevices:async()=>[]}}});
   await new Promise(resolve=>setImmediate(resolve));interval();await new Promise(resolve=>setImmediate(resolve));
   queries[0]([{id:1,url:'https://meet.google.com/abc-defg-hij',title:'Meeting'}]);await new Promise(resolve=>setImmediate(resolve));
   assert.equal(element('mic').checked,true);element('mic').checked=false;element('mic').listeners.change();

@@ -60,7 +60,7 @@ function journalHarness(initialRow,pendingBytes=32000) {
     const request=value=>{const req={result:structuredClone(value)};queueMicrotask(()=>req.onsuccess?.());return req;};
     const tx={abort(){aborted=true;queueMicrotask(()=>tx.onabort?.());},objectStore(name){return {get:key=>request(local[name].get(key)),put:value=>local[name].set(value.key??value.recordingId,structuredClone(value)),delete:key=>local[name].delete(key),index(){return {openCursor(target){const req={};const entries=[...local.chunks.entries()].filter(([,value])=>value.recordingId===target);let index=0;const next=()=>queueMicrotask(()=>{const entry=entries[index++];req.result=entry?{delete:()=>local.chunks.delete(entry[0]),continue:next}:null;req.onsuccess?.({target:req});});next();return req;}};}};}};
     setTimeout(()=>{if(!aborted){for(const name of names)data[name]=local[name];tx.oncomplete?.();}},0);return tx;}};
-  const context={URL,Uint8Array,ArrayBuffer,Blob,IDBKeyRange:{only:value=>value},indexedDB:{open(){const req={result:db};queueMicrotask(()=>req.onsuccess?.());return req;}}};
+  const context={TextEncoder,TextDecoder,navigator:{locks:locks()},URL,Uint8Array,ArrayBuffer,Blob,IDBKeyRange:{only:value=>value},indexedDB:{open(){const req={result:db};queueMicrotask(()=>req.onsuccess?.());return req;}}};
   vm.runInNewContext(storageBuild.outputFiles[0].text,context);return {api:context.journal,data,strict:()=>strict};
 }
 test('atomic local audio deletion removes chunks and releases pending byte budget',async()=>{

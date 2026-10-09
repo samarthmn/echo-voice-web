@@ -3,32 +3,20 @@
 //! meeting itself necessarily communicate with Google.
 use crate::{security::ApiError, store};
 use axum::{
-    extract::Query,
-    http::{header, HeaderMap, HeaderValue},
-    response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Json, Router,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration as ChronoDuration, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
-use std::{
-    collections::HashMap,
-    fs::{self, OpenOptions},
-    io::Write,
-    path::PathBuf,
-    sync::OnceLock,
-    time::Duration,
-};
+use std::{fs, path::PathBuf, sync::OnceLock, time::Duration};
 use tokio::sync::Mutex;
 use url::Url;
-use uuid::Uuid;
 
-const COOKIE: &str = "echo_google_oauth";
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+#[path = "google_oauth.rs"]
+mod oauth;
+use oauth::{callback, connect};
 static TOKEN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Default)]
@@ -124,7 +112,11 @@ fn cached_calendar_event(
     unique_calendar_event(&cache.events, raw, recorded_at)
 }
 pub(crate) fn associated_calendar_event(raw: &str, recorded_at: &str) -> Option<String> {
-    let current_account = read_tokens().ok()??.email?;
+    let tokens = read_tokens().ok()??;
+    if tokens.reconnect_required || !client_matches(&tokens, &oauth::config().ok()?) {
+        return None;
+    }
+    let current_account = tokens.email?;
     let cache = CALENDAR_ASSOCIATIONS.get()?.lock().ok()?;
     cached_calendar_event(
         &cache,
@@ -143,6 +135,7 @@ pub fn routes() -> Router {
         .route("/integrations/calendar", get(calendar))
         .route("/integrations/google/connect", get(connect))
         .route("/integrations/google/callback", get(callback))
+        .route("/integrations/google/cancel", post(cancel_connection))
         .route(
             "/integrations/google/disconnect",
             post(disconnect).delete(disconnect),
@@ -150,35 +143,16 @@ pub fn routes() -> Router {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct Tokens {
     access_token: String,
     refresh_token: Option<String>,
     expires_at: i64,
     email: Option<String>,
-}
-#[derive(Deserialize, Serialize)]
-struct OAuthState {
-    state: String,
-    verifier: String,
-    created_at: i64,
-}
-struct GoogleConfig {
-    id: String,
-    secret: String,
-    redirect: String,
-}
-/// Combine Google OAuth credentials with the callback address in shared runtime config.
-fn google_config() -> GoogleConfig {
-    GoogleConfig {
-        id: std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
-        secret: std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default(),
-        redirect: crate::config::get().google_redirect_uri.clone(),
-    }
-}
-/// Require both OAuth credentials before presenting Calendar connection as available.
-fn google_configured() -> bool {
-    let c = google_config();
-    !c.id.is_empty() && !c.secret.is_empty()
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_id: Option<String>,
+    #[serde(default)]
+    reconnect_required: bool,
 }
 /// Locate private Google tokens beneath the active library's credentials folder.
 fn credentials_file() -> PathBuf {
@@ -186,49 +160,47 @@ fn credentials_file() -> PathBuf {
 }
 /// Read saved Google tokens while distinguishing disconnected state from corrupt credentials.
 fn read_tokens() -> Result<Option<Tokens>, ApiError> {
-    match fs::read(credentials_file()) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|_| {
-            ApiError::new(
-                500,
-                "Google credentials could not be read. Disconnect and reconnect your calendar.",
-            )
-        }),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.into()),
+    let invalid = || {
+        ApiError::new(
+            500,
+            "Google credentials could not be read. Disconnect and reconnect your calendar.",
+        )
+    };
+    if fs::symlink_metadata(store::data_dir().join("credentials"))
+        .is_ok_and(|metadata| !metadata.is_dir() || metadata.file_type().is_symlink())
+    {
+        return Err(invalid());
     }
+    match fs::symlink_metadata(credentials_file()) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => return Err(invalid()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    let mut reader = store::protected_reader(&credentials_file()).map_err(|_| invalid())?;
+    if reader.len() > 1024 * 1024 {
+        return Err(invalid());
+    }
+    let bytes = zeroize::Zeroizing::new(reader.read_all().map_err(|_| invalid())?);
+    let tokens: Tokens = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    if tokens.access_token.is_empty()
+        || tokens
+            .refresh_token
+            .as_ref()
+            .is_some_and(|token| token.is_empty())
+    {
+        return Err(invalid());
+    }
+    Ok(Some(tokens))
+}
+/// Copy validation is local only: authenticate every saved byte and validate
+/// the token schema without contacting Google or refreshing the connection.
+pub(crate) fn validate_saved_credentials() -> Result<(), ApiError> {
+    read_tokens().map(|_| ()).map_err(|_| ApiError::bad("The selected library contains damaged Google credentials. Reconnect Calendar in the original library before copying it. Saved files have not been changed."))
 }
 /// Atomically publish Google credentials with private file and directory permissions.
 fn save_tokens(tokens: &Tokens) -> Result<(), ApiError> {
-    let file = credentials_file();
-    let parent = file.parent().unwrap();
-    fs::create_dir_all(parent)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
-    }
-    let temporary = parent.join(format!("google.{}.tmp", Uuid::new_v4()));
-    let result = (|| {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut out = options.open(&temporary)?;
-        out.write_all(&serde_json::to_vec(tokens)?)?;
-        out.sync_all()?;
-        fs::rename(&temporary, &file)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&file, fs::Permissions::from_mode(0o600))?;
-        }
-        Ok(())
-    })();
-    let _ = fs::remove_file(temporary);
-    result
+    store::replace_protected(&credentials_file(), &serde_json::to_vec(tokens)?)
 }
 /// Create a bounded Google HTTP client that never follows redirects automatically.
 fn client(seconds: u64) -> Result<Client, ApiError> {
@@ -257,213 +229,160 @@ fn loopback_url(raw: &str) -> Result<Url, ApiError> {
     }
     Ok(u)
 }
-/// Generate unpredictable material for the OAuth state and PKCE verifier.
-fn random_secret() -> String {
-    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
-}
-/// Build the Calendar authorization URL and its short-lived state cookie.
-fn authorization() -> Result<(String, String, bool), ApiError> {
-    if !google_configured() {
-        return Err(ApiError::new(503, "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, then restart Echo Voice. See docs/integrations.md."));
-    }
-    let c = google_config();
-    let callback = loopback_url(&c.redirect)?;
-    let state = OAuthState {
-        state: random_secret(),
-        verifier: random_secret(),
-        created_at: Utc::now().timestamp_millis(),
-    };
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(state.verifier.as_bytes()));
-    let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
-    url.query_pairs_mut().extend_pairs([
-        ("client_id", c.id.as_str()),
-        ("redirect_uri", c.redirect.as_str()),
-        ("response_type", "code"),
-        (
-            "scope",
-            "openid email https://www.googleapis.com/auth/calendar.readonly",
-        ),
-        ("access_type", "offline"),
-        ("prompt", "select_account consent"),
-        ("state", state.state.as_str()),
-        ("code_challenge_method", "S256"),
-        ("code_challenge", challenge.as_str()),
-    ]);
-    Ok((
-        url.to_string(),
-        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&state)?),
-        callback.scheme() == "https",
-    ))
-}
-/// Require a matching unexpired state cookie before accepting an OAuth callback.
-fn validate_state(cookie: Option<&str>, received: Option<&str>) -> Result<String, ApiError> {
-    let failure =
-        || ApiError::bad("Calendar security check failed or expired. Connect your calendar again.");
-    let bytes = URL_SAFE_NO_PAD
-        .decode(cookie.ok_or_else(failure)?)
-        .map_err(|_| failure())?;
-    let parsed: OAuthState = serde_json::from_slice(&bytes).map_err(|_| failure())?;
-    let received = received.ok_or_else(failure)?;
-    let age = Utc::now().timestamp_millis() - parsed.created_at;
-    if !(0..=600_000).contains(&age)
-        || parsed.state.len() != received.len()
-        || parsed
-            .state
-            .as_bytes()
-            .iter()
-            .zip(received.as_bytes())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            != 0
-    {
-        return Err(failure());
-    }
-    Ok(parsed.verifier)
-}
-/// Extract the exact OAuth cookie name without accepting substring matches.
-fn cookie_value(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(header::COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .find_map(|part| {
-            let (k, v) = part.trim().split_once('=')?;
-            (k == COOKIE).then(|| v.to_owned())
-        })
-}
-/// Normalize the callback host and redirect into Google's consent flow.
-async fn connect(headers: HeaderMap) -> Result<Response, ApiError> {
-    // Keep the state cookie on the same loopback host as Google's callback.
-    // A user may open 127.0.0.1 while their OAuth client names localhost.
-    let callback = loopback_url(&google_config().redirect)?;
-    let callback_origin = callback.origin().ascii_serialization();
-    let expected_host = callback_origin
-        .split_once("://")
-        .map(|(_, host)| host)
-        .unwrap_or_default();
-    if headers
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .is_some_and(|host| host != expected_host)
-    {
-        return Ok(Redirect::to(&format!(
-            "{callback_origin}/api/integrations/google/connect"
-        ))
-        .into_response());
-    }
-    let (url, cookie, secure) = authorization()?;
-    let mut response = Redirect::to(&url).into_response();
-    let value = format!(
-        "{COOKIE}={cookie}; Path=/api/integrations/google; HttpOnly; SameSite=Lax; Max-Age=600{}",
-        if secure { "; Secure" } else { "" }
-    );
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&value)
-            .map_err(|_| ApiError::new(500, "Could not begin calendar authorization."))?,
-    );
-    Ok(response)
-}
 /// Require a successful Google response and return concise errors on service failures.
 async fn google_response(
     response: Result<reqwest::Response, reqwest::Error>,
 ) -> Result<Value, ApiError> {
-    let response = response.map_err(|_| {
+    google_response_bounded(response, 16 * 1024 * 1024, false).await
+}
+async fn oauth_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> Result<Value, ApiError> {
+    google_response_bounded(response, 1024 * 1024, true).await
+}
+/// Only these fixed classifications can leave the token exchange. Never echo
+/// Google's raw body, description, request parameters, or token/code material.
+fn oauth_error(bytes: &[u8]) -> ApiError {
+    let value: Value = serde_json::from_slice(bytes).unwrap_or(Value::Null);
+    let code = value["error"].as_str().unwrap_or_default();
+    let missing_secret = value["error_description"]
+        .as_str()
+        .is_some_and(|description| {
+            let description = description.trim().trim_end_matches('.');
+            description.eq_ignore_ascii_case("client_secret is missing")
+                || description.eq_ignore_ascii_case("missing required parameter: client_secret")
+        });
+    match code {
+        "invalid_request" if missing_secret => ApiError::new(503, "Google requires additional publisher configuration for this Desktop OAuth client (client_secret_required). Your previous connection has not been changed."),
+        "invalid_client" => ApiError::new(503, "Google rejected this build's OAuth client configuration (invalid_client). Ask the publisher for an updated build. Your previous connection has not been changed."),
+        "unauthorized_client" => ApiError::new(503, "Google has not authorized this OAuth client for the requested flow (unauthorized_client). Ask the publisher to check its configuration."),
+        "invalid_grant" => ApiError::new(401, "Google rejected the authorization code or refresh grant (invalid_grant). Connect your calendar again."),
+        "invalid_request" => ApiError::new(503, "Google rejected the OAuth request configuration (invalid_request). Ask the publisher to check this build. Your previous connection has not been changed."),
+        "redirect_uri_mismatch" => ApiError::new(503, "Google rejected the OAuth callback configuration (redirect_uri_mismatch). Ask the publisher to check this build."),
+        "invalid_scope" => ApiError::new(503, "Google rejected this build's requested Calendar permissions (invalid_scope). Ask the publisher to check its configuration."),
+        "unsupported_grant_type" => ApiError::new(503, "Google rejected this build's authorization flow (unsupported_grant_type). Ask the publisher to check its configuration."),
+        "access_denied" => ApiError::new(403, "Google declined Calendar authorization (access_denied). Your previous connection has not been changed."),
+        "temporarily_unavailable" | "server_error" => ApiError::new(503, "Google authorization is temporarily unavailable (oauth_service_unavailable). Retry shortly."),
+        _ => ApiError::new(502, "Google rejected the authorization request (oauth_response_unrecognized). No response details were retained. Your previous connection has not been changed."),
+    }
+}
+async fn bounded_oauth_error(mut response: reqwest::Response) -> ApiError {
+    const LIMIT: usize = 16 * 1024;
+    if response
+        .content_length()
+        .is_some_and(|bytes| bytes > LIMIT as u64)
+    {
+        return oauth_error(&[]);
+    }
+    let mut bytes = zeroize::Zeroizing::new(Vec::new());
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if bytes.len() + chunk.len() <= LIMIT => {
+                bytes.extend_from_slice(&chunk)
+            }
+            Ok(None) => return oauth_error(&bytes),
+            _ => return oauth_error(&[]),
+        }
+    }
+}
+async fn google_response_bounded(
+    response: Result<reqwest::Response, reqwest::Error>,
+    limit: usize,
+    diagnose_oauth: bool,
+) -> Result<Value, ApiError> {
+    let mut response = response.map_err(|_| {
         ApiError::new(
             502,
             "Google could not be reached. Check your connection and retry.",
         )
     })?;
     match response.status().as_u16() {
-        200..=299 => response.json().await.map_err(|_|ApiError::new(502,"Google returned an invalid response. Retry shortly.")),
+        200..=299 => {
+            let invalid = || ApiError::new(502,"Google returned an invalid response. Retry shortly.");
+            if response.content_length().is_some_and(|bytes|bytes > limit as u64) { return Err(invalid()); }
+            let mut bytes = zeroize::Zeroizing::new(Vec::new());
+            while let Some(chunk) = response.chunk().await.map_err(|_|invalid())? {
+                if bytes.len() + chunk.len() > limit { return Err(invalid()); }
+                bytes.extend_from_slice(&chunk);
+            }
+            serde_json::from_slice(&bytes).map_err(|_|invalid())
+        },
+        400 | 401 if diagnose_oauth => Err(bounded_oauth_error(response).await),
         400 | 401 => Err(ApiError::new(401,"Google authorization expired or was declined. Reconnect your calendar.")),
         403 => Err(ApiError::new(403,"Google Calendar access was denied. Enable the Calendar API and grant calendar read access.")),
         429 => Err(ApiError::new(429,"Google Calendar is temporarily rate limited. Retry shortly.")),
         _ => Err(ApiError::new(502,"Google Calendar is unavailable. Retry shortly.")),
     }
 }
-/// Exchange the verified OAuth code and persist the resulting account tokens.
-async fn finish_authorization(code: &str, verifier: &str) -> Result<(), ApiError> {
-    let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let c = google_config();
-    if !google_configured() {
-        return Err(ApiError::new(503, "Google Calendar is not configured."));
-    }
+/// Exchange the verified code without committing anything until the owned
+/// session checks cancellation and expiry again.
+async fn exchange_authorization(
+    c: &oauth::Config,
+    code: &str,
+    verifier: &str,
+) -> Result<Tokens, ApiError> {
     let client = client(20)?;
-    let token = google_response(
-        client
-            .post(TOKEN_URL)
-            .form(&[
-                ("client_id", c.id.as_str()),
-                ("client_secret", c.secret.as_str()),
-                ("code", code),
-                ("code_verifier", verifier),
-                ("redirect_uri", c.redirect.as_str()),
-                ("grant_type", "authorization_code"),
-            ])
-            .send()
-            .await,
-    )
-    .await?;
+    let mut form = vec![
+        ("client_id", c.id.as_str()),
+        ("code", code),
+        ("code_verifier", verifier),
+        ("redirect_uri", c.redirect.as_str()),
+        ("grant_type", "authorization_code"),
+    ];
+    if let Some(secret) = &c.secret {
+        form.push(("client_secret", secret.as_str()));
+    }
+    let token = oauth_response(client.post(c.token_url()).form(&form).send().await).await?;
+    if token["scope"].as_str().is_some_and(|scope| {
+        !scope
+            .split_whitespace()
+            .any(|value| value == "https://www.googleapis.com/auth/calendar.readonly")
+    }) {
+        return Err(ApiError::new(403, "Calendar read-only access was not granted. Your previous connection has not been changed."));
+    }
     let access = token["access_token"]
         .as_str()
-        .ok_or_else(|| ApiError::new(502, "Google did not return an access token."))?;
-    let profile = google_response(
-        client
-            .get("https://openidconnect.googleapis.com/v1/userinfo")
-            .bearer_auth(access)
-            .send()
-            .await,
-    )
-    .await?;
-    save_tokens(&Tokens {
+        .filter(|value| !value.is_empty() && value.len() <= 65_536)
+        .ok_or_else(|| ApiError::new(502, "Google did not return a valid access token."))?;
+    let profile =
+        oauth_response(client.get(c.profile_url()).bearer_auth(access).send().await).await?;
+    Ok(Tokens {
         access_token: access.to_owned(),
-        refresh_token: token["refresh_token"].as_str().map(str::to_owned),
-        expires_at: Utc::now().timestamp_millis()
-            + token["expires_in"].as_i64().unwrap_or(3600) * 1000,
+        refresh_token: token["refresh_token"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        expires_at: expiry(&token)?,
         email: profile["email"].as_str().map(str::to_owned),
+        client_id: Some(c.id.clone()),
+        reconnect_required: false,
     })
 }
-/// Complete a state-checked callback and clear the one-use cookie on success or failure.
-async fn callback(headers: HeaderMap, Query(query): Query<HashMap<String, String>>) -> Response {
-    let result = async {
-        let cookie = cookie_value(&headers);
-        let verifier = validate_state(cookie.as_deref(), query.get("state").map(String::as_str))?;
-        if query.contains_key("error") {
-            return Err(ApiError::bad(
-                "Calendar access was declined. You can connect again when ready.",
-            ));
-        }
-        let code = query
-            .get("code")
-            .filter(|s| !s.is_empty() && s.len() <= 4096)
-            .ok_or_else(|| {
-                ApiError::bad("Google did not return an authorization code. Try connecting again.")
-            })?;
-        finish_authorization(code, &verifier).await
+fn expiry(token: &Value) -> Result<i64, ApiError> {
+    let seconds = token["expires_in"].as_i64().unwrap_or(3600);
+    if !(1..=86_400).contains(&seconds) {
+        return Err(ApiError::new(
+            502,
+            "Google returned an invalid token lifetime.",
+        ));
     }
-    .await;
-    let target = match result {
-        Ok(()) => "/?calendar=connected".to_owned(),
-        Err(error) => format!(
-            "/?{}",
-            url::form_urlencoded::Serializer::new(String::new())
-                .append_pair("calendar", "error")
-                .append_pair("message", &error.message)
-                .finish()
-        ),
-    };
-    let mut response = Redirect::to(&target).into_response();
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_static(
-            "echo_google_oauth=; Path=/api/integrations/google; HttpOnly; SameSite=Lax; Max-Age=0",
-        ),
-    );
-    response
+    Ok(Utc::now().timestamp_millis() + seconds * 1000)
+}
+fn client_matches(tokens: &Tokens, config: &oauth::Config) -> bool {
+    match &tokens.client_id {
+        Some(id) => id == &config.id,
+        None => !config.installed,
+    }
+}
+async fn cancel_connection() -> Json<Value> {
+    Json(json!({"cancelled":oauth::cancel()}))
+}
+pub(crate) fn shutdown() {
+    oauth::cancel();
 }
 /// Delete saved Google credentials while retaining meeting data.
 async fn disconnect() -> Result<Json<Value>, ApiError> {
+    oauth::cancel();
     if let Some(cache) = CALENDAR_ASSOCIATIONS.get() {
         if let Ok(mut cache) = cache.lock() {
             *cache = CalendarAssociationCache::default();
@@ -477,34 +396,52 @@ async fn disconnect() -> Result<Json<Value>, ApiError> {
     }
     Ok(Json(json!({"disconnected":true})))
 }
-/// Refresh expired Google access tokens under a lock and preserve the refresh credential.
+/// Refresh only credentials issued to the configured OAuth client. Legacy
+/// source credentials remain usable in source mode; installed copies reconnect.
 async fn access_token() -> Result<Tokens, ApiError> {
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let mut saved = read_tokens()?
+    let saved = read_tokens()?
         .ok_or_else(|| ApiError::new(401, "Connect Google Calendar to see your meetings."))?;
+    let config = oauth::config()?;
+    refresh_token(saved, &config).await
+}
+async fn refresh_token(mut saved: Tokens, c: &oauth::Config) -> Result<Tokens, ApiError> {
+    if saved.reconnect_required || !client_matches(&saved, c) {
+        return Err(ApiError::new(401, "Reconnect Calendar in this Echo build. Your previous connection is preserved until a new connection succeeds."));
+    }
     if saved.expires_at > Utc::now().timestamp_millis() + 60_000 {
         return Ok(saved);
     }
-    let refresh = saved
-        .refresh_token
-        .as_deref()
-        .ok_or_else(|| ApiError::new(401, "Reconnect Google Calendar to renew access."))?;
-    let c = google_config();
-    let token = google_response(
-        client(20)?
-            .post(TOKEN_URL)
-            .form(&[
-                ("client_id", c.id.as_str()),
-                ("client_secret", c.secret.as_str()),
-                ("refresh_token", refresh),
-                ("grant_type", "refresh_token"),
-            ])
-            .send()
-            .await,
-    )
-    .await?;
+    let Some(refresh) = saved.refresh_token.as_deref() else {
+        saved.reconnect_required = true;
+        save_tokens(&saved)?;
+        return Err(ApiError::new(
+            401,
+            "Reconnect Google Calendar to renew access.",
+        ));
+    };
+    let mut form = vec![
+        ("client_id", c.id.as_str()),
+        ("refresh_token", refresh),
+        ("grant_type", "refresh_token"),
+    ];
+    if let Some(secret) = &c.secret {
+        form.push(("client_secret", secret.as_str()));
+    }
+    let result = oauth_response(client(20)?.post(c.token_url()).form(&form).send().await).await;
+    let token = match result {
+        Ok(value) => value,
+        Err(error) => {
+            if error.status == axum::http::StatusCode::UNAUTHORIZED {
+                saved.reconnect_required = true;
+                save_tokens(&saved)?;
+            }
+            return Err(error);
+        }
+    };
     saved.access_token = token["access_token"]
         .as_str()
+        .filter(|value| !value.is_empty() && value.len() <= 65_536)
         .ok_or_else(|| {
             ApiError::new(
                 502,
@@ -512,11 +449,14 @@ async fn access_token() -> Result<Tokens, ApiError> {
             )
         })?
         .to_owned();
-    if let Some(refresh) = token["refresh_token"].as_str() {
+    if let Some(refresh) = token["refresh_token"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+    {
         saved.refresh_token = Some(refresh.into());
     }
-    saved.expires_at =
-        Utc::now().timestamp_millis() + token["expires_in"].as_i64().unwrap_or(3600) * 1000;
+    saved.expires_at = expiry(&token)?;
+    saved.client_id = Some(c.id.clone());
     save_tokens(&saved)?;
     Ok(saved)
 }
@@ -585,6 +525,15 @@ fn normalize_event(event: &Value) -> Option<Value> {
     }
     Some(value)
 }
+fn mark_revoked(access: &str) -> Result<(), ApiError> {
+    if let Some(mut current) = read_tokens()? {
+        if current.access_token == access {
+            current.reconnect_required = true;
+            save_tokens(&current)?;
+        }
+    }
+    Ok(())
+}
 /// Fetch the upcoming calendar window using a connected Google account.
 async fn calendar() -> Result<Json<Value>, ApiError> {
     let tokens = access_token().await?;
@@ -600,14 +549,24 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
         ("maxResults", "250"),
     ]);
     let account = tokens.email.clone();
-    let data = google_response(
+    let result = google_response(
         client(20)?
             .get(url)
-            .bearer_auth(tokens.access_token)
+            .bearer_auth(&tokens.access_token)
             .send()
             .await,
     )
-    .await?;
+    .await;
+    let data = match result {
+        Ok(value) => value,
+        Err(error) => {
+            if error.status == axum::http::StatusCode::UNAUTHORIZED {
+                let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+                mark_revoked(&tokens.access_token)?;
+            }
+            return Err(error);
+        }
+    };
     let events: Vec<Value> = data["items"]
         .as_array()
         .into_iter()
@@ -629,7 +588,15 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
 /// Report Calendar connection without exposing its credentials.
 async fn status() -> Result<Json<Value>, ApiError> {
     let tokens = read_tokens()?;
-    let mut google = json!({"configured":google_configured(),"connected":tokens.is_some()});
+    let config = oauth::config();
+    let reconnect = tokens.as_ref().is_some_and(|tokens| {
+        tokens.reconnect_required || config.as_ref().is_ok_and(|c| !client_matches(tokens, c))
+    });
+    let connected = tokens.is_some() && config.is_ok() && !reconnect;
+    let mut google = json!({"configured":config.is_ok(),"connected":connected,"mode":if crate::paths::installed(){"installed"}else{"source"},"pending":oauth::pending(),"reconnectRequired":reconnect});
+    if let Err(error) = config {
+        google["configurationError"] = json!(error.message);
+    }
     if let Some(email) = tokens.and_then(|t| t.email) {
         google["email"] = json!(email);
     }
@@ -638,6 +605,142 @@ async fn status() -> Result<Json<Value>, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        extract::Query,
+        http::{header, HeaderMap, HeaderValue},
+    };
+    use oauth::cookie_value;
+    use std::collections::HashMap;
+    #[test]
+    fn oauth_diagnostics_expose_only_allowlisted_classifications() {
+        for (code, status) in [
+            ("invalid_client", 503),
+            ("invalid_grant", 401),
+            ("invalid_request", 503),
+            ("unauthorized_client", 503),
+            ("redirect_uri_mismatch", 503),
+            ("invalid_scope", 503),
+            ("unsupported_grant_type", 503),
+            ("access_denied", 403),
+        ] {
+            let error=oauth_error(&serde_json::to_vec(&json!({"error":code,"error_description":"synthetic-private-code-and-token","access_token":"synthetic-private-access"})).unwrap());
+            assert_eq!(error.status.as_u16(), status);
+            assert!(error.message.contains(code));
+            assert!(!error.message.contains("synthetic-private"));
+        }
+        let missing = oauth_error(
+            br#"{"error":"invalid_request","error_description":"client_secret is missing."}"#,
+        );
+        assert_eq!(missing.status.as_u16(), 503);
+        assert!(missing.message.contains("client_secret_required"));
+        for body in [
+            b"not-json synthetic-private-code".as_slice(),
+            br#"{"error":"synthetic-private-code","error_description":"synthetic-private-token"}"#,
+            br#"{"error":{"message":"synthetic-private-token"}}"#,
+        ] {
+            let error = oauth_error(body);
+            assert!(error.message.contains("oauth_response_unrecognized"));
+            assert!(!error.message.contains("synthetic-private"));
+        }
+    }
+    #[tokio::test]
+    async fn oauth_error_http_body_is_bounded_and_never_echoed() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = body.clone();
+        let router = Router::new().route(
+            "/",
+            get(move || {
+                let output = output.clone();
+                async move {
+                    (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        output.lock().unwrap().clone(),
+                    )
+                }
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        for (value, expected) in [
+            (
+                json!({"error":"invalid_request","error_description":"client_secret is missing."})
+                    .to_string(),
+                "client_secret_required",
+            ),
+            (
+                json!({"error":"invalid_client","error_description":"synthetic-private-response"})
+                    .to_string(),
+                "invalid_client",
+            ),
+            (
+                "synthetic-private-response".repeat(1024),
+                "oauth_response_unrecognized",
+            ),
+            (
+                "synthetic-private-malformed".into(),
+                "oauth_response_unrecognized",
+            ),
+        ] {
+            *body.lock().unwrap() = value;
+            let error = oauth_response(
+                client(2)
+                    .unwrap()
+                    .get(format!("http://{address}/"))
+                    .send()
+                    .await,
+            )
+            .await
+            .unwrap_err();
+            assert!(error.message.contains(expected));
+            assert!(!error.message.contains("synthetic-private"));
+        }
+        server.abort();
+    }
+    #[test]
+    fn google_credentials_are_authenticated_at_rest_and_never_fall_back_to_json() {
+        let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = store::test_directory();
+        store::reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        store::test_key();
+        store::init().unwrap();
+        let tokens = Tokens {
+            access_token: "private-oauth-access".into(),
+            refresh_token: Some("private-oauth-refresh".into()),
+            expires_at: 42,
+            email: Some("private@example.test".into()),
+            client_id: None,
+            reconnect_required: false,
+        };
+        save_tokens(&tokens).unwrap();
+        let original = fs::read(credentials_file()).unwrap();
+        assert!(original.starts_with(b"ECHOENC1"));
+        assert!(!String::from_utf8_lossy(&original).contains("private-oauth"));
+        assert_eq!(
+            read_tokens().unwrap().unwrap().access_token,
+            tokens.access_token
+        );
+        let mut changed = original.clone();
+        changed[70] ^= 1;
+        fs::write(credentials_file(), &changed).unwrap();
+        assert!(read_tokens().is_err());
+        assert_eq!(fs::read(credentials_file()).unwrap(), changed);
+        fs::write(credentials_file(), serde_json::to_vec(&tokens).unwrap()).unwrap();
+        assert!(read_tokens().is_err());
+        save_tokens(&tokens).unwrap();
+        assert_eq!(
+            read_tokens().unwrap().unwrap().refresh_token,
+            tokens.refresh_token
+        );
+        assert!(fs::read_dir(credentials_file().parent().unwrap())
+            .unwrap()
+            .all(|entry| entry.unwrap().file_name() == "google.json"));
+        store::reset_for_tests();
+        std::env::remove_var("ECHO_DATA_DIR");
+    }
     #[test]
     fn calendar_association_requires_one_matching_current_event() {
         let event = json!({"id":"event-one","url":"https://meet.google.com/aaa-bbbb-ccc?authuser=1","start":"2026-10-05T10:00:00Z","end":"2026-10-05T11:00:00Z"});
@@ -738,30 +841,6 @@ mod tests {
         );
     }
     #[test]
-    fn state_requires_matching_fresh_cookie() {
-        let value = OAuthState {
-            state: "secret-state".into(),
-            verifier: "pkce".into(),
-            created_at: Utc::now().timestamp_millis(),
-        };
-        let cookie = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&value).unwrap());
-        assert_eq!(
-            validate_state(Some(&cookie), Some("secret-state")).unwrap(),
-            "pkce"
-        );
-        assert!(validate_state(Some(&cookie), Some("forged-state")).is_err());
-        assert!(validate_state(None, None).is_err());
-        let expired = OAuthState {
-            created_at: Utc::now().timestamp_millis() - 700_000,
-            ..value
-        };
-        assert!(validate_state(
-            Some(&URL_SAFE_NO_PAD.encode(serde_json::to_vec(&expired).unwrap())),
-            Some("secret-state")
-        )
-        .is_err());
-    }
-    #[test]
     fn callback_destinations_cannot_escape_loopback() {
         for bad in [
             "http://169.254.169.254",
@@ -788,6 +867,7 @@ mod tests {
     }
     #[tokio::test]
     async fn callback_without_valid_state_clears_cookie_and_returns_an_error() {
+        let _guard = store::TEST_LIBRARY_LOCK.lock().await;
         let response = callback(
             HeaderMap::new(),
             Query(HashMap::from([("code".into(), "untrusted".into())])),

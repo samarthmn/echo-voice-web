@@ -15,8 +15,13 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use uuid::Uuid;
+mod pairing;
+mod vault;
+use pairing::{
+    approve, pair_activate, pair_begin, pair_cancel, pair_claim, pair_code, pair_request, reject,
+    request_metadata,
+};
 type Result<T> = std::result::Result<T, ApiError>;
-type PairingReservation = (i64, Option<String>, Option<String>, Option<String>);
 const RATE: u64 = 16000;
 const MAX_FRAMES: u64 = RATE * 8 * 3600;
 const PART_FRAMES: u64 = RATE * 30 * 60;
@@ -58,6 +63,8 @@ pub(crate) fn init_schema(db: &Connection) -> Result<()> {
  CREATE TABLE IF NOT EXISTS extension_connections(installation_id TEXT PRIMARY KEY,name TEXT NOT NULL,origin TEXT NOT NULL,credential_hash TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS extension_recordings(recording_id TEXT PRIMARY KEY,installation_id TEXT NOT NULL,meeting_id TEXT NOT NULL UNIQUE,data TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS extension_chunks(recording_id TEXT NOT NULL,sequence INTEGER NOT NULL,frames INTEGER NOT NULL,digest TEXT NOT NULL,file TEXT NOT NULL,PRIMARY KEY(recording_id,sequence));")?;
+    pairing::migrate(db)?;
+    vault::init_schema(db)?;
     db.execute(
         "INSERT OR IGNORE INTO extension_library VALUES(1,?)",
         [Uuid::new_v4().to_string()],
@@ -322,8 +329,12 @@ fn reply_error(e: ApiError) -> Response {
 pub fn extension_routes() -> Router {
     Router::new()
         .route("/connection", get(connection).delete(disconnect))
+        .route("/vault", get(vault::read).put(vault::save))
+        .route("/pairing/begin", post(pair_begin))
         .route("/pairing/request", post(pair_request))
         .route("/pairing/claim", post(pair_claim))
+        .route("/pairing/activate", post(pair_activate))
+        .route("/pairing/cancel", post(pair_cancel))
         .route("/recordings/{id}", put(start).get(status))
         .route("/recordings/{id}/live", get(live_preview))
         .route("/recordings/{id}/chunks/{sequence}", put(chunk))
@@ -337,7 +348,9 @@ pub fn workspace_routes() -> Router {
         .route("/extensions/meetings/{id}/audio", get(meeting_audio))
         .route("/extensions/pairing", post(pair_code))
         .route("/extensions/connections", get(connections))
+        .route("/extensions/requests/{id}", get(request_metadata))
         .route("/extensions/requests/{id}/approve", post(approve))
+        .route("/extensions/requests/{id}/reject", post(reject))
         .route("/extensions/connections/{id}", delete(revoke))
         .route("/extensions/recordings", get(recordings))
         .route("/extensions/recordings/{id}/controls", post(control))
@@ -355,37 +368,15 @@ async fn connection(headers: HeaderMap) -> Result<Json<Value>> {
     store::with_db(|db| {
         let installation = authenticated(db, &headers)?;
         Ok(reply(
-            json!({"installationId":installation,"libraryId":library(db)?}),
+            json!({"installationId":installation,"libraryId":library(db)?,"appVersion":env!("CARGO_PKG_VERSION"),"storageProtectionVersion":1,"recordingReceiptVersion":1}),
         ))
     })
 }
 async fn disconnect(headers: HeaderMap) -> Result<Json<Value>> {
     store::with_db(|db| {
         let installation = authenticated(db, &headers)?;
-        db.execute(
-            "DELETE FROM extension_connections WHERE installation_id=?",
-            [&installation],
-        )?;
+        pairing::revoke_connection(db, &installation)?;
         Ok(reply(json!({"status":"disconnected"})))
-    })
-}
-async fn pair_code() -> Result<Json<Value>> {
-    store::with_db(|db| {
-        db.execute("DELETE FROM extension_pairing WHERE expires<?", [seconds()])?;
-        let count: i64 =
-            db.query_row("SELECT COUNT(*) FROM extension_pairing", [], |r| r.get(0))?;
-        if count >= 20 {
-            return Err(ApiError::new(429, "Too many active pairing codes."));
-        }
-        let code = Uuid::new_v4().simple().to_string();
-        let expires = seconds() + 300;
-        db.execute(
-            "INSERT INTO extension_pairing(code_hash,expires,state) VALUES(?,?,'available')",
-            params![hash(&code), expires],
-        )?;
-        Ok(reply(
-            json!({"code":code,"expiresAt":expires,"libraryId":library(db)?}),
-        ))
     })
 }
 async fn connections() -> Result<Json<Value>> {
@@ -393,112 +384,17 @@ async fn connections() -> Result<Json<Value>> {
         let mut stmt =
             db.prepare("SELECT installation_id,name,created_at FROM extension_connections")?;
         let connections=stmt.query_map([],|r|Ok(json!({"installationId":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"createdAt":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        let mut stmt=db.prepare("SELECT request_id,installation_id,name,expires FROM extension_pairing WHERE state='pending' AND expires>=?")?;
+        let mut stmt=db.prepare("SELECT request_id,installation_id,name,expires FROM extension_pairing WHERE state='pending' AND kind='manual' AND expires>?")?;
         let requests=stmt.query_map([seconds()],|r|Ok(json!({"requestId":r.get::<_,String>(0)?,"installationId":r.get::<_,String>(1)?,"name":r.get::<_,String>(2)?,"expiresAt":r.get::<_,i64>(3)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
         Ok(reply(
             json!({"libraryId":library(db)?,"connections":connections,"requests":requests}),
         ))
     })
 }
-async fn pair_request(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(&v, &["code", "installationId", "name"])?;
-    let code = text(&v, "code", 64)?;
-    let installation = text(&v, "installationId", 36)?;
-    uid(installation)?;
-    let name = text(&v, "name", 120)?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let row:Option<PairingReservation>=tx.query_row("SELECT expires,request_id,installation_id,origin FROM extension_pairing WHERE code_hash=? AND expires>=?",params![hash(code),seconds()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
-        let Some((expires, request, old_install, old_origin)) = row else {
-            return Err(ApiError::new(403, "Pairing code is invalid or expired."));
-        };
-        let id = if let Some(request) = request {
-            if old_install.as_deref() != Some(installation)
-                || old_origin.as_deref() != Some(&origin)
-            {
-                return Err(ApiError::new(
-                    409,
-                    "This code already belongs to another pairing request.",
-                ));
-            }
-            request
-        } else {
-            let id = Uuid::new_v4().to_string();
-            tx.execute("UPDATE extension_pairing SET request_id=?,installation_id=?,name=?,origin=?,state='pending' WHERE code_hash=?",params![id,installation,name,origin,hash(code)])?;
-            id
-        };
-        let lib = library(&tx)?;
-        tx.commit()?;
-        Ok(reply(
-            json!({"requestId":id,"libraryId":lib,"expiresAt":expires}),
-        ))
-    })
-}
-async fn approve(Path(id): Path<String>) -> Result<Json<Value>> {
-    uid(&id)?;
-    store::with_db(|db| {
-        let n=db.execute("UPDATE extension_pairing SET state='approved' WHERE request_id=? AND state='pending' AND expires>=?",params![id,seconds()])?;
-        if n == 0 {
-            return Err(ApiError::new(
-                409,
-                "Pairing request is unavailable or already approved.",
-            ));
-        }
-        Ok(reply(json!({"status":"approved"})))
-    })
-}
-async fn pair_claim(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(&v, &["requestId", "installationId", "code"])?;
-    let request = text(&v, "requestId", 36)?;
-    let install = text(&v, "installationId", 36)?;
-    uid(request)?;
-    uid(install)?;
-    let code = text(&v, "code", 64)?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let row:Option<(String,String)>=tx.query_row("SELECT state,name FROM extension_pairing WHERE request_id=? AND installation_id=? AND code_hash=? AND origin=? AND expires>=?",params![request,install,hash(code),origin,seconds()],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        let Some((state, name)) = row else {
-            return Err(ApiError::new(403, "Pairing request is invalid or expired."));
-        };
-        if state == "pending" {
-            return Ok(reply(json!({"status":"pending"})));
-        }
-        let lib = library(&tx)?;
-        let credential = hash(format!(
-            "echo-extension-v1\0{code}\0{request}\0{install}\0{lib}"
-        ));
-        if state == "claimed" {
-            let present:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM extension_connections WHERE installation_id=? AND credential_hash=? AND origin=?)",params![install,hash(&credential),origin],|r|r.get(0))?;
-            if !present {
-                return Err(ApiError::new(
-                    403,
-                    "Connection was revoked; create a new pairing code.",
-                ));
-            }
-        } else if state == "approved" {
-            tx.execute("INSERT INTO extension_connections VALUES(?,?,?,?,?) ON CONFLICT(installation_id) DO UPDATE SET name=excluded.name,origin=excluded.origin,credential_hash=excluded.credential_hash,created_at=excluded.created_at",params![install,name,origin,hash(&credential),store::now()])?;
-            tx.execute(
-                "UPDATE extension_pairing SET state='claimed' WHERE request_id=?",
-                [request],
-            )?;
-        } else {
-            return Err(ApiError::new(403, "Pairing is unavailable."));
-        }
-        tx.commit()?;
-        Ok(reply(
-            json!({"status":"approved","credential":credential,"libraryId":lib}),
-        ))
-    })
-}
 async fn revoke(Path(id): Path<String>) -> Result<Json<Value>> {
     uid(&id)?;
     store::with_db(|db| {
-        db.execute(
-            "DELETE FROM extension_connections WHERE installation_id=?",
-            [id],
-        )?;
+        pairing::revoke_connection(db, &id)?;
         Ok(reply(json!({"status":"revoked"})))
     })
 }
@@ -578,6 +474,7 @@ async fn start(
                     "Recording metadata conflicts with the saved session.",
                 ));
             }
+            verify_complete_files(&tx, &r)?;
             return Ok(reply(extension_recording(r, &lib)));
         }
         let count:i64=tx.query_row("SELECT COUNT(*) FROM extension_recordings WHERE installation_id=? AND json_extract(data,'$.status')='receiving'",[&install],|r|r.get(0))?;
@@ -616,10 +513,14 @@ fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
     let meeting_id = r["meetingId"].as_str().unwrap();
     let meeting = store::require_meeting(db, meeting_id)?;
     store::validate_meeting(&meeting)?;
-    let mut stmt = db.prepare("SELECT file,bytes FROM audio_chunks WHERE meeting_id=?")?;
+    let mut stmt = db.prepare("SELECT file,bytes,digest FROM audio_chunks WHERE meeting_id=?")?;
     let rows = stmt
         .query_map([meeting_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let expected = meeting["tracks"]
@@ -631,7 +532,7 @@ fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
     if rows.iter().map(|row| row.1).sum::<u64>() != expected || rows.is_empty() {
         return Err(ApiError::new(410, "The completed audio index is incomplete. Keep your local recording and restore Echo audio."));
     }
-    for (file, bytes) in rows {
+    for (file, bytes, expected_digest) in rows {
         if std::path::Path::new(&file)
             .file_name()
             .and_then(|s| s.to_str())
@@ -640,17 +541,40 @@ fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
             return Err(ApiError::new(410, "Invalid completed audio reference."));
         }
         let path = store::data_dir().join("audio").join(meeting_id).join(file);
-        let metadata = fs::symlink_metadata(path).map_err(|_| {
+        let metadata = fs::symlink_metadata(&path).map_err(|_| {
             ApiError::new(
                 410,
                 "Completed audio is missing. Keep your local recording and restore Echo audio.",
             )
         })?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() != bytes {
-            return Err(ApiError::new(
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(ApiError::new(410, "Invalid completed audio file."));
+        }
+        let damaged = || {
+            ApiError::new(
                 410,
                 "Completed audio is damaged. Keep your local recording and restore Echo audio.",
-            ));
+            )
+        };
+        let mut reader = store::protected_reader(&path).map_err(|_| damaged())?;
+        if reader.len() != bytes {
+            return Err(damaged());
+        }
+        // The authenticated header only proves the length. Authenticate every
+        // audio block and compare the complete plaintext digest before an
+        // acknowledgement can allow the browser to discard its durable copy.
+        // Read in bounded windows; never assemble an hours-long recording here.
+        let mut digest = Sha256::new();
+        let mut offset = 0;
+        while offset < bytes {
+            let count = (bytes - offset).min(1024 * 1024) as usize;
+            let mut plaintext = reader.read_range(offset, count).map_err(|_| damaged())?;
+            digest.update(&plaintext);
+            plaintext.fill(0);
+            offset += count as u64;
+        }
+        if format!("{:x}", digest.finalize()) != expected_digest {
+            return Err(damaged());
         }
     }
     Ok(())
@@ -820,7 +744,12 @@ fn read_chunk(path: &std::path::Path, frames: u64, digest: &str) -> Result<Vec<u
     if fs::symlink_metadata(path)?.file_type().is_symlink() {
         return Err(ApiError::new(410, "A saved audio chunk is unsafe."));
     }
-    let data = fs::read(path)?;
+    let data = store::read_protected(path).map_err(|_| {
+        ApiError::new(
+            410,
+            "A saved audio chunk is missing or failed authentication.",
+        )
+    })?;
     if data.len() as u64 != frames * 2 || hash(&data) != digest {
         return Err(ApiError::new(
             410,
@@ -865,6 +794,7 @@ async fn chunk(
             let path = chunk_path(&id, &file)?;
             read_chunk(&path, n, &h)?;
             sync_audio(&path, &pcm_dir(&id))?;
+            verify_complete_files(&tx, &r)?;
             return Ok(reply(extension_recording(r, &library(&tx)?)));
         }
         if r["status"] != "receiving" || r["nextSequence"].as_u64() != Some(sequence) {
@@ -890,7 +820,7 @@ async fn chunk(
             if path.exists() {
                 fs::remove_file(&path)?;
             }
-            store::write_private(&path, &data)?;
+            store::write_protected(&path, &data)?;
         }
         sync_audio(&path, &dir)?;
         tx.execute(
@@ -1034,11 +964,13 @@ async fn complete(
             if path.exists() && fs::symlink_metadata(&path)?.file_type().is_symlink() {
                 return Err(ApiError::new(410, "Unsafe WAV file."));
             }
-            if !path.exists() || hash(fs::read(&path)?) != digest {
+            if !path.exists()
+                || store::read_protected(&path).map(hash).ok().as_deref() != Some(digest.as_str())
+            {
                 if path.exists() {
                     fs::remove_file(&path)?;
                 }
-                store::write_private(&path, &wav)?;
+                store::write_protected(&path, &wav)?;
             }
             sync_audio(&path, &dir)?;
             let track_id = Uuid::new_v4().to_string();
@@ -1067,6 +999,7 @@ async fn complete(
         r.as_object_mut().unwrap().remove("lease");
         save_recording(&tx, &r)?;
         tx.commit()?;
+        verify_complete_files(db, &r)?;
         Ok(reply(extension_recording(r, &lib)))
     })
 }
@@ -1330,7 +1263,6 @@ async fn meeting_audio(
     headers: HeaderMap,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response> {
-    use tokio::io::{AsyncReadExt, AsyncSeekExt};
     let meeting = store::get_meeting(&id)?.ok_or_else(ApiError::not_found)?;
     let metadata = meeting
         .get("extensionRecording")
@@ -1370,7 +1302,24 @@ async fn meeting_audio(
             return Ok(response);
         }
     };
-    let stream = async_stream::stream! {if start<44{yield Ok::<Vec<u8>,std::io::Error>(header_bytes[start as usize..(end+1).min(44)as usize].to_vec());}let mut offset=44;for (path,skip,size) in sources{let part_start=offset;let part_end=offset+size;offset=part_end;if part_end<=start||part_start>end{continue;}let from=start.saturating_sub(part_start);let until=(end+1).min(part_end)-part_start;let mut remaining=until-from;let mut file=match tokio::fs::File::open(path).await{Ok(f)=>f,Err(e)=>{yield Err(e);return;}};if let Err(e)=file.seek(std::io::SeekFrom::Start(skip+from)).await{yield Err(e);return;}while remaining>0{let mut buffer=vec![0u8;remaining.min(65536)as usize];match file.read(&mut buffer).await{Ok(0)=>{yield Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof,"Saved WAV is incomplete."));return;},Ok(n)=>{remaining-=n as u64;buffer.truncate(n);yield Ok(buffer);},Err(e)=>{yield Err(e);return;}}}}};
+    let stream = async_stream::stream! {
+        if start < 44 { yield Ok::<Vec<u8>,std::io::Error>(header_bytes[start as usize..(end+1).min(44) as usize].to_vec()); }
+        let mut offset = 44;
+        for (path, skip, size) in sources {
+            let part_start = offset; let part_end = offset + size; offset = part_end;
+            if part_end <= start || part_start > end { continue; }
+            let from = start.saturating_sub(part_start); let until = (end+1).min(part_end)-part_start;
+            let mut cursor = from;
+            let mut file = match store::protected_reader(&path) { Ok(file)=>file, Err(error)=>{ yield Err(error); return; } };
+            while cursor < until {
+                let length = (until-cursor).min(65536) as usize;
+                match file.read_range(skip+cursor, length) {
+                    Ok(bytes)=>{cursor += bytes.len() as u64; yield Ok(bytes);},
+                    Err(error)=>{ yield Err(error); return; }
+                }
+            }
+        }
+    };
     let mut builder = Response::builder()
         .status(if partial {
             StatusCode::PARTIAL_CONTENT
@@ -1763,9 +1712,10 @@ mod tests {
     #[tokio::test]
     async fn live_preview_ownership_status_fencing_and_connection_revocation() {
         let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-        let directory = tempfile::tempdir().unwrap();
+        let directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", directory.path());
+        crate::store::test_key();
         store::init().unwrap();
         let app = app();
         let first = Uuid::new_v4().to_string();
@@ -1933,11 +1883,120 @@ mod tests {
         store::reset_for_tests();
     }
     #[tokio::test]
-    async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases() {
+    async fn completed_receipts_authenticate_every_audio_block_and_manifest_digest() {
         let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-        let directory = tempfile::tempdir().unwrap();
+        let directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", directory.path());
+        crate::store::test_key();
+        store::init().unwrap();
+        let app = app();
+        let (token, _, _) = pair(&app, &Uuid::new_v4().to_string()).await;
+        let id = Uuid::new_v4().to_string();
+        let route = format!("/extension/v1/recordings/{id}");
+        let (_, started) = json_request(&app, "PUT", &route, ORIGIN, Some(&token), input()).await;
+        let pcm = vec![1u8, 0, 2, 0, 3, 0, 4, 0];
+        assert_eq!(
+            send(
+                &app,
+                "PUT",
+                &format!("{route}/chunks/0"),
+                ORIGIN,
+                Some(&token),
+                pcm.clone(),
+                &[("x-echo-frames", "4".into()), ("x-echo-sha256", hash(&pcm))]
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        let manifest = json!({"chunkCount":1,"totalFrames":4,"gaps":[],"interrupted":false});
+        assert_eq!(
+            json_request(
+                &app,
+                "POST",
+                &format!("{route}/complete"),
+                ORIGIN,
+                Some(&token),
+                manifest.clone()
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        let meeting_id = started["meetingId"].as_str().unwrap();
+        let file = store::with_db(|db| {
+            Ok(db.query_row(
+                "SELECT file FROM audio_chunks WHERE meeting_id=?",
+                [meeting_id],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .unwrap();
+        let path = directory.path().join("audio").join(meeting_id).join(file);
+        let original = fs::read(&path).unwrap();
+        let mut damaged = original.clone();
+        damaged[80] ^= 1; // Valid header and length, damaged authenticated body.
+        fs::write(&path, &damaged).unwrap();
+        for (method, suffix, body) in [
+            ("GET", "", json!(null)),
+            ("POST", "/complete", manifest.clone()),
+            ("PUT", "", input()),
+        ] {
+            assert_eq!(
+                json_request(
+                    &app,
+                    method,
+                    &format!("{route}{suffix}"),
+                    ORIGIN,
+                    Some(&token),
+                    body
+                )
+                .await
+                .0,
+                StatusCode::GONE
+            );
+        }
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            damaged,
+            "verification never discards damaged evidence"
+        );
+        assert_eq!(
+            read_chunk(
+                &pcm_dir(&id).join(format!("0-{}.pcm", hash(&pcm))),
+                4,
+                &hash(&pcm)
+            )
+            .unwrap(),
+            pcm,
+            "original ingest prefix remains recoverable"
+        );
+        fs::write(&path, &original).unwrap();
+        assert_eq!(
+            json_request(&app, "GET", &route, ORIGIN, Some(&token), json!(null))
+                .await
+                .0,
+            StatusCode::OK
+        );
+        // Even a valid encrypted replacement must match the saved manifest.
+        store::replace_protected(&path, &[0; 52]).unwrap();
+        assert_eq!(
+            json_request(&app, "GET", &route, ORIGIN, Some(&token), json!(null))
+                .await
+                .0,
+            StatusCode::GONE
+        );
+        store::reset_for_tests();
+        std::env::remove_var("ECHO_DATA_DIR");
+    }
+    #[tokio::test]
+    async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases() {
+        let _guard = store::TEST_LIBRARY_LOCK.lock().await;
+        let directory = crate::store::test_directory();
+        store::reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        crate::store::test_key();
         store::init().unwrap();
         store::with_db(|db| {
             assert_eq!(
@@ -2341,7 +2400,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::GONE);
-        fs::write(&saved_file, &data).unwrap();
+        store::replace_protected(&saved_file, &data).unwrap();
         let (status, r) = json_request(
             &app,
             "POST",
@@ -2511,9 +2570,10 @@ mod tests {
     #[tokio::test]
     async fn thirty_minute_parts_form_one_stream_and_portable_receipts_restore() {
         let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-        let directory = tempfile::tempdir().unwrap();
+        let directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", directory.path());
+        crate::store::test_key();
         store::init().unwrap();
         let app = app();
         let install = Uuid::new_v4().to_string();
@@ -2526,8 +2586,8 @@ mod tests {
         let block = vec![17u8; (RATE * 2) as usize];
         let tail = vec![29u8; 2];
         store::mkdir(&pcm_dir(&id)).unwrap();
-        store::write_private(&pcm_dir(&id).join("fixture-block.pcm"), &block).unwrap();
-        store::write_private(&pcm_dir(&id).join("fixture-tail.pcm"), &tail).unwrap();
+        store::write_protected(&pcm_dir(&id).join("fixture-block.pcm"), &block).unwrap();
+        store::write_protected(&pcm_dir(&id).join("fixture-tail.pcm"), &tail).unwrap();
         store::with_db(|db| {
             let tx = db.transaction()?;
             for sequence in 0..1800 {
@@ -2582,7 +2642,7 @@ mod tests {
         assert_eq!(bytes, vec![17, 17, 29, 29]);
         let backup = store::export_library().unwrap();
         assert_eq!(backup["extensionRecordings"][0]["recordingId"], id);
-        let restored_directory = tempfile::tempdir().unwrap();
+        let restored_directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", restored_directory.path());
         store::import_library(backup.clone()).unwrap();
@@ -2622,7 +2682,7 @@ mod tests {
         .is_err());
         store::delete_meeting(&meeting).unwrap();
         let tombstones = store::export_library().unwrap();
-        let tombstone_directory = tempfile::tempdir().unwrap();
+        let tombstone_directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", tombstone_directory.path());
         store::import_library(tombstones).unwrap();
@@ -2636,9 +2696,10 @@ mod tests {
     #[tokio::test]
     async fn start_accepts_current_and_legacy_meeting_hosts_but_rejects_lookalikes() {
         let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-        let directory = tempfile::tempdir().unwrap();
+        let directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", directory.path());
+        crate::store::test_key();
         store::init().unwrap();
         let app = app();
         let (token, _, _) = pair(&app, &Uuid::new_v4().to_string()).await;
@@ -2699,9 +2760,10 @@ mod tests {
     #[tokio::test]
     async fn orphan_retries_resync_files_and_directories_before_durable_ack() {
         let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-        let directory = tempfile::tempdir().unwrap();
+        let directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", directory.path());
+        crate::store::test_key();
         store::init().unwrap();
         let app = app();
         let (token, _, _) = pair(&app, &Uuid::new_v4().to_string()).await;
@@ -2738,7 +2800,8 @@ mod tests {
             )
             .await;
             assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-            assert_eq!(fs::read(&file).unwrap(), pcm);
+            assert_eq!(store::read_protected(&file).unwrap(), pcm);
+            assert_ne!(fs::read(&file).unwrap(), pcm);
             store::with_db(|db| {
                 assert_eq!(recording(db, &id)?["nextSequence"], 0);
                 assert_eq!(
@@ -2819,7 +2882,8 @@ mod tests {
             )
             .await;
             assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-            assert_eq!(fs::read(&file).unwrap(), wav);
+            assert_eq!(store::read_protected(&file).unwrap(), wav);
+            assert_ne!(fs::read(&file).unwrap(), wav);
             store::with_db(|db| {
                 assert_eq!(recording(db, &id)?["status"], "receiving");
                 assert_eq!(

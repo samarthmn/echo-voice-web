@@ -1,0 +1,80 @@
+name: Prepare native desktop candidates
+
+# Produces unsigned qualification artifacts. Publication and signing are separate.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-candidates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: ${{ matrix.target }} candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            bundles: app
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep scratch in the checkout
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tmp/npm-cache"
+          printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'npm_config_cache=%s/tmp/npm-cache\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Ubuntu build prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Confirm native architecture
+        shell: bash
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "$EXPECTED_TARGET"
+      - name: Build application assets and server
+        run: bash scripts/build.sh
+      - name: Verify release key policy and package boundaries
+        run: |
+          node --test tests/release-key-policy.test.mjs
+          npm run test:desktop-package
+      - name: Assemble pinned native runtime
+        run: npm run package:desktop -- --server target/release/echo-server
+      - name: Bundle the native launcher
+        working-directory: desktop
+        env:
+          BUNDLE_TARGET: ${{ matrix.target }}
+          BUNDLE_FORMAT: ${{ matrix.bundles }}
+        run: npm exec --yes --package=@tauri-apps/cli@2.12.1 -- tauri build --ci --bundles "$BUNDLE_FORMAT" --config "../artifacts/desktop-runtime/tauri-$BUNDLE_TARGET.json"
+      - name: Archive macOS application preserving executable permissions
+        if: runner.os == 'macOS'
+        run: tar -czf artifacts/echo-macos-unsigned.tar.gz -C target/release/bundle/macos 'Echo Voice.app'
+      - name: Retain private-testing candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-unsigned-${{ matrix.target }}-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            artifacts/echo-macos-unsigned.tar.gz
+            target/release/bundle/deb/*.deb
+            artifacts/desktop-runtime/${{ matrix.target }}/manifest.json

@@ -1,8 +1,8 @@
+import { decodeBackup, prepareRecovery } from './helpers/encrypted-backup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
@@ -15,7 +15,8 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function launch(t, initialControl = {}, helperBinary = fixture) {
   await access(executable);
   await chmod(fixture, 0o755);
-  const directory = await mkdtemp(join(tmpdir(), 'echo-chatgpt-test-'));
+  await mkdir(resolve('tmp'), { recursive: true });
+  const directory = await mkdtemp(join(resolve('tmp'), 'echo-chatgpt-test-'));
   const home = join(directory, 'chatgpt');
   await mkdir(home);
   let settings = initialControl;
@@ -29,7 +30,7 @@ async function launch(t, initialControl = {}, helperBinary = fixture) {
     response.writeHead(503, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'Unexpected local-provider fallback' }));
   });
   localProvider.listen(0, '127.0.0.1'); await once(localProvider, 'listening');
-  const env = { ...process.env, ECHO_DATA_DIR: directory, ECHO_BIND: `127.0.0.1:${port}`, ECHO_CODEX_BIN: helperBinary,
+  const env = { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_CHATGPT_RUNTIME:'fixture', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), ECHO_DATA_DIR: directory, ECHO_BIND: `127.0.0.1:${port}`, ECHO_CODEX_BIN: helperBinary,
     GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '',
     OPENAI_API_KEY: 'fixture-must-not-inherit', CODEX_API_KEY: 'fixture-must-not-inherit', CHATGPT_ACCESS_TOKEN: 'fixture-must-not-inherit',
     OPENAI_BASE_URL: 'https://fixture.invalid', CODEX_HOME: join(directory, 'unused-host-codex'), HOME: join(directory, 'unused-host-home') };
@@ -104,7 +105,7 @@ test('ChatGPT login, catalog, isolated generation, provenance, and logout use th
   const spawn = records.find(entry => entry.event === 'spawn');
   assert.deepEqual(spawn.inheritedCredentialNames, []); assert.equal(spawn.home, h.home); assert.equal(spawn.cwd, join(h.home, 'work'));
   assert.deepEqual(spawn.argv, ['app-server', '--stdio', '--strict-config']);
-  for (const setting of ['forced_login_method = "chatgpt"', 'model_provider = "openai"', 'shell_tool = false', 'apps = false', 'plugins = false', 'web_search = "disabled"']) assert.ok(spawn.config.includes(setting), setting);
+  for (const setting of ['forced_login_method = "chatgpt"', 'cli_auth_credentials_store = "keyring"', 'persistence = "none"', 'secret_auth_storage = false', 'model_provider = "openai"', 'shell_tool = false', 'apps = false', 'plugins = false', 'web_search = "disabled"']) assert.ok(spawn.config.includes(setting), setting);
   const thread = records.find(entry => entry.method === 'thread/start').params;
   assert.equal(thread.ephemeral, true); assert.equal(thread.modelProvider, 'openai'); assert.equal(thread.model, 'fixture-codex');
   assert.equal(thread.allowProviderModelFallback, false); assert.deepEqual(thread.environments, []); assert.deepEqual(thread.dynamicTools, []);
@@ -113,7 +114,7 @@ test('ChatGPT login, catalog, isolated generation, provenance, and logout use th
   assert.deepEqual(turn.sandboxPolicy, { type: 'readOnly', networkAccess: false });
   assert.deepEqual(turn.environments, []); assert.match(turn.input[0].text, /We agreed to release Friday/);
   assert.equal(turn.outputSchema.additionalProperties, false); assert.deepEqual(turn.outputSchema.required, ['summary', 'decisions', 'actions']);
-  const archive = await h.api('/storage/export'); assert.equal(JSON.stringify(archive).includes('fixture-login'), false); assert.equal(JSON.stringify(archive).includes('fixture@example.test'), false);
+  const phrase = await prepareRecovery(h.api); const archive = decodeBackup(await h.api('/storage/export'), phrase); assert.equal(JSON.stringify(archive).includes('fixture-login'), false); assert.equal(JSON.stringify(archive).includes('fixture@example.test'), false);
   await h.api('/chatgpt/logout', { method: 'POST' }); assert.equal((await h.api('/chatgpt')).connected, false);
   await h.generate(meeting.id, { status: 401 });
   assert.equal((await h.api(`/meetings/${meeting.id}`)).notes.length, 1);

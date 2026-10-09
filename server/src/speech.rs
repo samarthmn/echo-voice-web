@@ -1,5 +1,9 @@
 //! Optional native Large V3 execution, owned by the local server rather than a browser heap.
 use crate::{security::ApiError, store};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use zeroize::Zeroizing;
+#[path = "speech_spool.rs"]
+mod speech_spool;
 use axum::{
     extract::{Path, Query, Request},
     http::{header, StatusCode},
@@ -65,11 +69,14 @@ struct Manager {
 fn manager() -> Arc<Manager> {
     MANAGER.get_or_init(|| Arc::new(Manager::default())).clone()
 }
+pub async fn active_count() -> usize {
+    usize::from(manager().state.lock().await.active.is_some())
+}
 fn root() -> Result<PathBuf> {
-    Ok(std::env::current_dir()?)
+    Ok(crate::paths::get().resource_root)
 }
 fn cache_dir() -> PathBuf {
-    store::data_dir().join("models/native-large-v3")
+    crate::paths::get().cache_dir.join("native-large-v3")
 }
 fn valid_id(id: &str) -> Result<String> {
     uuid::Uuid::parse_str(id)
@@ -113,7 +120,7 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
                 return None;
             }
         }
-        let output = timeout(Duration::from_secs(3), Command::new("node")
+        let output = timeout(Duration::from_secs(3), Command::new(crate::paths::node_binary())
             .arg("--input-type=module").arg("-e")
             .arg("if(Number(process.versions.node.split('.')[0])<22)process.exit(1);await import('onnxruntime-node');await import('./scripts/native-speech.mjs');process.stdout.write('echo-native-ready')")
             .current_dir(root).kill_on_drop(true).output()).await.ok()?.ok()?;
@@ -121,14 +128,14 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
     }
     .await
     .is_some();
-    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run npm ci in the Echo Voice folder, then retry." }.to_owned();
+    let detail = if available { "Large V3 runs locally through the native speech helper." } else if crate::paths::installed() { "The bundled Large V3 helper is unavailable. Reinstall Echo, then retry. Your saved audio is unchanged." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run npm ci in the Echo Voice folder, then retry." }.to_owned();
     *cached = Some((Instant::now(), available, detail.clone()));
     (available, detail)
 }
 
 /// Private native model files never enter browser backup exports or accept client paths.
 fn safe_cache(create: bool) -> Result<PathBuf> {
-    let parent = store::data_dir().join("models");
+    let parent = crate::paths::get().cache_dir;
     let path = cache_dir();
     for folder in [&parent, &path] {
         if std::fs::symlink_metadata(folder).is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -347,7 +354,11 @@ fn spool_namespace(project: &FsPath, data: &FsPath) -> Result<PathBuf> {
         "{:x}",
         Sha256::digest(canonical.as_os_str().as_encoded_bytes())
     );
-    let temporary = project.join("tmp");
+    let temporary = if crate::paths::installed() {
+        crate::paths::get().runtime_dir
+    } else {
+        project.join("tmp")
+    };
     let namespace = temporary.join(format!("native-speech-{identity}"));
     for folder in [&temporary, &namespace] {
         match std::fs::symlink_metadata(folder) {
@@ -508,18 +519,19 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
         if is_cancelled(&cancellation) { return Err(cancelled_error()); }
         let cache = safe_cache(true)?;
         if input.operation == "transcribe" && !qualified(&cache) { return Err(ApiError::new(409,"Download and qualify Large V3 in Models before transcribing.")); }
-        let audio = spool.join("audio.f32");
+        let audio = spool.join("audio.enc");
+        let mut audio_secret = None;
         if input.operation == "transcribe" {
-            let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&audio).await?;
+            let mut file = speech_spool::Writer::create(&audio).await?;
             let mut body = request.into_body().into_data_stream(); let mut bytes = 0usize;
             while let Some(chunk) = tokio::select! { _ = cancellation.changed() => { return Err(cancelled_error()); }, value = timeout(Duration::from_secs(60), body.next()) => value.map_err(|_| ApiError::new(408,"The speech upload timed out. Retry the saved audio."))? } {
                 let chunk = chunk.map_err(|_| ApiError::bad("The speech upload was interrupted. Retry the saved audio."))?;
                 bytes = bytes.checked_add(chunk.len()).ok_or_else(|| ApiError::new(413,"Native speech accepts recordings up to two hours."))?;
                 if bytes > MAX_PCM { return Err(ApiError::new(413,"Native speech accepts recordings up to two hours.")); }
-                file.write_all(&chunk).await?;
+                file.append(&chunk).await?;
             }
             if bytes == 0 || !bytes.is_multiple_of(4) { return Err(ApiError::bad("The decoded speech audio is empty or incomplete.")); }
-            file.flush().await?;
+            audio_secret = Some(file.finish().await?);
         } else {
             let body = tokio::select! {
                 _ = cancellation.changed() => return Err(cancelled_error()),
@@ -529,13 +541,21 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
         }
         if is_cancelled(&cancellation) { return Err(cancelled_error()); }
         let cache = std::fs::canonicalize(cache)?;
-        let request_file = spool.join("request.json");
         let mut value = json!({"operation":input.operation,"cacheDir":cache,"language":language});
-        if input.operation == "transcribe" { value["audioPath"] = json!(audio); }
-        crate::config::write_private(&request_file, &serde_json::to_vec(&value)?)?;
-        Ok(request_file)
+        if let Some((key, bytes)) = audio_secret {
+            value["audioPath"] = json!(audio);
+            value["audioBytes"] = json!(bytes);
+            value["audioKey"] = json!(STANDARD.encode(key.as_ref()));
+        }
+        let mut message = Zeroizing::new(serde_json::to_vec(&value)?);
+        if let Some(Value::String(key)) = value.get_mut("audioKey") {
+            use zeroize::Zeroize;
+            key.zeroize();
+        }
+        message.push(b'\n');
+        Ok(message)
     }.await;
-    let request_file = match prepared {
+    let request_message = match prepared {
         Ok(path) => path,
         Err(error) => {
             let public = ApiError::new(error.status.as_u16(), error.message.clone());
@@ -549,7 +569,7 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
     let job_id = id.clone();
     let operation = input.operation;
     tokio::spawn(async move {
-        let outcome = run(&owner, &job_id, &request_file, &operation, cancellation).await;
+        let outcome = run(&owner, &job_id, request_message, &operation, cancellation).await;
         remove_spool(&spool).await;
         finish(&owner, &job_id, outcome).await;
     });
@@ -638,7 +658,7 @@ fn result(value: &Value, operation: &str) -> Result<Value> {
 async fn run(
     owner: &Manager,
     id: &str,
-    request_file: &FsPath,
+    request_message: Zeroizing<Vec<u8>>,
     operation: &str,
     cancellation: watch::Receiver<bool>,
 ) -> Result<Value> {
@@ -646,30 +666,61 @@ async fn run(
         return Err(cancelled_error());
     }
     let project = root()?;
-    let mut command = Command::new("node");
+    let mut command = Command::new(crate::paths::node_binary());
     command
         .arg(project.join("scripts/native-speech.mjs"))
-        .arg("--request")
-        .arg(request_file)
+        .arg("--stdin-request")
         .current_dir(&project)
-        .env("TMPDIR", project.join("tmp"));
-    supervise(owner, id, operation, command, cancellation).await
+        .env("TMPDIR", crate::paths::get().runtime_dir);
+    supervise_request(
+        owner,
+        id,
+        operation,
+        command,
+        cancellation,
+        Some(request_message),
+    )
+    .await
 }
+#[cfg(test)]
 async fn supervise(
+    owner: &Manager,
+    id: &str,
+    operation: &str,
+    command: Command,
+    cancellation: watch::Receiver<bool>,
+) -> Result<Value> {
+    supervise_request(owner, id, operation, command, cancellation, None).await
+}
+async fn supervise_request(
     owner: &Manager,
     id: &str,
     operation: &str,
     mut command: Command,
     mut cancellation: watch::Receiver<bool>,
+    request_message: Option<Zeroizing<Vec<u8>>>,
 ) -> Result<Value> {
     if is_cancelled(&cancellation) {
         return Err(cancelled_error());
     }
     let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn().map_err(|_| ApiError::new(503, "The native speech helper could not start. Check Node.js and reinstall the local dependencies."))?;
-    let _lease = child
+    let mut lease = child
         .stdin
         .take()
         .ok_or_else(|| ApiError::new(503, "The native speech process could not be supervised."))?;
+    if let Some(message) = request_message {
+        let sent = tokio::select! {
+            _ = cancellation.changed() => Err(cancelled_error()),
+            sent = timeout(Duration::from_secs(10), lease.write_all(&message)) => sent
+                .map_err(|_| ApiError::new(504, "The native speech request timed out."))?
+                .map_err(ApiError::from),
+        };
+        if let Err(error) = sent {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(error);
+        }
+    }
     let stdout = child
         .stdout
         .take()
@@ -735,7 +786,11 @@ async fn supervise(
     };
     if outcome.is_err() {
         if !tail.is_empty() {
-            tracing::warn!(job_id = id, diagnostics = %String::from_utf8_lossy(&tail), "Native speech child failed");
+            tracing::warn!(
+                job_id = id,
+                diagnostic_bytes = tail.len(),
+                "Native speech child failed; private diagnostics were discarded"
+            );
         }
         if operation == "download" {
             // An encoder probe followed by a teardown crash is not a qualified download.
@@ -823,6 +878,17 @@ pub async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn fixture() -> tempfile::TempDir {
+        let root = FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("tmp");
+        std::fs::create_dir_all(&root).unwrap();
+        tempfile::Builder::new()
+            .prefix("native-rust-test-")
+            .tempdir_in(root)
+            .unwrap()
+    }
     #[tokio::test]
     async fn exact_cancel_fences_late_results_and_prestart_requests() {
         let owner = Manager::default();
@@ -969,7 +1035,7 @@ mod tests {
         let owner = Arc::new(Manager::default());
         let id = uuid::Uuid::new_v4().to_string();
         let _lease = reserve(&owner, &id, "transcribe").await.unwrap();
-        let directory = tempfile::tempdir().unwrap();
+        let directory = fixture();
         let spool = directory.path().join("owned-job");
         std::fs::create_dir(&spool).unwrap();
         std::fs::write(spool.join("audio.f32"), [0; 4]).unwrap();
@@ -997,7 +1063,7 @@ mod tests {
     }
     #[test]
     fn startup_recovery_removes_only_the_locked_library_namespace() {
-        let project = tempfile::tempdir().unwrap();
+        let project = fixture();
         let first = project.path().join("first-library");
         let second = project.path().join("second-library");
         std::fs::create_dir(&first).unwrap();
@@ -1029,10 +1095,10 @@ mod tests {
     #[test]
     fn startup_recovery_rejects_symlink_ancestors_and_never_follows_job_links() {
         use std::os::unix::fs::symlink;
-        let project = tempfile::tempdir().unwrap();
+        let project = fixture();
         let library = project.path().join("library");
         std::fs::create_dir(&library).unwrap();
-        let external = tempfile::tempdir().unwrap();
+        let external = fixture();
         std::fs::write(external.path().join("keep"), b"outside").unwrap();
         symlink(external.path(), project.path().join("tmp")).unwrap();
         assert!(clean_namespace(project.path(), &library).is_err());
@@ -1070,7 +1136,7 @@ mod tests {
         ] {
             assert!(result(&bad, "transcribe").is_err());
         }
-        let folder = tempfile::tempdir().unwrap();
+        let folder = fixture();
         let pinned = format!("{CHECKPOINT}/{REVISION}");
         std::fs::create_dir_all(folder.path().join(format!("{pinned}/onnx"))).unwrap();
         let mut entries = Vec::new();

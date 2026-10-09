@@ -4,6 +4,8 @@ mod extension;
 use extension::ExtensionRecordingStatus;
 mod chatgpt;
 mod models;
+mod onboarding;
+mod privacy;
 mod review;
 mod settings;
 mod ui;
@@ -533,6 +535,7 @@ fn App() -> Element {
                     if current_page=="overview"{
                         div{class:"page-content overview",PageHeading{title:"Overview"}
                             div{class:"quick-actions",button{class:"quick-action",disabled:is_recording,onclick:move |_|new_meeting.set(true),span{class:"quick-icon peach",Icon{name:"mic",size:21}}span{strong{"Record in person"}small{"Room microphone"}}Icon{name:"arrow-right",size:17}}button{class:"quick-action",onclick:move |_|page.set("calendar".into()),span{class:"quick-icon lavender",Icon{name:"calendar",size:21}}span{strong{"Online meeting"}small{"Browser extension"}}Icon{name:"arrow-right",size:17}}label{class:"quick-action upload-action",span{class:"quick-icon mint",Icon{name:"upload",size:21}}span{strong{"Upload a recording"}small{"Audio file"}}Icon{name:"arrow-right",size:17}input{r#type:"file","aria-label":"Upload a recording",accept:"audio/*,video/webm,video/mp4",onchange:move |_|{spawn(async move{match crate::api::evaluate("return await window.echo.upload(document.getElementById('audio-upload'))").await{Ok(_)=>{},Err(e)=>toast.set(format!("Upload could not complete: {e}"))}});},id:"audio-upload",class:"file-input"}}}
+                            if !loading() && load_error().is_empty() && onboarding::needs_first_transcript(&meetings()){onboarding::FirstTranscript{settings,download:model_download,meetings,on_models:move |_|page.set("models".into()),on_open:move |m|{selected.set(m);page.set("review".into());}}}
                             if count>0{div{class:"stats-row",div{class:"stat-item",span{class:"stat-icon",Icon{name:"video",size:18}}div{strong{"{count}"}span{"Meetings"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"clock",size:18}}div{strong{"{minutes:.0}"}span{"Minutes"}}}div{class:"stat-item",span{class:"stat-icon",Icon{name:"sparkles",size:18}}div{strong{"{note_count}"}span{"With notes"}}}div{class:"stat-item privacy-stat",span{class:"stat-icon",Icon{name:"shield",size:18}}div{strong{"Local"}span{"Audio capture"}}}}}
                             div{class:"overview-columns",section{class:"recent-section",SectionHeading{title:"Recent meetings",button{class:"text-button",onclick:move |_|page.set("meetings".into()),"View all" Icon{name:"arrow-right",size:15}}}if count==0{div{class:"empty-library panel",div{class:"empty-library-icon",Icon{name:"mic",size:27}}h3{"No meetings yet"}p{"Record a meeting or upload audio."}ActionButton{kind:ButtonKind::Secondary,onclick:move |_|{spawn(async move{if let Ok(v)=get("/demo").await{selected.set(v);page.set("review".into())}else{toast.set("Sample meeting is unavailable.".into())}});},Icon{name:"play",size:14}"Explore a sample meeting"}span{class:"small-muted","Sample · no audio"}}}else{div{class:"recent-list",for meeting in visible.iter().take(4).cloned(){MeetingCard{meeting,on_open:move |m|{selected.set(m);page.set("review".into());}}}}}
                             }

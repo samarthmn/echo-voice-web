@@ -1,13 +1,7 @@
 //! Public loopback runtime settings. Legacy runner configuration is ignored.
 use crate::security::ApiError;
 use serde::Deserialize;
-use std::{
-    fs,
-    io::Write,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use std::{fs, net::SocketAddr, path::PathBuf, sync::OnceLock};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -24,14 +18,37 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 /// Load the shared file once; packaged binaries retain the same embedded defaults.
 pub fn get() -> &'static Config {
     CONFIG.get_or_init(|| {
-        let path = std::env::var_os("ECHO_CONFIG_FILE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| "echo.config.json".into());
+        let path = if crate::paths::installed() {
+            crate::paths::installed_data_dir()
+                .expect("Invalid installed data directory")
+                .join("config.json")
+        } else {
+            std::env::var_os("ECHO_CONFIG_FILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| "echo.config.json".into())
+        };
+        if crate::paths::installed() && path.exists() {
+            let metadata = fs::symlink_metadata(&path).expect("Cannot inspect installed config");
+            assert!(
+                !metadata.file_type().is_symlink() && metadata.is_file(),
+                "Installed config must be a regular private file"
+            );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{MetadataExt, PermissionsExt};
+                assert!(
+                    metadata.uid() == unsafe { libc::geteuid() }
+                        && metadata.permissions().mode() & 0o077 == 0,
+                    "Installed config must be owned by this account with mode 0600"
+                );
+            }
+        }
         let source = match fs::read_to_string(&path) {
             Ok(source) => source,
             Err(e)
                 if e.kind() == std::io::ErrorKind::NotFound
-                    && std::env::var_os("ECHO_CONFIG_FILE").is_none() =>
+                    && (crate::paths::installed()
+                        || std::env::var_os("ECHO_CONFIG_FILE").is_none()) =>
             {
                 include_str!("../../echo.config.json").to_owned()
             }
@@ -55,35 +72,6 @@ pub fn loopback_bind(raw: &str) -> Result<SocketAddr, ApiError> {
         ));
     }
     Ok(address)
-}
-
-/// Create private files atomically, with durable content before publishing the name.
-pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ApiError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| ApiError::bad("Invalid private file path."))?;
-    fs::create_dir_all(parent)?;
-    let temporary = parent.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
-    let result = (|| {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)?;
-        #[cfg(unix)]
-        fs::File::open(parent)?.sync_all()?;
-        Ok::<_, ApiError>(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temporary);
-    }
-    result
 }
 
 #[cfg(test)]

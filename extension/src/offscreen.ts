@@ -2,13 +2,13 @@ import {Recording, Settings, MAX_BACKLOG_FRAMES, MAX_FRAMES, MAX_PENDING_BYTES, 
 import {allRecordings, appendChunk, createRecording, markInterrupted, recording, updateRecording} from './storage';
 import {transferPending} from './protocol';
 declare const chrome: any;
-type Capture = {id: string; context: AudioContext; worklet: AudioWorkletNode; tab: MediaStream; mic?: MediaStream; micDisconnected?: boolean; micExcluded: boolean; exclusionRevision: number; lastGateRevision: number; sequence: number; queuedFrames: number; persistedFrames: number; queue: Promise<void>; failed: boolean; pausedAt?: number; waiters: Map<string,() => void>; sourceState: string};
+type Capture = {id: string; title:string; context: AudioContext; worklet: AudioWorkletNode; tab: MediaStream; mic?: MediaStream; micDisconnected?: boolean; micExcluded: boolean; exclusionRevision: number; lastGateRevision: number; sequence: number; queuedFrames: number; persistedFrames: number; queue: Promise<void>; failed: boolean; pausedAt?: number; waiters: Map<string,() => void>; sourceState: string};
 let active: Capture | undefined; let transition = false; let recoveryError: string | undefined;
 let transitionDone = Promise.resolve(); let finishTransition: (() => void) | undefined;
 function beginTransition() {transition = true; transitionDone = new Promise(resolve => {finishTransition = resolve;});}
 function endTransition() {transition = false; finishTransition?.(); finishTransition = undefined;}
 let initializing: Promise<void> = markInterrupted().catch(error => {recoveryError = `Local recovery metadata could not be updated. Saved audio is retained for export. ${(error as Error).message}`;});
-const activeStatus = () => active ? {recordingId:active.id,mic:active.mic ? active.sourceState:'tab-only',micCaptured:!!active.mic,micAvailable:!!active.mic && !active.micDisconnected,micExcluded:active.micExcluded,tab:true,paused:!!active.pausedAt}:null;
+const activeStatus = () => active ? {recordingId:active.id,title:active.title,mic:active.mic ? active.sourceState:'tab-only',micCaptured:!!active.mic,micAvailable:!!active.mic && !active.micDisconnected,micExcluded:active.micExcluded,tab:true,paused:!!active.pausedAt}:null;
 const publish = (endedRecordingId?: string) => chrome.runtime.sendMessage({target:'background',type:'CAPTURE_STATUS',endedRecordingId,active:activeStatus()}).catch(() => {});
 async function trustedSettings(): Promise<Settings> {const response = await chrome.runtime.sendMessage({target:'background',type:'TRUSTED_SETTINGS'}); if(!response?.ok) throw new Error('Trusted recorder settings are unavailable.'); return response.value;}
 function microphoneFailure(error: unknown): string {
@@ -49,7 +49,7 @@ async function start(message: any) {
     const worklet = new AudioWorkletNode(context,'echo-pcm',{numberOfInputs:2,numberOfOutputs:1,outputChannelCount:[1],processorOptions:{recordingId:message.recording.recordingId}});
     const row: Recording = {...message.recording,chunkCount:0,totalFrames:0,captureState:'recording',transferState:'saved-local',gaps:[],interrupted:false};
     await createRecording(row);
-    const capture: Capture = {id:row.recordingId,context,worklet,tab,mic,micExcluded:false,exclusionRevision:0,lastGateRevision:-1,sequence:0,queuedFrames:0,persistedFrames:0,queue:Promise.resolve(),failed:false,waiters:new Map(),sourceState:'Excluded · unknown mute state'}; active = capture;
+    const capture: Capture = {id:row.recordingId,title:row.title,context,worklet,tab,mic,micExcluded:false,exclusionRevision:0,lastGateRevision:-1,sequence:0,queuedFrames:0,persistedFrames:0,queue:Promise.resolve(),failed:false,waiters:new Map(),sourceState:'Excluded · unknown mute state'}; active = capture;
     worklet.port.onmessage = ({data}) => {
       if(data.type === 'flushed') {capture.waiters.get(data.requestId)?.(); capture.waiters.delete(data.requestId); return;}
       if(data.type === 'failed') {void fail(capture,'Local saving fell five seconds behind. Recording stopped; the committed audio prefix is retained.','save-backlog'); return;}

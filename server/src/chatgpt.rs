@@ -2,10 +2,13 @@
 //! Echo never reads existing Codex/browser credentials or implements OpenAI's
 //! private authentication endpoints. The supported helper owns its own login.
 use crate::{security::ApiError, store};
+#[path = "chatgpt_runtime.rs"]
+mod runtime;
 use axum::{
     routing::{get, post},
     Json, Router,
 };
+use runtime::ProtectedHome;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -24,6 +27,7 @@ use tokio::{
     time::timeout,
 };
 use url::Url;
+use zeroize::Zeroizing;
 
 const VERSION: &str = "codex-cli 0.160.0";
 const MAX_LINE: usize = 2 * 1024 * 1024;
@@ -81,6 +85,7 @@ struct Worker {
     alive: AtomicBool,
     state: Mutex<PublicState>,
     working_dir: PathBuf,
+    runtime: Mutex<Option<ProtectedHome>>,
 }
 /// Return the process-wide helper owner used to serialize account and generation operations.
 fn manager() -> &'static Manager {
@@ -165,7 +170,7 @@ fn helper_path() -> Option<PathBuf> {
             .flatten();
     }
     let executable = if cfg!(windows) { "codex.exe" } else { "codex" };
-    let root = std::env::current_dir().ok()?;
+    let root = crate::paths::get().resource_root;
     let (package, triple) = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => ("codex-linux-x64", "x86_64-unknown-linux-musl"),
         ("linux", "aarch64") => ("codex-linux-arm64", "aarch64-unknown-linux-musl"),
@@ -188,6 +193,9 @@ fn helper_path() -> Option<PathBuf> {
         if path.is_file() {
             return Some(path);
         }
+    }
+    if crate::paths::installed() {
+        return None;
     }
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)
@@ -223,6 +231,8 @@ fn child_command(binary: &Path, home: &Path, working: &Path) -> Command {
         "WINDIR",
         "TEMP",
         "TMP",
+        "XDG_RUNTIME_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
         "LANG",
         "LC_ALL",
         "SSL_CERT_FILE",
@@ -241,6 +251,9 @@ fn child_command(binary: &Path, home: &Path, working: &Path) -> Command {
         }
     }
     c.env("CODEX_HOME", home)
+        .env("TMPDIR", home.join("tmp"))
+        .env("TEMP", home.join("tmp"))
+        .env("TMP", home.join("tmp"))
         .current_dir(working)
         .kill_on_drop(true);
     c
@@ -249,13 +262,328 @@ fn child_command(binary: &Path, home: &Path, working: &Path) -> Command {
 fn configuration() -> String {
     include_str!("chatgpt-config.toml").to_owned()
 }
+/// Retain old helper credentials/caches encrypted before any new helper runs.
+/// The workspace lock excludes an older Echo process. Nothing is restored to
+/// ordinary disk; a new official helper uses its protected runtime filesystem.
+pub(crate) fn protect_legacy_state() -> Result<(), ApiError> {
+    if runtime::fixture_runtime() {
+        return Ok(());
+    }
+    fn visit(folder: &Path) -> Result<(), ApiError> {
+        if !folder.exists() {
+            return Ok(());
+        }
+        if std::fs::symlink_metadata(folder)?.file_type().is_symlink() {
+            return Err(ApiError::bad(
+                "The old ChatGPT folder cannot contain symbolic links.",
+            ));
+        }
+        for item in std::fs::read_dir(folder)? {
+            let item = item?;
+            let kind = item.file_type()?;
+            if kind.is_symlink() {
+                return Err(ApiError::bad(
+                    "The old ChatGPT folder cannot contain symbolic links.",
+                ));
+            }
+            if kind.is_dir() {
+                visit(&item.path())?;
+            } else if kind.is_file() && !crate::protected_storage::is_encrypted(&item.path())? {
+                if item.metadata()?.len() > 512 * 1024 * 1024 {
+                    return Err(ApiError::new(413, "An old ChatGPT cache exceeds the protected migration limit. Its original has been preserved."));
+                }
+                let bytes = Zeroizing::new(std::fs::read(item.path())?);
+                store::replace_protected(&item.path(), &bytes)?;
+            }
+        }
+        Ok(())
+    }
+    visit(&store::data_dir().join("chatgpt"))
+}
+fn auth_migration_error() -> ApiError {
+    ApiError::new(503, "Echo could not move the existing ChatGPT connection into its isolated OS credential store. Unlock the credential store and retry. The encrypted original is preserved; no account was replaced.")
+}
+/// Codex 0.160.0's explicit Direct keyring backend uses this canonical-home
+/// identity (login/src/auth/storage.rs). No other Codex home's entry is read.
+fn auth_store_identity(home: &Path) -> Result<String, ApiError> {
+    use sha2::{Digest, Sha256};
+    if !home.is_absolute()
+        || home
+            .components()
+            .any(|v| matches!(v, std::path::Component::ParentDir))
+    {
+        return Err(auth_migration_error());
+    }
+    // The official backend falls back to the absolute spelling while an
+    // encrypted runtime is unmounted (or its Linux tmpfs was cleaned up).
+    let canonical = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(canonical.to_string_lossy().as_bytes())
+    );
+    Ok(format!("cli|{}", &digest[..16]))
+}
+fn no_links(path: &Path) -> Result<(), ApiError> {
+    let mut current = PathBuf::new();
+    for part in path.components() {
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(value) if value.file_type().is_symlink() => return Err(auth_migration_error()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(auth_migration_error()),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+fn copied_home(root: &Path) -> Result<PathBuf, ApiError> {
+    #[cfg(target_os = "macos")]
+    let home = root.join("chatgpt-runtime/codex");
+    #[cfg(target_os = "linux")]
+    let home = {
+        use sha2::{Digest, Sha256};
+        let runtime =
+            PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(auth_migration_error)?);
+        if !runtime.is_absolute() {
+            return Err(auth_migration_error());
+        }
+        no_links(&runtime)?;
+        let identity = format!("{:x}", Sha256::digest(root.as_os_str().as_encoded_bytes()));
+        runtime.join(format!("echo-chatgpt-{identity}/codex"))
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    return Err(auth_migration_error());
+    no_links(&home)?;
+    Ok(home)
+}
+fn copied_auth_file(root: &Path) -> Result<Option<Zeroizing<String>>, ApiError> {
+    let path = root.join("chatgpt/auth.json");
+    no_links(&path)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = if crate::protected_storage::is_encrypted(&path)? {
+        // The desktop copies the source protection descriptor. Authentication
+        // proves that this file belongs to that same source library key.
+        store::with_key(|key| {
+            let mut reader =
+                crate::protected_storage::Reader::open(key, &path, "chatgpt/auth.json")?;
+            if reader.len() > 1024 * 1024 {
+                return Err(std::io::Error::other(
+                    "Old ChatGPT credentials are too large.",
+                ));
+            }
+            reader.read_all()
+        })?
+    } else {
+        if std::fs::metadata(&path)?.len() > 1024 * 1024 {
+            return Err(auth_migration_error());
+        }
+        std::fs::read(path)?
+    };
+    String::from_utf8(bytes)
+        .map(Zeroizing::new)
+        .map(Some)
+        .map_err(|_| auth_migration_error())
+}
+fn copy_connection_with_store(
+    source: &Path,
+    destination: &Path,
+    mut read: impl FnMut(&str) -> Result<Option<Zeroizing<String>>, ApiError>,
+    mut write: impl FnMut(&str, &str) -> Result<(), ApiError>,
+    mut remove: impl FnMut(&str) -> Result<(), ApiError>,
+) -> Result<(), ApiError> {
+    let source_home = copied_home(source)?;
+    let legacy_home = source.join("chatgpt");
+    no_links(&legacy_home)?;
+    let mut auth = read(&auth_store_identity(&source_home)?)?;
+    if auth.is_none() {
+        auth = read(&auth_store_identity(&legacy_home)?)?;
+    }
+    if auth.is_none() {
+        auth = copied_auth_file(source)?;
+    }
+    let Some(auth) = auth else {
+        return Ok(());
+    };
+    let target = auth_store_identity(&copied_home(destination)?)?;
+    let copied = destination.join("chatgpt/auth.json");
+    no_links(&copied)?;
+    let mut created = false;
+    let migrated = verify_auth_migration(
+        &auth,
+        || read(&target),
+        |value| {
+            // The destination library is still an unselected, exclusively owned
+            // copy. Only its newly created scoped entry is eligible for rollback.
+            created = true;
+            write(&target, value)
+        },
+    );
+    if let Err(error) = migrated {
+        if created {
+            let _ = remove(&target);
+        }
+        return Err(error);
+    }
+    // Avoid a stale copied file overriding/refusing refreshed keyring tokens
+    // on the next helper start. The selected source copy is never changed.
+    if copied.exists() {
+        if let Err(error) = std::fs::remove_file(copied) {
+            if created {
+                let _ = remove(&target);
+            }
+            return Err(error.into());
+        }
+    }
+    Ok(())
+}
+/// Called only for an explicit desktop library copy after all copied database,
+/// audio and legacy-session checks pass. Roots arrive over the private stdin
+/// pipe; the source account is read only and is never signed out or replaced.
+pub(crate) fn copy_connection(source: &Path, destination: &Path) -> Result<(), ApiError> {
+    if !source.is_absolute() || !destination.is_absolute() {
+        return Err(auth_migration_error());
+    }
+    no_links(source)?;
+    no_links(destination)?;
+    let source = std::fs::canonicalize(source)?;
+    let destination = std::fs::canonicalize(destination)?;
+    if source == destination
+        || destination != std::fs::canonicalize(store::data_dir())?
+        || !source.join("workspace.sqlite").is_file()
+    {
+        return Err(auth_migration_error());
+    }
+    if cfg!(debug_assertions) && std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some() {
+        // Integration fixtures cannot read any real OS account, including a
+        // keyring-only account. Injected in-memory stores test transfer below.
+        return if std::env::var("ECHO_TEST_MODE").as_deref() == Ok("1")
+            && copied_auth_file(&source)?.is_none()
+        {
+            Ok(())
+        } else {
+            Err(auth_migration_error())
+        };
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        copy_connection_with_store(
+            &source,
+            &destination,
+            |id| {
+                let entry =
+                    keyring::Entry::new("Codex Auth", id).map_err(|_| auth_migration_error())?;
+                match entry.get_password() {
+                    Ok(value) => Ok(Some(Zeroizing::new(value))),
+                    Err(keyring::Error::NoEntry) => Ok(None),
+                    Err(_) => Err(auth_migration_error()),
+                }
+            },
+            |id, value| {
+                keyring::Entry::new("Codex Auth", id)
+                    .map_err(|_| auth_migration_error())?
+                    .set_password(value)
+                    .map_err(|_| auth_migration_error())
+            },
+            |id| {
+                keyring::Entry::new("Codex Auth", id)
+                    .map_err(|_| auth_migration_error())?
+                    .delete_credential()
+                    .map_err(|_| auth_migration_error())
+            },
+        )
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Err(auth_migration_error())
+    }
+}
+fn verify_auth_migration(
+    source: &str,
+    mut read: impl FnMut() -> Result<Option<Zeroizing<String>>, ApiError>,
+    mut write: impl FnMut(&str) -> Result<(), ApiError>,
+) -> Result<(), ApiError> {
+    if source.len() > 1024 * 1024 {
+        return Err(auth_migration_error());
+    }
+    let value: Value = serde_json::from_str(source).map_err(|_| auth_migration_error())?;
+    if !value.is_object() || !value["tokens"].is_object() || !value["OPENAI_API_KEY"].is_null() {
+        return Err(auth_migration_error());
+    }
+    match read()? {
+        Some(existing) if existing.as_str() != source => return Err(auth_migration_error()),
+        Some(_) => {}
+        None => write(source)?,
+    }
+    if read()?.as_deref().map(|v| v.as_str()) != Some(source) {
+        return Err(auth_migration_error());
+    }
+    Ok(())
+}
+fn migrate_auth_to_keyring(home: &Path) -> Result<(), ApiError> {
+    if runtime::fixture_runtime() {
+        return Ok(());
+    }
+    let original = store::data_dir().join("chatgpt/auth.json");
+    if !original.exists() {
+        return Ok(());
+    }
+    let bytes = Zeroizing::new(store::read_protected(&original)?);
+    let source = std::str::from_utf8(&bytes).map_err(|_| auth_migration_error())?;
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        // Test-key libraries must never touch the user's real OS account store.
+        if cfg!(debug_assertions) && std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some() {
+            return Err(auth_migration_error());
+        }
+        let entry = keyring::Entry::new("Codex Auth", &auth_store_identity(home)?)
+            .map_err(|_| auth_migration_error())?;
+        verify_auth_migration(
+            source,
+            || match entry.get_password() {
+                Ok(value) => Ok(Some(Zeroizing::new(value))),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(_) => Err(auth_migration_error()),
+            },
+            |value| {
+                entry
+                    .set_password(value)
+                    .map_err(|_| auth_migration_error())
+            },
+        )?;
+        std::fs::remove_file(&original)?;
+        std::fs::File::open(original.parent().unwrap())?.sync_all()?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (source, home);
+        Err(auth_migration_error())
+    }
+}
 /// Verify the helper version, write private config, and perform the strict-config protocol handshake.
-async fn spawn_worker(binary: PathBuf, home: PathBuf) -> Result<Arc<Worker>, ApiError> {
-    private_directory(&home)?;
+async fn spawn_worker(binary: PathBuf, protected: ProtectedHome) -> Result<Arc<Worker>, ApiError> {
+    let home = protected.home.clone();
+    match spawn_protected_worker(binary, &home).await {
+        Ok(worker) => {
+            *worker.runtime.lock().await = Some(protected);
+            Ok(worker)
+        }
+        Err(error) => {
+            let _ = protected.close().await;
+            Err(error)
+        }
+    }
+}
+async fn spawn_protected_worker(binary: PathBuf, home: &Path) -> Result<Arc<Worker>, ApiError> {
+    private_directory(home)?;
+    private_directory(&home.join("tmp"))?;
+    migrate_auth_to_keyring(home)?;
     let working = home.join("work");
     private_directory(&working)?;
     private_directory(&working.join(".git"))?;
-    let mut probe = child_command(&binary, &home, &working);
+    let mut probe = child_command(&binary, home, &working);
     probe
         .arg("--version")
         .stdin(Stdio::null())
@@ -277,7 +605,7 @@ async fn spawn_worker(binary: PathBuf, home: PathBuf) -> Result<Arc<Worker>, Api
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600))?;
     }
-    let mut command = child_command(&binary, &home, &working);
+    let mut command = child_command(&binary, home, &working);
     command
         .args(["app-server", "--stdio", "--strict-config"])
         .stdin(Stdio::piped())
@@ -298,6 +626,7 @@ async fn spawn_worker(binary: PathBuf, home: PathBuf) -> Result<Arc<Worker>, Api
         alive: AtomicBool::new(true),
         state: Mutex::new(PublicState::default()),
         working_dir: working,
+        runtime: Mutex::new(None),
     });
     tokio::spawn(read_loop(Arc::clone(&worker), BufReader::new(output)));
     let initialized=worker.rpc("initialize",json!({"clientInfo":{"name":"echo_voice_notes","title":"Echo Voice","version":"0.1.0"},"capabilities":{"experimentalApi":true}})).await;
@@ -316,13 +645,15 @@ impl Manager {
             if worker.alive.load(Ordering::SeqCst) {
                 return Ok(Arc::clone(worker));
             }
+            worker.shutdown().await;
         }
         let path=helper_path().ok_or_else(||ApiError::new(503,"Install the optional official Codex helper 0.160.0 to connect ChatGPT. Local AI remains available."))?;
         let root = std::fs::canonicalize(store::data_dir()).or_else(|_| {
             std::fs::create_dir_all(store::data_dir())?;
             std::fs::canonicalize(store::data_dir())
         })?;
-        let worker = spawn_worker(path, root.join("chatgpt")).await?;
+        let protected = ProtectedHome::prepare(&root).await?;
+        let worker = spawn_worker(path, protected).await?;
         *current = Some(Arc::clone(&worker));
         Ok(worker)
     }
@@ -377,8 +708,19 @@ impl Worker {
     /// Terminate the managed helper process and fail any outstanding protocol requests.
     async fn shutdown(&self) {
         self.alive.store(false, Ordering::SeqCst);
-        let _ = self.child.lock().await.kill().await;
+        {
+            let mut child = self.child.lock().await;
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
         self.fail_pending().await;
+        let mut runtime = self.runtime.lock().await;
+        if let Some(protected) = runtime.as_ref() {
+            if protected.close().await.is_err() {
+                tracing::warn!("The encrypted ChatGPT helper volume remains mounted; Echo will retry its owned cleanup on the next connection.");
+            }
+        }
+        runtime.take();
     }
     /// Wake outstanding callers when the helper connection is no longer usable.
     async fn fail_pending(&self) {
@@ -889,5 +1231,193 @@ pub async fn shutdown() {
         if let Some(worker) = manager.worker.lock().await.take() {
             worker.shutdown().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod protection_tests {
+    use super::*;
+    use std::cell::RefCell;
+    #[test]
+    fn copied_connection_preserves_plain_encrypted_and_keyring_only_sources() {
+        let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = store::test_directory();
+        store::reset_for_tests();
+        let source = directory.path().join("source");
+        let destination = directory.path().join("copy");
+        std::fs::create_dir_all(source.join("chatgpt")).unwrap();
+        std::fs::create_dir(&destination).unwrap();
+        std::env::set_var("ECHO_DATA_DIR", &destination);
+        store::test_key();
+        store::init().unwrap();
+        #[cfg(target_os = "linux")]
+        std::env::set_var("XDG_RUNTIME_DIR", directory.path());
+        let auth = r#"{"tokens":{"access_token":"synthetic-copied-token"},"OPENAI_API_KEY":null}"#;
+        let source_id = auth_store_identity(&copied_home(&source).unwrap()).unwrap();
+        let target_id = auth_store_identity(&copied_home(&destination).unwrap()).unwrap();
+        assert_ne!(source_id, target_id);
+        let entries = RefCell::new(HashMap::<String, String>::new());
+        for mode in ["keyring", "plaintext", "encrypted"] {
+            entries.borrow_mut().clear();
+            let path = source.join("chatgpt/auth.json");
+            let _ = std::fs::remove_file(&path);
+            if mode == "keyring" {
+                entries
+                    .borrow_mut()
+                    .insert(source_id.clone(), auth.to_owned());
+            } else if mode == "plaintext" {
+                std::fs::write(&path, auth).unwrap();
+            } else {
+                crate::protected_storage::write_file(
+                    &crate::protected_storage::LibraryKey::from_bytes([42; 32]),
+                    &path,
+                    "chatgpt/auth.json",
+                    auth.as_bytes(),
+                )
+                .unwrap();
+            }
+            let original = std::fs::read(&path).ok();
+            std::fs::create_dir_all(destination.join("chatgpt")).unwrap();
+            store::write_protected(&destination.join("chatgpt/auth.json"), auth.as_bytes())
+                .unwrap();
+            copy_connection_with_store(
+                &source,
+                &destination,
+                |id| Ok(entries.borrow().get(id).cloned().map(Zeroizing::new)),
+                |id, value| {
+                    entries.borrow_mut().insert(id.to_owned(), value.to_owned());
+                    Ok(())
+                },
+                |id| {
+                    entries.borrow_mut().remove(id);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                entries.borrow().get(&target_id).map(String::as_str),
+                Some(auth)
+            );
+            assert_eq!(std::fs::read(&path).ok(), original);
+            if mode == "keyring" {
+                assert_eq!(
+                    entries.borrow().get(&source_id).map(String::as_str),
+                    Some(auth)
+                );
+            }
+            assert!(!destination.join("chatgpt/auth.json").exists());
+        }
+        entries
+            .borrow_mut()
+            .insert(source_id.clone(), auth.to_owned());
+        entries
+            .borrow_mut()
+            .insert(target_id.clone(), "different account".into());
+        assert!(copy_connection_with_store(
+            &source,
+            &destination,
+            |id| Ok(entries.borrow().get(id).cloned().map(Zeroizing::new)),
+            |_, _| panic!("A conflicting destination must not be overwritten"),
+            |_| panic!("A conflicting destination must not be removed")
+        )
+        .is_err());
+        entries.borrow_mut().remove(&target_id);
+        let target_reads = RefCell::new(0);
+        assert!(copy_connection_with_store(
+            &source,
+            &destination,
+            |id| {
+                if id == target_id {
+                    *target_reads.borrow_mut() += 1;
+                    if *target_reads.borrow() == 2 {
+                        return Err(auth_migration_error());
+                    }
+                }
+                Ok(entries.borrow().get(id).cloned().map(Zeroizing::new))
+            },
+            |id, value| {
+                entries.borrow_mut().insert(id.to_owned(), value.to_owned());
+                Ok(())
+            },
+            |id| {
+                entries.borrow_mut().remove(id);
+                Ok(())
+            }
+        )
+        .is_err());
+        assert!(!entries.borrow().contains_key(&target_id));
+        assert_eq!(
+            entries.borrow().get(&source_id).map(String::as_str),
+            Some(auth)
+        );
+        store::reset_for_tests();
+    }
+    #[test]
+    fn keyring_migration_preserves_conflicts_and_requires_verified_readback() {
+        let source = r#"{"tokens":{"access_token":"synthetic","refresh_token":"synthetic"},"OPENAI_API_KEY":null}"#;
+        let entry = RefCell::new(None);
+        verify_auth_migration(
+            source,
+            || {
+                Ok(entry
+                    .borrow()
+                    .as_ref()
+                    .map(|value: &String| Zeroizing::new(value.clone())))
+            },
+            |value| {
+                *entry.borrow_mut() = Some(value.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(entry.borrow().as_deref(), Some(source));
+        let writes = RefCell::new(0);
+        assert!(verify_auth_migration(
+            source,
+            || Ok(Some(Zeroizing::new("another account".into()))),
+            |_| {
+                *writes.borrow_mut() += 1;
+                Ok(())
+            }
+        )
+        .is_err());
+        assert_eq!(*writes.borrow(), 0);
+        assert!(verify_auth_migration(source, || Ok(None), |_| Ok(())).is_err());
+        assert!(verify_auth_migration(
+            r#"{"OPENAI_API_KEY":"sk-not-allowed"}"#,
+            || Ok(None),
+            |_| panic!("API key must not migrate")
+        )
+        .is_err());
+    }
+    #[test]
+    fn old_helper_state_is_encrypted_without_touching_any_os_keyring() {
+        let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = store::test_directory();
+        store::reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        store::test_key();
+        let home = directory.path().join("chatgpt");
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        let secret = b"private helper transcript and credentials";
+        for path in [
+            home.join("auth.json"),
+            home.join("state_5.sqlite"),
+            home.join("sessions/old.jsonl"),
+        ] {
+            std::fs::write(path, secret).unwrap();
+        }
+        store::init().unwrap();
+        for path in [
+            home.join("auth.json"),
+            home.join("state_5.sqlite"),
+            home.join("sessions/old.jsonl"),
+        ] {
+            assert!(std::fs::read(&path).unwrap().starts_with(b"ECHOENC1"));
+            assert_eq!(store::read_protected(&path).unwrap(), secret);
+        }
+        assert!(migrate_auth_to_keyring(&home).is_err());
+        assert!(home.join("auth.json").exists());
+        store::reset_for_tests();
     }
 }

@@ -83,7 +83,7 @@ test('lost completion acknowledgement retains PCM, repeat verification then safe
   const id = 'recording-1'; const row = {recordingId:id,libraryId:'library-1',title:'Synthetic meeting',provider:'meet',meetingUrl:'https://meet.google.com/abc-defg-hij',consent:true,liveTranscription:false,sampleRate:16000,channels:1,createdAt:'2026-10-05T00:00:00Z',chunkCount:1,totalFrames:100,captureState:'stopped',gaps:[],interrupted:false};
   globalThis.records = new Map([[id,row]]); globalThis.chunks = new Map([[id+':0',{pcm:new ArrayBuffer(200),frames:100,sha256:'a'.repeat(64)}]]);
   let sequence = 0; let complete = false; let loseComplete = true; let purgesChecked = false;
-  const reply = () => ({protocolVersion:1,recordingId:id,libraryId:'library-1',meetingId:'meeting-1',status:complete ? 'complete':'receiving',nextSequence:sequence,totalFrames:sequence * 100,controls:[]});
+  const reply = () => ({protocolVersion:1,appVersion:"0.1.0",storageProtectionVersion:1,recordingReceiptVersion:1,recordingId:id,libraryId:'library-1',meetingId:'meeting-1',status:complete ? 'complete':'receiving',nextSequence:sequence,totalFrames:sequence * 100,controls:[]});
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url,options) => {
     assert.equal(options.redirect,'error'); assert.equal(options.credentials,'omit'); assert.equal(options.headers.get('Authorization'),'Bearer synthetic-token');
@@ -102,9 +102,9 @@ test('wrong-library and chunk conflicts preserve the complete local prefix',asyn
   const row = {recordingId:'recording-2',libraryId:'library-1',chunkCount:1,totalFrames:100,captureState:'stopped'}; globalThis.records = new Map([[row.recordingId,row]]); globalThis.chunks = new Map([[row.recordingId+':0',{frames:100,pcm:new ArrayBuffer(200),sha256:'b'.repeat(64)}]]);
   const originalFetch = globalThis.fetch; const pair = {endpoint:'http://localhost:3000',libraryId:'library-1',credential:'synthetic-token'};
   try {
-    globalThis.fetch = async () => new Response(JSON.stringify({protocolVersion:1,recordingId:row.recordingId,libraryId:'wrong',status:'receiving',nextSequence:0,totalFrames:0}));
+    globalThis.fetch = async () => new Response(JSON.stringify({protocolVersion:1,appVersion:"0.1.0",storageProtectionVersion:1,recordingReceiptVersion:1,recordingId:row.recordingId,libraryId:'wrong',status:'receiving',nextSequence:0,totalFrames:0}));
     await assert.rejects(protocol.transferOne(row,pair,async () => {}),/inconsistent/); assert.equal(globalThis.chunks.size,1);
-    globalThis.fetch = async (url) => url.includes('/chunks/') ? new Response('{}',{status:409}) : new Response(JSON.stringify({protocolVersion:1,recordingId:row.recordingId,libraryId:'library-1',status:'receiving',nextSequence:0,totalFrames:0}));
+    globalThis.fetch = async (url) => url.includes('/chunks/') ? new Response('{}',{status:409}) : new Response(JSON.stringify({protocolVersion:1,appVersion:"0.1.0",storageProtectionVersion:1,recordingReceiptVersion:1,recordingId:row.recordingId,libraryId:'library-1',status:'receiving',nextSequence:0,totalFrames:0}));
     await protocol.transferPending({pairs:{'library-1':pair},activeLibraryId:'library-1'},async () => {},() => {}); assert.equal(globalThis.records.get(row.recordingId).transferState,'attention'); assert.equal(globalThis.chunks.size,1);
   } finally {globalThis.fetch = originalFetch;}
 });
@@ -112,15 +112,25 @@ test('bounded transfer turns retain unfinished audio and complete only after the
   const id = 'batch-recording'; const row = {recordingId:id,libraryId:'library-1',chunkCount:65,totalFrames:65,captureState:'stopped',gaps:[],createdAt:'2026-10-05T00:00:00Z'};
   globalThis.records = new Map([[id,row]]);globalThis.chunks = new Map(Array.from({length:65},(_,sequence) => [id+':'+sequence,{pcm:new ArrayBuffer(2),frames:1,sha256:'c'.repeat(64)}]));
   let nextSequence = 0; let completionCalls = 0; const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url,options) => {if(url.includes('/chunks/'))nextSequence++;if(url.endsWith('/complete'))completionCalls++;return new Response(JSON.stringify({protocolVersion:1,recordingId:id,libraryId:'library-1',meetingId:'meeting-1',status:completionCalls ? 'complete':'receiving',nextSequence,totalFrames:nextSequence}));};
+  globalThis.fetch = async (url,options) => {if(url.includes('/chunks/'))nextSequence++;if(url.endsWith('/complete'))completionCalls++;return new Response(JSON.stringify({protocolVersion:1,appVersion:"0.1.0",storageProtectionVersion:1,recordingReceiptVersion:1,recordingId:id,libraryId:'library-1',meetingId:'meeting-1',status:completionCalls ? 'complete':'receiving',nextSequence,totalFrames:nextSequence}));};
   try {const pair={endpoint:'http://localhost:3000',libraryId:'library-1',credential:'synthetic'};await protocol.transferOne(row,pair,async () => {});assert.equal(nextSequence,64);assert.equal(completionCalls,0);assert.equal(globalThis.chunks.size,65);await protocol.transferOne(globalThis.records.get(id),pair,async () => {});assert.equal(nextSequence,65);assert.equal(completionCalls,1);assert.ok(globalThis.records.get(id).receipt);} finally {globalThis.fetch=originalFetch;}
 });
 test('an unreachable active library cannot starve another library’s durable recording',async () => {
   const offline={recordingId:'offline-active',libraryId:'offline-library',chunkCount:1,totalFrames:1,captureState:'recording',createdAt:'2026-10-05T00:00:01Z'};const healthy={recordingId:'healthy-pending',libraryId:'healthy-library',chunkCount:1,totalFrames:1,captureState:'stopped',gaps:[],createdAt:'2026-10-05T00:00:00Z'};
   globalThis.records=new Map([[offline.recordingId,offline],[healthy.recordingId,healthy]]);globalThis.chunks=new Map([offline,healthy].map(row => [row.recordingId+':0',{pcm:new ArrayBuffer(2),frames:1,sha256:'d'.repeat(64)}]));
   let now=1000000;let complete=false;let nextSequence=0;const originalFetch=globalThis.fetch;const originalNow=Date.now;
-  Date.now=() => now;globalThis.fetch=async url => {if(url.startsWith('http://localhost:3999')){now+=15000;throw new Error('unreachable')}if(url.includes('/chunks/'))nextSequence=1;if(url.endsWith('/complete'))complete=true;return new Response(JSON.stringify({protocolVersion:1,recordingId:healthy.recordingId,libraryId:healthy.libraryId,meetingId:'healthy-meeting',status:complete ? 'complete':'receiving',nextSequence,totalFrames:nextSequence}))};
+  Date.now=() => now;globalThis.fetch=async url => {if(url.startsWith('http://localhost:3999')){now+=15000;throw new Error('unreachable')}if(url.includes('/chunks/'))nextSequence=1;if(url.endsWith('/complete'))complete=true;return new Response(JSON.stringify({protocolVersion:1,appVersion:"0.1.0",storageProtectionVersion:1,recordingReceiptVersion:1,recordingId:healthy.recordingId,libraryId:healthy.libraryId,meetingId:'healthy-meeting',status:complete ? 'complete':'receiving',nextSequence,totalFrames:nextSequence}))};
   try {const prefs={activeLibraryId:offline.libraryId,pairs:{[offline.libraryId]:{libraryId:offline.libraryId,endpoint:'http://localhost:3999',credential:'offline'},[healthy.libraryId]:{libraryId:healthy.libraryId,endpoint:'http://localhost:3000',credential:'healthy'}}};await protocol.transferPending(prefs,async () => {},() => {});assert.equal(globalThis.records.get(healthy.recordingId).receipt,undefined);await protocol.transferPending(prefs,async () => {},() => {});assert.ok(globalThis.records.get(healthy.recordingId).receipt);assert.ok(globalThis.chunks.has(offline.recordingId+':0'));} finally {Date.now=originalNow;globalThis.fetch=originalFetch;}
+});
+test('older companion cannot receive metadata or PCM without protected-storage capabilities',async()=>{
+  const id='old-companion-recording';const row={recordingId:id,libraryId:null,title:'Private title',chunkCount:1,totalFrames:1,captureState:'stopped'};
+  globalThis.records=new Map([[id,row]]);globalThis.chunks=new Map([[id+':0',{frames:1,pcm:new ArrayBuffer(2)}]]);
+  const previous=globalThis.fetch;const requests=[];
+  globalThis.fetch=async(url,options)=>{requests.push({url,method:options.method,body:options.body});return new Response(JSON.stringify({protocolVersion:1,libraryId:'library-1'}));};
+  try{await assert.rejects(protocol.transferOne(row,{endpoint:'http://localhost:3000',libraryId:'library-1',credential:'synthetic'},async()=>{}),/Update the Echo app/);
+    assert.equal(requests.length,1);assert.ok(requests[0].url.endsWith('/connection'));assert.equal(requests[0].body,undefined);
+    assert.equal(globalThis.records.get(id).libraryId,null);assert.equal(globalThis.chunks.size,1);
+  }finally{globalThis.fetch=previous;}
 });
 test('manifest uses scoped MV3 permissions, a stable identity and no content credential bridge',async () => {
   const manifest = JSON.parse(await readFile(path.join(project,'extension/manifest.json'),'utf8'));
