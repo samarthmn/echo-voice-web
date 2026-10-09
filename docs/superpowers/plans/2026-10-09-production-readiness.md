@@ -1,5 +1,7 @@
 # Echo onboarding and production readiness implementation plan
 
+> **Scope superseded October 9, 2026:** The user subsequently requested the web version with the browser extension only, and removal of all separate Mac/desktop application work. The original proposal below is retained as design history. A7 and all launcher, bundled installer, signing/notarization, installed-client OAuth and automatic application-update tasks are cancelled, not pending release gates. Current work retains the locally served web app, approved pairing flow, A4 guidance, A6 protection/recovery, library-schema safeguards, manual backup/source updates, native Large V3 speech helper and browser qualification on macOS/Ubuntu. Use the [current setup guide](../../install.md) and [readiness record](../../production-readiness-status.md) for the active scope. Initial local-server setup currently requires developer tools; the former terminal-free installation goal is not a shipped capability.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let everyday users install Echo, connect its extension, record, transcribe, recover and update without developer tools, while preserving a complete developer workflow.

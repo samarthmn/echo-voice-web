@@ -1,42 +1,36 @@
-# Install and open Echo
+# Set up and open Echo
 
-**Development preview:** the current branch has a desktop launcher and packaging tools, but no signed, qualified download or store listing has been published. This guide is the candidate user path. Use only a build supplied for testing until the [release record](production-readiness-status.md) identifies a qualified artifact.
+**Development preview:** Echo is a locally served web app, with a browser extension for online meetings. Initial server setup currently requires the [source-build steps](development.md#build-and-start). There is no separate Echo desktop application. A Chrome Web Store listing has not been published; check the [readiness record](production-readiness-status.md) for tested builds and remaining work.
 
-## Desktop app
+## Open the web app
 
-The initial targets are Apple Silicon macOS 14+ and Ubuntu 24.04 x64. Other systems need separate qualification.
+If Echo is already running on your computer, open [http://localhost:3000](http://localhost:3000) in your existing Brave or Chrome browser. Use the same browser profile for the workspace and meeting extension. A different configured port or hostname must also be used when connecting the extension.
 
-For a signed Mac release, open its `.dmg`, copy **Echo Voice** into Applications and open it. For an Ubuntu release, open the supplied `.deb` with the software installer and install it, then launch **Echo Voice** from Applications. Do not disable OS security protections to install an unknown build. Developer test builds and signing instructions belong in the [developer guide](development.md).
+If the address cannot be reached, start the local server. The [developer guide](development.md) covers the one-time Rust/Node build setup and the build/start scripts. This preview does not provide installation without developer tools. Once started, the workspace is used through the browser; Echo does not host your library on a cloud service.
 
-In Echo Voice, choose your existing Brave or Chrome browser and select **Open Echo**. Use the browser profile where you will install the extension. The launcher starts and manages the local app; its bundled runtime provides the native Large V3 engine without requiring a separate Node.js installation. Models are downloaded deliberately inside Echo, and Ollama remains optional.
-
-A busy local address, locked library or missing browser produces an action in the launcher. Use **Retry** after resolving it. Run only one app against a library. Closing the workspace tab and quitting the local app are different actions: choose **Quit Echo** in the launcher to stop it. Echo warns about active processing or capture before quitting.
+Keep the server running for library access, transcription and recording transfers. Keep the workspace tab open during in-person capture and browser transcription. Closing the whole browser interrupts extension recording; closing only the popup does not. An initialized extension can record with the server stopped and transfer when it returns.
 
 ## First use
 
 1. Save the library recovery phrase in **Settings → Storage**.
 2. Try the [short in-person recording](../README.md#record-your-first-conversation), then play it back.
-3. Follow **First transcript** on Overview. It checks whether the selected speech model is downloaded and links to model setup or your saved recording. Download the model deliberately, then create the transcript.
-4. For online calls, [install and set up the extension](browser-extension.md). It records from the existing meeting tab; it needs its own saved recovery phrase.
+3. Follow **First transcript** on Overview. It checks the selected model and links to its download or your saved recording. Download the model deliberately, then create the transcript.
+4. For online calls, [install and set up the extension](browser-extension.md). It records from the existing meeting tab and needs its own saved recovery phrase.
 
-Google Calendar and notes providers can be connected later. They are not prerequisites for recording.
+Google Calendar and notes providers are optional. Turbo runs in the browser; the full Large V3 model requires the separate [native speech setup](native-speech.md).
 
 ## Existing library
 
-Keep a backup and stop the old Echo app first. In the launcher expand **Library and recovery**, then choose **Copy existing library…** and select the old data folder. Echo verifies a separate copy before selecting it. Keep the original until meetings, audio and saved versions work. A locked protected copy requires its OS key or recovery phrase; see [recovery](storage-and-recovery.md).
+Keep a backup and stop the old server before copying a library. The default library is `.echo-data` inside the project; **Settings → Storage** shows the actual path. Copy the whole folder to a separate location and point the new server's `dataDir` or `ECHO_DATA_DIR` at that copy. Keep the original until meetings, audio and saved versions work. See [storage and recovery](storage-and-recovery.md) for encrypted backups, locked keys and migration checks. Never use two servers against one library or remove locks to bypass an active process.
 
 ## Updates
 
-Back up first, finish active recordings and synchronize or export pending browser audio. The launcher's **Check for updates** enables installation only when its build has an approved signing key and a qualified update feed. Development builds do not silently accept unsigned updates. The Ubuntu path directs you to a matching verified package; clean-machine update testing remains pending.
+Follow [web updates and recovery](update-recovery.md): back up, finish recording and processing, stop the server, update/rebuild, then start it with the intended data directory. No automatic application update or pre-update snapshot is provided.
 
-Extension updates are delivered separately. Reloading an unpacked extension can interrupt capture. Moving from its development identity to a store identity creates a different browser installation: finish transfers or exports, install and pair the new extension, and verify the destination before removing the old one.
-
-Before a qualified macOS in-app update replaces the application, Echo verifies a separate encrypted library snapshot. A failed snapshot stops the update. See [update recovery](update-recovery.md) for its location and how to restore it deliberately. Ubuntu's manual package update still requires the separate backup described above.
+Extension updates are separate. Reloading an unpacked extension can interrupt capture. Moving from the development identity to a store identity creates a different browser installation: finish transfers or exports, install and pair the new extension, and verify the destination before removing the old one.
 
 ## Remove Echo
 
-Quit Echo and finish/export pending browser recordings first. Removing the desktop application should leave its separately stored library intact; verify data-retention behavior on the qualified installer. Deleting the library itself or its browser profile is a separate irreversible operation. Uninstalling the extension can delete pending audio even if a recovery phrase has been saved.
+Stop the server and finish or export pending extension recordings first. Back up the library outside the project folder before deleting a checkout: the default `.echo-data` folder is inside it. Removing the source folder can otherwise delete your recordings. Custom data directories remain until separately removed.
 
-## No installer available?
-
-Developers can [build from source](development.md#build-and-start). GitHub's **Code → Download ZIP** supplies source, not an application. Nontechnical users should wait for a qualified download rather than installing a toolchain just to record a meeting.
+Uninstalling the extension or deleting its browser profile can erase pending audio. A recovery phrase can unlock existing data; it cannot recreate deleted files.

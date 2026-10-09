@@ -49,7 +49,7 @@ async function ready() {
   }
   throw new Error(`Isolated Calendar server did not start: ${log}`);
 }
-const disconnected = () => ({ mode: 'installed', configured: true, connected: false, pending: false, reconnectRequired: false });
+const disconnected = () => ({ mode: 'source', configured: true, connected: false, pending: false, reconnectRequired: false });
 const connected = () => ({ ...disconnected(), connected: true, email: 'calendar-fixture@example.test' });
 let state = { ...disconnected(), configured: false };
 let nextFailure;
@@ -122,8 +122,8 @@ try {
   await openCalendar();
   await connect.click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog).toContainText('The publisher needs to configure Google sign-in');
-  await expect(dialog).not.toContainText('GOOGLE_CLIENT_SECRET');
+  await expect(dialog).toContainText('Ask the person who runs this Echo workspace');
+  await expect(dialog.locator('code')).not.toBeVisible();
   await expect(dialog).not.toContainText('localhost:3000');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -131,12 +131,14 @@ try {
 
   await refreshState({ ...disconnected(), mode: 'source', configured: false });
   await connect.click();
+  await dialog.getByText('Developer configuration', { exact: true }).click();
+  await expect(dialog.locator('code')).toBeVisible();
   await expect(dialog).toContainText('GOOGLE_CLIENT_ID');
-  await expect(dialog.getByRole('link', { name: 'Developer setup guide' })).toHaveAttribute('href', /docs\/integrations\.md#source-builds--developers$/);
+  await expect(dialog.getByRole('link', { name: 'Developer setup guide' })).toHaveAttribute('href', /docs\/integrations\.md#configure-the-local-server$/);
   await dialog.getByRole('button', { name: 'Done', exact: true }).click();
 
-  await refreshState({ ...disconnected(), configured: false, configurationError: 'Publisher configuration is unavailable.' });
-  await expect(calendar).toContainText('Publisher configuration is unavailable.');
+  await refreshState({ ...disconnected(), configured: false, configurationError: 'Calendar configuration is unavailable.' });
+  await expect(calendar).toContainText('Calendar configuration is unavailable.');
   await refreshState({ ...disconnected(), reconnectRequired: true });
   await expect(reconnect).toBeEnabled();
   await expect(calendar).toContainText('Your recorded meetings are unchanged.');
@@ -188,7 +190,7 @@ try {
   assert.equal(calls.filter(key => key === 'GET /api/integrations/google/connect').length, 1);
   assert.deepEqual(unexpected, [], 'No real sign-in, external traffic, or unrelated writes.');
   assert.deepEqual(runtimeErrors, []);
-  console.log('PASS: Calendar installed/source guidance, reconnect, pending polling, cancel/retry, connection preservation, stale-state recovery, narrow layout, and mocked sign-in navigation.');
+  console.log('PASS: Calendar web setup guidance, reconnect, pending polling, cancel/retry, connection preservation, stale-state recovery, narrow layout, and mocked sign-in navigation.');
 } finally {
   await browser?.close();
   if (!exited) child.kill('SIGINT');

@@ -4,7 +4,7 @@ These assets are prepared locally for review. They have not been uploaded or pub
 
 | Asset | Contents |
 | --- | --- |
-| [promo-440x280.png](promo-440x280.png) | 440×280 promotional tile using Echo's existing icon, shared tokens and bundled Inter font. The copy states that transcripts and notes need the desktop app. |
+| [promo-440x280.png](promo-440x280.png) | 440×280 promotional tile using Echo's existing icon, shared tokens and bundled Inter font. The copy states that transcripts and notes need the local web app. |
 | [setup-protection-1280x800.png](setup-protection-1280x800.png) | Actual extension setup showing recording protection and the unpaired connection choices. |
 | [setup-choices-1280x800.png](setup-choices-1280x800.png) | The same setup page scrolled to service and microphone choices. No service is enabled and no microphone permission is granted. |
 

@@ -63,7 +63,6 @@ pub fn Calendar(notify: EventHandler<String>) -> Element {
     let configured = status()["google"]["configured"] == true;
     let pending = status()["google"]["pending"] == true;
     let reconnect = status()["google"]["reconnectRequired"] == true;
-    let source_mode = status()["google"]["mode"] == "source";
     let configuration_error = text(&status()["google"], "configurationError");
     rsx! {div {class:"page-content calendar-page",
         PageHeading {title:"Calendar",ActionButton {kind:ButtonKind::Secondary,disabled:loading()||busy(),onclick:move |_|refresh+=1,Icon {name:"refresh",size:16}"Refresh"}}
@@ -79,7 +78,7 @@ pub fn Calendar(notify: EventHandler<String>) -> Element {
         div {class:"section-heading",h2 {"Upcoming meetings " span {class:"count-label","{events().len()}"}}span {class:"small-muted","Next 30 days"}}
         if loading(){div {class:"panel loading-panel",span {class:"spinner"}"Loading calendar…"}}
         else if status().is_null(){div {class:"calendar-empty panel",h2 {"Calendar status unavailable"}p {"Refresh to check your connection again."}}}
-        else if !connected{div {class:"calendar-empty panel",h2 {"No upcoming meetings"}p {if pending{"Finish signing in to load your meetings."}else if !configured&&!source_mode{"Calendar is unavailable in this Echo build. You can still open meetings and record with the browser extension."}else if reconnect{"Reconnect your calendar above to load meetings."}else{"Connect your calendar above to load meetings."}}}}
+        else if !connected{div {class:"calendar-empty panel",h2 {"No upcoming meetings"}p {if pending{"Finish signing in to load your meetings."}else if reconnect{"Reconnect your calendar above to load meetings."}else{"Connect your calendar above to load meetings."}}}}
         else if !error().is_empty(){div {class:"calendar-empty panel",h2 {"Meetings could not load"}p {"Refresh to try again."}}}
         else if events().is_empty(){div {class:"calendar-empty panel",h2 {"No upcoming meetings"}p {"Nothing scheduled in the next 30 days."}}}
         else{div {class:"event-list",for event in events(){ {let url=text(&event,"url");let supported=matches!(text(&event,"provider").as_str(),"google-meet"|"zoom"|"teams");rsx!{
@@ -91,8 +90,9 @@ pub fn Calendar(notify: EventHandler<String>) -> Element {
         p {class:"small-muted","Opening a meeting does not record it. Join normally, then choose Start recording in the extension."}
         if connected{ActionButton {kind:ButtonKind::Ghost,disabled:busy()||loading()||pending,onclick:move |_|{spawn(async move{busy.set(true);match post("/integrations/google/disconnect",json!({})).await{Ok(_)=>{notify.call("Calendar disconnected.".into());refresh+=1;},Err(e)=>error.set(e)}busy.set(false);});},"Disconnect calendar"}}
         if setup(){div {class:"dialog-backdrop",div {class:"dialog",role:"dialog","aria-modal":"true","aria-labelledby":"calendar-setup-title",IconButton {class:"dialog-close",label:"Close calendar setup",icon:"close",onclick:move |_|setup.set(false)}h2 {id:"calendar-setup-title","Calendar setup"}
-            if source_mode{p {"This source build needs a Google OAuth web client configured by its developer. Add the client ID and secret to the project’s local .env file, then restart Echo."}code {"GOOGLE_CLIENT_ID" br {}"GOOGLE_CLIENT_SECRET"}p {"Use the exact callback URI from googleRedirectUri in echo.config.json."}a {href:"https://github.com/samarthmn/echo-voice-web/blob/main/docs/integrations.md#source-builds--developers",target:"_blank",rel:"noopener noreferrer","Developer setup guide"}}
-            else{p {"Google Calendar is unavailable in this Echo build. The publisher needs to configure Google sign-in before distributing it."}p {"Ask the person who provided Echo for a Calendar-enabled release. You do not need to create a Google Cloud project or edit configuration files."}}
+            p {"Calendar is optional. Ask the person who runs this Echo workspace to configure Google Calendar, or follow the setup guide if you run it yourself."}
+            details {summary {"Developer configuration"}p {"Configure a Google OAuth web client. Add the client ID and secret to the project’s local .env file, then restart Echo."}code {"GOOGLE_CLIENT_ID" br {}"GOOGLE_CLIENT_SECRET"}p {"Use the exact callback URI from googleRedirectUri in echo.config.json."}}
+            a {href:"https://github.com/samarthmn/echo-voice-web/blob/main/docs/integrations.md#configure-the-local-server",target:"_blank",rel:"noopener noreferrer","Developer setup guide"}
             p {"The browser extension works without connecting Calendar."}ActionButton {kind:ButtonKind::Primary,onclick:move |_|setup.set(false),"Done"}}}}
     }}
 }

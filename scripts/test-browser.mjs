@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
+import { stopTestServer, removeTestDirectory } from '../tests/helpers/server-cleanup.mjs';
 
 const scratch = path.resolve('tmp');
 await mkdir(scratch, { recursive: true });
@@ -17,14 +18,12 @@ const port = socket.address().port;
 await new Promise(resolve => socket.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
-  env: { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), TMPDIR: scratch, ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' },
+  env: { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), ECHO_TEST_CHATGPT_RUNTIME: 'fixture', ECHO_CODEX_BIN: path.resolve('tests/fixtures/codex-helper.mjs'), TMPDIR: scratch, ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' },
   stdio: 'inherit',
 });
 let serverError, serverExited = false;
-const exit = new Promise(resolve => {
-  server.once('error', error => { serverError = error; serverExited = true; resolve(); });
-  server.once('exit', () => { serverExited = true; resolve(); });
-});
+server.once('error', error => { serverError = error; serverExited = true; });
+server.once('exit', () => { serverExited = true; });
 function requireServer() {
   if (serverError) throw new Error(`The isolated browser-test server could not start: ${serverError.message}`);
   if (serverExited) throw new Error(`The isolated browser-test server exited (${server.exitCode ?? server.signalCode}). Refusing to use another workspace.`);
@@ -70,18 +69,15 @@ async function run(script) {
   requireServer();
 }
 async function shutdown() {
-  if (!serverExited) server.kill('SIGINT');
-  await Promise.race([exit, delay(2000, undefined, { ref: false })]);
-  if (!serverExited) {
-    server.kill('SIGKILL');
-    await Promise.race([exit, delay(1000, undefined, { ref: false })]);
-  }
-  if (serverExited) {
-    await rm(data, { recursive: true, force: true });
-    if (passed) await rm(runRoot, { recursive: true, force: true });
+  try {
+    await stopTestServer(server);
+    await removeTestDirectory(data);
+    if (passed) await removeTestDirectory(runRoot);
     else console.error(`Browser test failure evidence was preserved at ${artifacts}.`);
+  } catch (error) {
+    console.error(`Browser test data was preserved at ${data}.`);
+    throw error;
   }
-  else console.error(`Test server did not exit; its isolated data was preserved at ${data}.`);
 }
 
 try {

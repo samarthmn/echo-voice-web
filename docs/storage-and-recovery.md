@@ -37,9 +37,27 @@ The portable backup is size-bounded. For a larger library, stop Echo and copy th
 
 An unavailable credential store is different from a lost key. First unlock your macOS login keychain or Ubuntu desktop keyring, then retry Echo. The app must not replace missing keys or fall back to saving plaintext.
 
-If the saved key was lost, open the launcher, expand **Library and recovery**, choose **Recover a locked library**, and enter the library's 24-word phrase. The app verifies the database before restoring its key to the OS credential store. To recover another library folder, select **Choose another library folder**. Keep the original folder intact until it opens and its audio plays correctly.
+If the saved key was lost, stop the server and use the private recovery command described below with the library's 24-word phrase. It verifies the database before restoring its key to the OS credential store. Recovery currently requires local command-line assistance; there is no launcher recovery screen. Keep the original folder intact until it opens and its audio plays correctly.
 
 If you have neither a usable OS key nor the matching recovery phrase, the protected data cannot be recovered by support. An earlier backup and its phrase may still be usable. Do not repeatedly create replacement libraries over the existing directory.
+
+### Private local recovery command
+
+Run from the project root after stopping Echo. Confirm `echo.config.json` (or `ECHO_DATA_DIR`) points at the intended library first. The following Python 3 wrapper prompts without echoing the phrase and passes JSON through stdin, rather than command arguments, environment variables or a file:
+
+```bash
+python3 - <<'PYTHON'
+import getpass, json, subprocess, warnings
+warnings.simplefilter("error", getpass.GetPassWarning)
+phrase = getpass.getpass("Library recovery phrase (hidden): ")
+subprocess.run(
+    ["./target/release/echo-server", "--recover-library"],
+    input=json.dumps({"phrase": phrase}), text=True, check=True,
+)
+PYTHON
+```
+
+Use a private local terminal, not a shared recording or support session. Never paste the real phrase into a command line, chat or log. Restart Echo after success. This command restores the library key; it does not recover the extension's separate browser vault or merge backups.
 
 ## Recover extension recordings
 
@@ -53,6 +71,6 @@ Deleting unsynchronized audio requires confirmation and cannot be undone. A reco
 
 ## Moving from an older installation
 
-Back up the old library and stop its server and any retired recording helper. In the launcher choose **Copy existing library…**. Echo copies a supported library into a new location, verifies it and then selects the copy. The original remains unchanged. Browser profiles, caches and old application configuration are not copied. Legacy runner files require the [runner recovery checks](extension-migration.md).
+Back up the old library and stop its server and any retired recording helper. Copy the complete data directory into a separate location, then set `dataDir` or `ECHO_DATA_DIR` to that copy. Validate with `echo-server --check-library` before starting normal service. The command can migrate older data, so use the copy and preserve the original. Browser profiles and model caches have separate locations. Legacy runner files require the [runner recovery checks](extension-migration.md).
 
 The server migrates older plaintext library data to protected storage. Migration can require additional free disk space. If it fails, preserve the source and error details; never force startup by deleting protection files. Qualification must include interrupted migration, damaged audio and wrong keys before this workflow is advertised as a released capability.

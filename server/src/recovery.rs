@@ -284,7 +284,7 @@ pub(crate) fn routes() -> Router {
         .route("/privacy/recovery/cancel", post(cancel))
         .layer(DefaultBodyLimit::max(4096))
 }
-/// Used by the launcher's explicit recovery action before the HTTP server opens.
+/// Used by the explicit recovery command before the HTTP server opens.
 /// Validate the phrase and database read-only, then repair OS unlock material.
 pub(crate) fn recover_library(root: &Path, phrase: &str) -> Result<()> {
     use fs2::FileExt;

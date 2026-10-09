@@ -69,9 +69,6 @@ struct Manager {
 fn manager() -> Arc<Manager> {
     MANAGER.get_or_init(|| Arc::new(Manager::default())).clone()
 }
-pub async fn active_count() -> usize {
-    usize::from(manager().state.lock().await.active.is_some())
-}
 fn root() -> Result<PathBuf> {
     Ok(crate::paths::get().resource_root)
 }
@@ -120,7 +117,7 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
                 return None;
             }
         }
-        let output = timeout(Duration::from_secs(3), Command::new(crate::paths::node_binary())
+        let output = timeout(Duration::from_secs(3), Command::new("node")
             .arg("--input-type=module").arg("-e")
             .arg("if(Number(process.versions.node.split('.')[0])<22)process.exit(1);await import('onnxruntime-node');await import('./scripts/native-speech.mjs');process.stdout.write('echo-native-ready')")
             .current_dir(root).kill_on_drop(true).output()).await.ok()?.ok()?;
@@ -128,7 +125,7 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
     }
     .await
     .is_some();
-    let detail = if available { "Large V3 runs locally through the native speech helper." } else if crate::paths::installed() { "The bundled Large V3 helper is unavailable. Reinstall Echo, then retry. Your saved audio is unchanged." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run npm ci in the Echo Voice folder, then retry." }.to_owned();
+    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run npm ci in the Echo Voice folder, then retry." }.to_owned();
     *cached = Some((Instant::now(), available, detail.clone()));
     (available, detail)
 }
@@ -354,11 +351,7 @@ fn spool_namespace(project: &FsPath, data: &FsPath) -> Result<PathBuf> {
         "{:x}",
         Sha256::digest(canonical.as_os_str().as_encoded_bytes())
     );
-    let temporary = if crate::paths::installed() {
-        crate::paths::get().runtime_dir
-    } else {
-        project.join("tmp")
-    };
+    let temporary = project.join("tmp");
     let namespace = temporary.join(format!("native-speech-{identity}"));
     for folder in [&temporary, &namespace] {
         match std::fs::symlink_metadata(folder) {
@@ -666,7 +659,7 @@ async fn run(
         return Err(cancelled_error());
     }
     let project = root()?;
-    let mut command = Command::new(crate::paths::node_binary());
+    let mut command = Command::new("node");
     command
         .arg(project.join("scripts/native-speech.mjs"))
         .arg("--stdin-request")

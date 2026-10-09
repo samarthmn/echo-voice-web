@@ -1,43 +1,28 @@
-# Updates and recovery
+# Web updates and recovery
 
-This describes the development candidate's update safeguards. Public signed updates and clean-machine qualification remain pending in the [release checklist](release-checklist.md).
+Echo's web server is updated from source. Backups and restoration are deliberate actions; there is no automatic application updater or pre-update snapshot. These steps apply on macOS and Ubuntu. See the [release checklist](release-checklist.md) for qualification status.
 
 ## Before updating
 
-Finish active recordings and processing. Synchronize or export pending browser recordings, and keep the appropriate [recovery phrases and backup](storage-and-recovery.md). An application backup does not contain audio that is still pending inside the extension.
+1. Finish active recordings and processing. Synchronize or export pending extension audio; a library backup does not include audio still in the browser.
+2. In **Settings → Storage**, confirm your recovery phrase and export the encrypted library backup. Keep it outside the checkout. For a library beyond the export limit, stop the server and copy the entire data folder, including protection/recovery files and any database sidecar files. Do not copy a live database.
+3. Record the actual data path from Storage. Preserve the original folder and matching phrase privately.
+4. Stop the server normally, then follow [source update commands](development.md#update-a-source-checkout). Retain the same workspace hostname and port if you want to reuse its browser model cache.
 
-The macOS launcher's **Install update** verifies the download before stopping Echo. It then makes and checks an encrypted library snapshot before replacing the app. If active work is still running, installation waits for you to finish it. If the snapshot cannot be verified—for example, disk space is unavailable, the key is locked or saved audio is damaged—the app is not replaced and Echo attempts to resume its existing server. No plaintext snapshot is created to work around an encryption failure.
+## Verify the updated build
 
-The snapshot includes the database, audio, transcript and note versions, vocabulary, saved preferences, protection/recovery records and supported saved credentials. It excludes model downloads, old browser profiles, executable configuration, helper caches and pending extension audio. Because it can contain account state, keep its folder private.
+Start the new server against the intended library. Check meetings, playback, transcript and notes versions, vocabulary and settings. Confirm pending extension audio transfers to the expected library. Keep the backup until verification succeeds.
 
-Ubuntu `.deb` updates are installed by the system package installer; this automatic macOS snapshot step does not run during a manual package installation. Make a portable backup in **Settings → Storage** before installing a verified `.deb`. Larger libraries require a stopped-library copy as described in the storage guide. Ubuntu update qualification is still pending.
-
-## Find a pre-update snapshot
-
-On macOS, use Finder's **Go → Go to Folder** and enter:
-
-```text
-~/Library/Application Support/Echo Voice-update-snapshots
-```
-
-Each completed snapshot is a dated folder containing `snapshot.json` and a `library` folder. The descriptor records the source and target app versions and creation time. A `.pending-…` directory is an interrupted attempt, not a verified snapshot. Completed snapshots remain until you deliberately remove them; Echo does not automatically delete or restore one.
-
-These snapshots are on the same computer. Keep a separate backup for disk loss or device loss.
+The server stores library-schema and minimum-reader versions. It rejects future or damaged schema metadata before database mutation. This protects against incompatible startup; it is not a backup and does not automatically undo a migration. Never remove schema/protection records to force an older build to open a library.
 
 ## Restore deliberately
 
-1. Close other Echo instances and keep the current library intact.
-2. Open a compatible Echo launcher, expand **Library and recovery**, and choose **Copy existing library…**.
-3. Select the completed snapshot's **library** folder, rather than its parent folder.
-4. Echo verifies another copy before selecting it. Confirm that expected meetings, audio, transcripts and notes open correctly.
-5. If the operating system key is unavailable, use **Recover a locked library**, select that snapshot's `library` folder and enter its matching library recovery phrase privately. Then repeat the copy step.
+For a portable backup, use a compatible running Echo version with an empty library and vocabulary, then import through **Settings → Storage**. Another library or computer needs the phrase associated with that backup. Reconnect optional accounts and pair the extension after restoration.
 
-Restoring does not merge meetings saved after the snapshot was made. Export or preserve the current library before switching. Optional accounts may require reconnection if their credentials have expired or been revoked.
+For a complete stopped-library copy, keep the failed/current directory intact and configure `dataDir` or `ECHO_DATA_DIR` to a separate copy of the backup. If its OS key is unavailable, follow [locked-library recovery](storage-and-recovery.md#recover-a-locked-library). A developer can run the retained `echo-server --check-library` command against the copy before starting the web server; validation can migrate an older library, so never treat it as a read-only check of your only copy.
 
-## If an older app refuses a library
+Restoration does not merge meetings recorded after the backup. Account for those recordings separately before switching directories. Do not downgrade a migrated library in place or automatically replace it with an older snapshot.
 
-Echo records a library format version and the minimum reader version inside the protected database. A newer or damaged format is rejected before migration, checkpointing or schema changes. Reopen it with the matching newer release, or explicitly restore a verified compatible snapshot. Do not delete version records, protection files or database journal files to force it open.
+## Extension updates
 
-This protection begins with releases that contain the format check; it cannot make previously distributed, older binaries enforce a check they did not contain. Application replacement never automatically rolls the library back.
-
-For developers: the schema fence is `library_schema` plus SQLite's `user_version`; storage protection has its own version. Future migrations must validate before writes and update the schema/minimum reader metadata transactionally. Tests retain byte-identical database and WAL files on rejected versions; SQLite's transient shared-memory read marks are not durable library data. Snapshot validation authenticates every copied protected file in bounded reads and checks the database and indexed audio digests before publishing the snapshot directory.
+A same-item update should retain browser storage, but finish active capture before reloading or updating. Test it with the exact release candidate. A different extension ID owns separate storage: synchronize or export pending recordings, install and pair the new identity, verify imported audio, then remove the old installation. Keep every WAV part and timeline file from an export.

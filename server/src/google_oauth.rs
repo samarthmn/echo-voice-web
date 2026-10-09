@@ -1,24 +1,16 @@
-//! Publisher-configured desktop OAuth and bounded, one-use local PKCE sessions.
-//! Installed clients are public. Google may require their publisher-supplied
-//! client secret as a protocol parameter; it is never browser/session proof.
-//! Endpoints are fixed and the browser cookie contains only an opaque proof.
+//! Environment-configured Web OAuth with PKCE and a one-use browser session.
+//! The configured same-origin callback is served by the existing web server.
 use crate::security::ApiError;
 use axum::{
     extract::Query,
     http::{header, HeaderMap, HeaderValue},
     response::{IntoResponse, Redirect, Response},
-    routing::get,
-    Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::OsRng, RngCore};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    fs,
-    io::Read,
-    path::Path,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -34,7 +26,6 @@ static SESSION: OnceLock<Mutex<Option<Arc<Session>>>> = OnceLock::new();
 pub(super) struct Config {
     pub id: String,
     pub secret: Option<Zeroizing<String>>,
-    pub installed: bool,
     pub redirect: String,
     #[cfg(test)]
     pub endpoints: Option<(String, String)>,
@@ -55,88 +46,7 @@ impl Config {
         "https://openidconnect.googleapis.com/v1/userinfo"
     }
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Descriptor {
-    version: u8,
-    client_type: String,
-    client_id: Option<String>,
-    #[serde(default, deserialize_with = "descriptor_secret")]
-    client_secret: Option<Zeroizing<String>>,
-}
-fn descriptor_secret<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Zeroizing<String>>, D::Error> {
-    String::deserialize(deserializer).map(|value| Some(Zeroizing::new(value)))
-}
-fn valid_client_secret(secret: &str) -> bool {
-    !secret.is_empty() && secret.len() <= 1024 && secret.bytes().all(|byte| byte.is_ascii_graphic())
-}
-fn unavailable() -> ApiError {
-    ApiError::new(503, "Calendar is not available in this Echo build. Ask its publisher for a Calendar-enabled update. Recording works without Calendar.")
-}
-fn invalid_configuration() -> ApiError {
-    ApiError::new(503, "This Echo build has invalid Calendar configuration. Reinstall a publisher-provided build. Recording works without Calendar.")
-}
-pub(super) fn valid_client_id(id: &str) -> bool {
-    id.len() <= 256
-        && id
-            .strip_suffix(".apps.googleusercontent.com")
-            .is_some_and(|prefix| {
-                !prefix.is_empty()
-                    && prefix
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-            })
-}
-fn desktop_config(root: &Path) -> Result<Config, ApiError> {
-    let path = root.join("google-oauth.json");
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(unavailable()),
-        Err(_) => return Err(invalid_configuration()),
-    };
-    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 4096 {
-        return Err(invalid_configuration());
-    }
-    let mut bytes = Zeroizing::new(Vec::new());
-    fs::File::open(&path)
-        .map_err(|_| invalid_configuration())?
-        .take(4097)
-        .read_to_end(&mut bytes)
-        .map_err(|_| invalid_configuration())?;
-    if bytes.len() > 4096 {
-        return Err(invalid_configuration());
-    }
-    let descriptor: Descriptor =
-        serde_json::from_slice(&bytes).map_err(|_| invalid_configuration())?;
-    if descriptor.version != 1
-        || descriptor.client_type != "desktop"
-        || descriptor
-            .client_secret
-            .as_ref()
-            .is_some_and(|secret| !valid_client_secret(secret))
-        || descriptor.client_id.is_none() && descriptor.client_secret.is_some()
-    {
-        return Err(invalid_configuration());
-    }
-    let id = descriptor.client_id.ok_or_else(unavailable)?;
-    if !valid_client_id(&id) {
-        return Err(invalid_configuration());
-    }
-    Ok(Config {
-        id,
-        secret: descriptor.client_secret,
-        installed: true,
-        redirect: String::new(),
-        #[cfg(test)]
-        endpoints: None,
-    })
-}
 pub(super) fn config() -> Result<Config, ApiError> {
-    if crate::paths::installed() {
-        return desktop_config(&crate::paths::get().resource_root);
-    }
     let id = std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
     let secret = std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
     if id.is_empty() || secret.is_empty() || id.len() > 256 || secret.len() > 4096 {
@@ -147,24 +57,10 @@ pub(super) fn config() -> Result<Config, ApiError> {
     Ok(Config {
         id,
         secret: Some(Zeroizing::new(secret)),
-        installed: false,
         redirect,
         #[cfg(test)]
         endpoints: None,
     })
-}
-fn workspace_origin(headers: &HeaderMap) -> Result<String, ApiError> {
-    let bind = crate::config::loopback_bind(
-        &std::env::var("ECHO_BIND").unwrap_or_else(|_| crate::config::get().bind.clone()),
-    )?;
-    let host = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(state_error)?;
-    if host != bind.to_string() && host != format!("localhost:{}", bind.port()) {
-        return Err(state_error());
-    }
-    Ok(format!("http://{host}"))
 }
 fn random_secret() -> Zeroizing<String> {
     let mut bytes = Zeroizing::new([0; 32]);
@@ -202,12 +98,10 @@ struct Session {
     state: Zeroizing<String>,
     browser: Zeroizing<String>,
     verifier: Zeroizing<String>,
-    bootstrap: Zeroizing<String>,
     origin: String,
     expires: Instant,
     stop: watch::Sender<bool>,
     claimed: std::sync::atomic::AtomicBool,
-    started: std::sync::atomic::AtomicBool,
 }
 impl Drop for Session {
     fn drop(&mut self) {
@@ -320,154 +214,36 @@ fn outcome(origin: &str, result: Result<(), ApiError>) -> Response {
         .insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     response
 }
-async fn begin(
-    mut config: Config,
-    origin: String,
-    lifetime: Duration,
-) -> Result<Response, ApiError> {
-    let listener = if config.installed {
-        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-            .await
-            .map_err(|_| {
-                ApiError::new(
-                    503,
-                    "Echo could not open its temporary Calendar callback. Retry the connection.",
-                )
-            })?;
-        config.redirect = format!(
-            "http://{}/",
-            listener.local_addr().map_err(|_| state_error())?
-        );
-        Some(listener)
-    } else {
-        None
-    };
+async fn begin(config: Config, origin: String, lifetime: Duration) -> Result<Response, ApiError> {
     let (stop, mut stopped) = watch::channel(false);
-    let installed = config.installed;
     let session = Arc::new(Session {
         config,
         state: random_secret(),
         browser: random_secret(),
         verifier: random_secret(),
-        bootstrap: random_secret(),
         origin,
         expires: Instant::now() + lifetime,
         stop,
         claimed: std::sync::atomic::AtomicBool::new(false),
-        started: std::sync::atomic::AtomicBool::new(!installed),
     });
-    let response = if installed {
-        let mut response = Redirect::to(&format!(
-            "{}start?request={}",
-            session.config.redirect,
-            session.bootstrap.as_str()
-        ))
-        .into_response();
-        response
-            .headers_mut()
-            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-        response
-            .headers_mut()
-            .insert("referrer-policy", HeaderValue::from_static("no-referrer"));
-        response
-    } else {
-        authorization_redirect(&session)?
-    };
+    let response = authorization_redirect(&session)?;
     {
         let mut current = sessions().lock().map_err(|_| state_error())?;
         if let Some(previous) = current.replace(session.clone()) {
             let _ = previous.stop.send(true);
         }
     }
-    if let Some(listener) = listener {
-        let active = session.clone();
-        let expected_host = listener
-            .local_addr()
-            .map_err(|_| state_error())?
-            .to_string();
-        let initial = session.clone();
-        let initial_host = expected_host.clone();
-        let router = Router::new()
-            .route(
-                "/start",
-                get(
-                    move |headers: HeaderMap, query: Query<HashMap<String, String>>| {
-                        let initial = initial.clone();
-                        let initial_host = initial_host.clone();
-                        async move {
-                            use std::sync::atomic::Ordering;
-                            let current = sessions().lock().is_ok_and(|current| {
-                                current
-                                    .as_ref()
-                                    .is_some_and(|value| Arc::ptr_eq(value, &initial))
-                            });
-                            if headers.get(header::HOST).and_then(|v| v.to_str().ok())
-                                != Some(initial_host.as_str())
-                                || !current
-                                || initial.expires <= Instant::now()
-                                || !query
-                                    .get("request")
-                                    .is_some_and(|value| same_secret(value, &initial.bootstrap))
-                                || initial
-                                    .started
-                                    .compare_exchange(
-                                        false,
-                                        true,
-                                        Ordering::SeqCst,
-                                        Ordering::SeqCst,
-                                    )
-                                    .is_err()
-                            {
-                                return state_error().into_response();
-                            }
-                            authorization_redirect(&initial)
-                                .unwrap_or_else(IntoResponse::into_response)
-                        }
-                    },
-                ),
-            )
-            .route(
-                "/",
-                get(
-                    move |headers: HeaderMap, query: Query<HashMap<String, String>>| {
-                        let active = active.clone();
-                        let expected_host = expected_host.clone();
-                        async move {
-                            if headers.get(header::HOST).and_then(|v| v.to_str().ok())
-                                != Some(expected_host.as_str())
-                            {
-                                return ApiError::new(403, "Invalid Calendar callback host.")
-                                    .into_response();
-                            }
-                            complete(active, headers, query.0).await
-                        }
-                    },
-                ),
-            );
-        let stopping = session.clone();
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, router).with_graceful_shutdown(async move {
-                tokio::select! { _ = tokio::time::sleep(lifetime) => {}, _ = stopped.changed() => {} }
-                clear_matching(&stopping);
-            }).await;
-        });
-    } else {
-        tokio::spawn(async move {
-            tokio::select! { _ = tokio::time::sleep(lifetime) => {}, _ = stopped.changed() => {} }
-            clear_matching(&session);
-        });
-    }
+    tokio::spawn(async move {
+        tokio::select! { _ = tokio::time::sleep(lifetime) => {}, _ = stopped.changed() => {} }
+        clear_matching(&session);
+    });
     Ok(response)
 }
 pub(super) async fn connect(headers: HeaderMap) -> Result<Response, ApiError> {
     let config = config()?;
-    let origin = if config.installed {
-        workspace_origin(&headers)?
-    } else {
-        super::loopback_url(&config.redirect)?
-            .origin()
-            .ascii_serialization()
-    };
+    let origin = super::loopback_url(&config.redirect)?
+        .origin()
+        .ascii_serialization();
     let expected_host = origin
         .split_once("://")
         .map(|(_, host)| host)
@@ -496,7 +272,6 @@ async fn complete(
     });
     if !matches
         || !current
-        || !session.started.load(Ordering::SeqCst)
         || session.expires <= Instant::now()
         || session
             .claimed
@@ -543,7 +318,7 @@ pub(super) async fn callback(
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let session = sessions().lock().ok().and_then(|current| current.clone());
-    if let Some(session) = session.filter(|session| !session.config.installed) {
+    if let Some(session) = session {
         complete(session, headers, query).await
     } else {
         outcome("", Err(state_error()))
@@ -554,8 +329,14 @@ pub(super) async fn callback(
 mod tests {
     use super::*;
     use crate::{integrations, store};
-    use axum::{extract::Form, http::StatusCode, routing::post, Json};
+    use axum::{
+        extract::Form,
+        http::StatusCode,
+        routing::{get, post},
+        Json, Router,
+    };
     use serde_json::json;
+    use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const CLIENT: &str = "123_echo-test.apps.googleusercontent.com";
@@ -607,9 +388,6 @@ mod tests {
                     if behavior.load(Ordering::SeqCst) == 4 {
                         return (StatusCode::BAD_REQUEST,Json(json!({"error":"invalid_client","error_description":"synthetic-private-diagnostic"}))).into_response();
                     }
-                    if behavior.load(Ordering::SeqCst) == 5 && form.get("client_secret").map(String::as_str) != Some("synthetic-desktop-secret") {
-                        return (StatusCode::BAD_REQUEST,Json(json!({"error":"invalid_request","error_description":"client_secret is missing."}))).into_response();
-                    }
                     Json(json!({"access_token":"synthetic-new-access","refresh_token":"synthetic-new-refresh","expires_in":3600,"scope":SCOPE})).into_response()
                 }
             })).route("/profile",get(|headers:HeaderMap|async move {
@@ -629,30 +407,17 @@ mod tests {
                 task,
             }
         }
-        fn config(&self, installed: bool) -> Config {
+        fn config(&self) -> Config {
             Config {
                 id: CLIENT.into(),
-                secret: (!installed).then(|| Zeroizing::new("synthetic-web-secret".into())),
-                installed,
-                redirect: if installed {
-                    String::new()
-                } else {
-                    "http://localhost:3000/api/integrations/google/callback".into()
-                },
+                secret: Some(Zeroizing::new("synthetic-web-secret".into())),
+                redirect: "http://localhost:3000/api/integrations/google/callback".into(),
                 endpoints: Some((
                     format!("{}/token", self.url),
                     format!("{}/profile", self.url),
                 )),
             }
         }
-    }
-    fn http() -> reqwest::Client {
-        reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(3))
-            .build()
-            .unwrap()
     }
     fn fixture() -> tempfile::TempDir {
         cancel();
@@ -675,252 +440,88 @@ mod tests {
         .unwrap();
         fs::read(integrations::credentials_file()).unwrap()
     }
-    fn cookie(response: &reqwest::Response) -> String {
-        response
-            .headers()
-            .get_all(header::SET_COOKIE)
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .find(|value| value.starts_with("echo_google_oauth=") && !value.contains("Max-Age=0"))
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap()
-            .to_owned()
-    }
-    async fn closed(url: &str) {
-        let url = Url::parse(url).unwrap();
-        for _ in 0..100 {
-            if tokio::net::TcpStream::connect(("127.0.0.1", url.port().unwrap()))
-                .await
-                .is_err()
-            {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("Owned OAuth listener did not close");
-    }
-    async fn launch(provider: &Provider, lifetime: Duration) -> (Arc<Session>, String, String) {
-        let start = begin(
-            provider.config(true),
-            "http://localhost:3000".into(),
-            lifetime,
-        )
-        .await
-        .unwrap();
-        let start_url = start.headers()[header::LOCATION].to_str().unwrap();
-        assert!(start_url.starts_with("http://127.0.0.1:"));
-        assert!(!start.headers().contains_key(header::SET_COOKIE));
-        let initial = http().get(start_url).send().await.unwrap();
-        assert_eq!(initial.status(), StatusCode::SEE_OTHER);
-        let auth = Url::parse(initial.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+    async fn launch(provider: &Provider, lifetime: Duration) -> Arc<Session> {
+        let response = begin(provider.config(), "http://localhost:3000".into(), lifetime)
+            .await
+            .unwrap();
+        let auth = Url::parse(response.headers()[header::LOCATION].to_str().unwrap()).unwrap();
         assert_eq!(auth.host_str(), Some("accounts.google.com"));
         let fields: HashMap<_, _> = auth.query_pairs().into_owned().collect();
         assert_eq!(fields["scope"], SCOPE);
         assert_eq!(fields["client_id"], CLIENT);
+        assert_eq!(
+            fields["redirect_uri"],
+            "http://localhost:3000/api/integrations/google/callback"
+        );
         assert_eq!(fields["code_challenge_method"], "S256");
         assert!(!fields.contains_key("client_secret"));
         assert!(!fields.contains_key("code_verifier"));
         *provider.challenge.lock().unwrap() = fields["code_challenge"].clone();
         let session = sessions().lock().unwrap().as_ref().unwrap().clone();
-        let cookie = cookie(&initial);
-        assert!(!cookie.contains(session.verifier.as_str()));
-        assert_eq!(
-            http().get(start_url).send().await.unwrap().status(),
-            StatusCode::BAD_REQUEST
-        );
-        (session, fields["redirect_uri"].clone(), cookie)
+        let cookies = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(cookies
+            .iter()
+            .any(|value| value.contains(session.browser.as_str())));
+        assert!(cookies
+            .iter()
+            .all(|value| !value.contains(session.verifier.as_str())
+                && !value.contains("synthetic-web-secret")));
+        session
     }
-    fn callback_url(redirect: &str, session: &Session, result: &str) -> String {
-        format!("{redirect}?state={}&{result}", session.state.as_str())
-    }
-    #[test]
-    fn descriptor_accepts_only_bounded_desktop_configuration() {
-        let directory = store::test_directory();
-        let path = directory.path().join("google-oauth.json");
-        assert!(desktop_config(directory.path()).is_err());
-        for value in [
-            json!({"version":1,"clientType":"desktop","clientId":null}),
-            json!({"version":1,"clientType":"web","clientId":CLIENT}),
-            json!({"version":1,"clientType":"desktop","clientId":null,"clientSecret":"synthetic"}),
-            json!({"version":1,"clientType":"desktop","clientId":CLIENT,"tokenUrl":"http://remote.invalid"}),
-            json!({"version":1,"clientType":"desktop","clientId":"bad.prefix.apps.googleusercontent.com"}),
-            json!({"version":2,"clientType":"desktop","clientId":CLIENT}),
-        ] {
-            fs::write(&path, value.to_string()).unwrap();
-            assert!(desktop_config(directory.path()).is_err());
-        }
-        fs::write(&path, " ".repeat(4097)).unwrap();
-        assert!(desktop_config(directory.path()).is_err());
-        fs::write(
-            &path,
-            json!({"version":1,"clientType":"desktop","clientId":CLIENT}).to_string(),
-        )
-        .unwrap();
-        let config = desktop_config(directory.path()).unwrap();
-        assert_eq!(config.id, CLIENT);
-        assert!(config.secret.is_none());
-        assert!(config.installed);
-        assert_eq!(config.token_url(), "https://oauth2.googleapis.com/token");
-        assert_eq!(
-            config.profile_url(),
-            "https://openidconnect.googleapis.com/v1/userinfo"
-        );
-        for secret in [
-            json!(""),
-            json!("x".repeat(1025)),
-            json!("with space"),
-            json!("line\nbreak"),
-            json!("null\u{0}byte"),
-            json!("del\u{7f}byte"),
-            json!("nonascii-é"),
-            json!(null),
-            json!(42),
-        ] {
-            fs::write(
-                &path,
-                json!({"version":1,"clientType":"desktop","clientId":CLIENT,"clientSecret":secret})
-                    .to_string(),
-            )
-            .unwrap();
-            let error = desktop_config(directory.path()).err().unwrap();
-            assert!(!error.message.contains("byte") && !error.message.contains("nonascii"));
-        }
-        fs::write(&path, json!({"version":1,"clientType":"desktop","clientId":CLIENT,"clientSecret":"synthetic-desktop-secret"}).to_string()).unwrap();
-        let config = desktop_config(directory.path()).unwrap();
-        assert_eq!(
-            config.secret.as_ref().unwrap().as_str(),
-            "synthetic-desktop-secret"
-        );
-        #[cfg(unix)]
-        {
-            fs::rename(&path, directory.path().join("target.json")).unwrap();
-            std::os::unix::fs::symlink("target.json", &path).unwrap();
-            assert!(desktop_config(directory.path()).is_err());
-        }
-    }
-    #[tokio::test]
-    async fn packaged_desktop_secret_is_used_only_for_code_and_refresh_token_forms() {
-        let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-        let directory = fixture();
-        let provider = Provider::start().await;
-        provider.mode.store(5, Ordering::SeqCst);
-        fs::write(directory.path().join("google-oauth.json"), json!({"version":1,"clientType":"desktop","clientId":CLIENT,"clientSecret":"synthetic-desktop-secret"}).to_string()).unwrap();
-        let mut config = desktop_config(directory.path()).unwrap();
-        config.endpoints = provider.config(true).endpoints;
-        let start = begin(
-            config,
-            "http://localhost:3000".into(),
-            Duration::from_secs(10),
+    async fn response(
+        session: Arc<Session>,
+        state: &str,
+        cookie: &str,
+        result: (&str, &str),
+    ) -> Response {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, HeaderValue::from_str(cookie).unwrap());
+        complete(
+            session,
+            headers,
+            HashMap::from([
+                ("state".into(), state.into()),
+                (result.0.into(), result.1.into()),
+            ]),
         )
         .await
-        .unwrap();
-        let start_url = start.headers()[header::LOCATION].to_str().unwrap();
-        assert!(!start_url.contains("synthetic-desktop-secret"));
-        let initial = http().get(start_url).send().await.unwrap();
-        let browser_cookie = cookie(&initial);
-        let auth = Url::parse(initial.headers()[header::LOCATION].to_str().unwrap()).unwrap();
-        let fields: HashMap<_, _> = auth.query_pairs().into_owned().collect();
-        assert!(!auth.as_str().contains("synthetic-desktop-secret"));
-        assert!(!browser_cookie.contains("synthetic-desktop-secret"));
-        assert!(!fields.contains_key("client_secret"));
-        assert!(!fields.contains_key("code_verifier"));
-        *provider.challenge.lock().unwrap() = fields["code_challenge"].clone();
-        let session = sessions().lock().unwrap().as_ref().unwrap().clone();
-        let redirect = fields["redirect_uri"].clone();
-        let result = http()
-            .get(callback_url(&redirect, &session, "code=synthetic-code"))
-            .header(header::COOKIE, browser_cookie)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            result.headers()[header::LOCATION],
-            "http://localhost:3000/?calendar=connected"
-        );
-        closed(&redirect).await;
-        let mut saved = integrations::read_tokens().unwrap().unwrap();
-        assert_eq!(saved.client_id.as_deref(), Some(CLIENT));
-        assert!(!serde_json::to_string(&saved)
-            .unwrap()
-            .contains("synthetic-desktop-secret"));
-        saved.expires_at = 42;
-        integrations::refresh_token(saved, &session.config)
-            .await
-            .unwrap();
-        let forms = provider.forms.lock().unwrap();
-        assert_eq!(forms.len(), 2);
-        for form in forms.iter() {
-            assert_eq!(form["client_secret"], "synthetic-desktop-secret");
-        }
-        assert_eq!(forms[0]["grant_type"], "authorization_code");
-        assert_eq!(forms[1]["grant_type"], "refresh_token");
-        store::reset_for_tests();
+    }
+    fn browser(session: &Session) -> String {
+        format!("{COOKIE}={}", session.browser.as_str())
     }
     #[tokio::test]
-    async fn installed_pkce_binds_browser_consumes_once_and_closes_owned_listeners() {
+    async fn web_pkce_binds_browser_consumes_once_and_preserves_previous_connection() {
         let _guard = store::TEST_LIBRARY_LOCK.lock().await;
         let _directory = fixture();
         let original = previous();
         let provider = Provider::start().await;
-        let (session, redirect, cookie) = launch(&provider, Duration::from_secs(10)).await;
-        for (url, browser) in [
+        let session = launch(&provider, Duration::from_secs(10)).await;
+        for (state, cookie) in [
+            ("wrong".into(), browser(&session)),
+            (session.state.to_string(), "echo_google_oauth=wrong".into()),
             (
-                format!("{redirect}?state=wrong&code=synthetic-code"),
-                cookie.clone(),
-            ),
-            (
-                callback_url(&redirect, &session, "code=synthetic-code"),
-                "echo_google_oauth=wrong".into(),
-            ),
-            (
-                callback_url(&redirect, &session, "code=synthetic-code"),
-                format!("{cookie}; {cookie}"),
+                session.state.to_string(),
+                format!("{}; {}", browser(&session), browser(&session)),
             ),
         ] {
-            let response = http()
-                .get(url)
-                .header(header::COOKIE, browser)
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-            assert!(!response.headers().contains_key(header::SET_COOKIE));
+            let result =
+                response(session.clone(), &state, &cookie, ("code", "synthetic-code")).await;
+            assert_eq!(result.status(), StatusCode::BAD_REQUEST);
             assert!(pending());
         }
-        let forged_host = http()
-            .get(&redirect)
-            .header(header::HOST, "attacker.invalid")
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(forged_host.status(), StatusCode::FORBIDDEN);
-        let denied = http()
-            .get(callback_url(&redirect, &session, "error=access_denied"))
-            .header(header::COOKIE, &cookie)
-            .send()
-            .await
-            .unwrap();
+        let denied = response(
+            session.clone(),
+            &session.state,
+            &browser(&session),
+            ("error", "access_denied"),
+        )
+        .await;
         assert!(denied.headers()[header::LOCATION]
-            .to_str()
-            .unwrap()
-            .starts_with("http://localhost:3000/?calendar=error"));
-        assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
-            original
-        );
-        assert!(provider.forms.lock().unwrap().is_empty());
-        closed(&redirect).await;
-        let (session, redirect, cookie) = launch(&provider, Duration::from_secs(10)).await;
-        *provider.challenge.lock().unwrap() = "incorrect-pkce-challenge".into();
-        let rejected = http()
-            .get(callback_url(&redirect, &session, "code=synthetic-code"))
-            .header(header::COOKIE, &cookie)
-            .send()
-            .await
-            .unwrap();
-        assert!(rejected.headers()[header::LOCATION]
             .to_str()
             .unwrap()
             .contains("calendar=error"));
@@ -928,87 +529,109 @@ mod tests {
             fs::read(integrations::credentials_file()).unwrap(),
             original
         );
-        closed(&redirect).await;
+        assert!(provider.forms.lock().unwrap().is_empty());
+        assert!(!pending());
+        let session = launch(&provider, Duration::from_secs(10)).await;
+        *provider.challenge.lock().unwrap() = "wrong-pkce-challenge".into();
+        let denied = response(
+            session.clone(),
+            &session.state,
+            &browser(&session),
+            ("code", "synthetic-code"),
+        )
+        .await;
+        assert!(denied.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .contains("calendar=error"));
+        assert_eq!(
+            fs::read(integrations::credentials_file()).unwrap(),
+            original
+        );
         provider.forms.lock().unwrap().clear();
-        let (session, redirect, cookie) = launch(&provider, Duration::from_secs(10)).await;
-        let success = http()
-            .get(callback_url(&redirect, &session, "code=synthetic-code"))
-            .header(header::COOKIE, &cookie)
-            .send()
-            .await
-            .unwrap();
+        let session = launch(&provider, Duration::from_secs(10)).await;
+        let success = response(
+            session.clone(),
+            &session.state,
+            &browser(&session),
+            ("code", "synthetic-code"),
+        )
+        .await;
         assert_eq!(
             success.headers()[header::LOCATION],
             "http://localhost:3000/?calendar=connected"
         );
         let saved = integrations::read_tokens().unwrap().unwrap();
         assert_eq!(saved.client_id.as_deref(), Some(CLIENT));
-        assert_eq!(saved.access_token, "synthetic-new-access");
         let disk = fs::read(integrations::credentials_file()).unwrap();
         assert!(disk.starts_with(b"ECHOENC1"));
         assert!(!String::from_utf8_lossy(&disk).contains("synthetic-new"));
-        {
-            let forms = provider.forms.lock().unwrap();
-            assert_eq!(forms.len(), 1);
-            assert!(!forms[0].contains_key("client_secret"));
-            assert_eq!(forms[0]["redirect_uri"], redirect);
-        }
-        let mut headers = HeaderMap::new();
-        headers.insert(header::COOKIE, HeaderValue::from_str(&cookie).unwrap());
+        assert_eq!(provider.forms.lock().unwrap().len(), 1);
         assert_eq!(
-            complete(
+            response(
                 session.clone(),
-                headers,
-                HashMap::from([
-                    ("state".into(), session.state.to_string()),
-                    ("code".into(), "synthetic-code".into())
-                ])
+                &session.state,
+                &browser(&session),
+                ("code", "synthetic-code")
             )
             .await
             .status(),
             StatusCode::BAD_REQUEST
         );
-        closed(&redirect).await;
-        let (_, redirect, _) = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10)).await;
         assert!(cancel());
-        closed(&redirect).await;
-        assert_eq!(fs::read(integrations::credentials_file()).unwrap(), disk);
-        let start = begin(
-            provider.config(true),
-            "http://localhost:3000".into(),
-            Duration::from_millis(40),
-        )
-        .await
-        .unwrap();
-        closed(start.headers()[header::LOCATION].to_str().unwrap()).await;
+        assert_eq!(
+            response(
+                session.clone(),
+                &session.state,
+                &browser(&session),
+                ("code", "synthetic-code")
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let session = launch(&provider, Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(!pending());
+        assert_eq!(
+            response(
+                session.clone(),
+                &session.state,
+                &browser(&session),
+                ("code", "synthetic-code")
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(fs::read(integrations::credentials_file()).unwrap(), disk);
         store::reset_for_tests();
     }
     #[tokio::test]
-    async fn cancellation_during_token_exchange_never_replaces_previous_credentials() {
+    async fn cancellation_during_web_token_exchange_never_replaces_previous_credentials() {
         let _guard = store::TEST_LIBRARY_LOCK.lock().await;
         let _directory = fixture();
         let original = previous();
         let provider = Provider::start().await;
         provider.mode.store(2, Ordering::SeqCst);
-        let (session, redirect, cookie) = launch(&provider, Duration::from_secs(10)).await;
-        let url = callback_url(&redirect, &session, "code=synthetic-code");
+        let session = launch(&provider, Duration::from_secs(10)).await;
         let request = tokio::spawn(async move {
-            http()
-                .get(url)
-                .header(header::COOKIE, cookie)
-                .send()
-                .await
-                .unwrap()
+            response(
+                session.clone(),
+                &session.state,
+                &browser(&session),
+                ("code", "synthetic-code"),
+            )
+            .await
         });
         tokio::time::timeout(Duration::from_secs(2), provider.entered.notified())
             .await
             .unwrap();
         assert!(cancel());
-        closed(&redirect).await;
         provider.release.notify_one();
-        let response = request.await.unwrap();
-        assert!(response.headers()[header::LOCATION]
+        let result = request.await.unwrap();
+        assert!(result.headers()[header::LOCATION]
             .to_str()
             .unwrap()
             .contains("calendar=error"));
@@ -1016,7 +639,6 @@ mod tests {
             fs::read(integrations::credentials_file()).unwrap(),
             original
         );
-        closed(&redirect).await;
         store::reset_for_tests();
     }
     #[tokio::test]
@@ -1028,13 +650,7 @@ mod tests {
         let mut saved = integrations::read_tokens().unwrap().unwrap();
         saved.client_id = Some("other-client.apps.googleusercontent.com".into());
         assert!(
-            integrations::refresh_token(saved.clone(), &provider.config(true))
-                .await
-                .is_err()
-        );
-        saved.client_id = None;
-        assert!(
-            integrations::refresh_token(saved.clone(), &provider.config(true))
+            integrations::refresh_token(saved.clone(), &provider.config())
                 .await
                 .is_err()
         );
@@ -1045,20 +661,17 @@ mod tests {
         );
         saved.client_id = Some(CLIENT.into());
         saved.expires_at = 42;
-        let fresh = integrations::refresh_token(saved.clone(), &provider.config(true))
+        let fresh = integrations::refresh_token(saved.clone(), &provider.config())
             .await
             .unwrap();
         assert_eq!(fresh.access_token, "synthetic-new-access");
-        assert!(!provider
-            .forms
-            .lock()
-            .unwrap()
-            .last()
-            .unwrap()
-            .contains_key("client_secret"));
+        assert_eq!(
+            provider.forms.lock().unwrap().last().unwrap()["client_secret"],
+            "synthetic-web-secret"
+        );
         provider.mode.store(4, Ordering::SeqCst);
         let unchanged = fs::read(integrations::credentials_file()).unwrap();
-        let diagnostic = integrations::refresh_token(saved.clone(), &provider.config(true))
+        let diagnostic = integrations::refresh_token(saved.clone(), &provider.config())
             .await
             .unwrap_err();
         assert!(diagnostic.message.contains("invalid_client"));
@@ -1069,7 +682,7 @@ mod tests {
         );
         provider.mode.store(0, Ordering::SeqCst);
         saved.client_id = None;
-        let fresh = integrations::refresh_token(saved.clone(), &provider.config(false))
+        let fresh = integrations::refresh_token(saved.clone(), &provider.config())
             .await
             .unwrap();
         assert_eq!(fresh.client_id.as_deref(), Some(CLIENT));
@@ -1080,7 +693,7 @@ mod tests {
         let mut missing = fresh.clone();
         missing.expires_at = 42;
         missing.refresh_token = None;
-        assert!(integrations::refresh_token(missing, &provider.config(true))
+        assert!(integrations::refresh_token(missing, &provider.config())
             .await
             .is_err());
         assert!(
@@ -1092,7 +705,7 @@ mod tests {
         provider.mode.store(1, Ordering::SeqCst);
         saved.client_id = Some(CLIENT.into());
         assert!(
-            integrations::refresh_token(saved.clone(), &provider.config(true))
+            integrations::refresh_token(saved.clone(), &provider.config())
                 .await
                 .is_err()
         );
@@ -1117,7 +730,7 @@ mod tests {
         );
         provider.mode.store(3, Ordering::SeqCst);
         let before = fs::read(integrations::credentials_file()).unwrap();
-        assert!(integrations::refresh_token(saved, &provider.config(true))
+        assert!(integrations::refresh_token(saved, &provider.config())
             .await
             .is_err());
         assert_eq!(fs::read(integrations::credentials_file()).unwrap(), before);
@@ -1130,7 +743,7 @@ mod tests {
         previous();
         let provider = Provider::start().await;
         let response = begin(
-            provider.config(false),
+            provider.config(),
             "http://localhost:3000".into(),
             Duration::from_secs(10),
         )

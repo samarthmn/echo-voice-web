@@ -1,12 +1,12 @@
 # Echo human-only dependencies
 
-Approved October 9, 2026 with the [Codex implementation plan](2026-10-09-production-readiness.md). Codex owns coding, configuration, documentation, tests, diagnosis, packaging, signing commands, hosting setup and accessible store operations. An approval is a checkpoint, not a transfer of the surrounding work to a human.
+Approved October 9, 2026 with the [Codex implementation plan](2026-10-09-production-readiness.md), then narrowed by the user to the local web app and browser extension. Desktop application distribution, Apple signing/notarization and installer tasks are cancelled. Codex owns coding, configuration, documentation, tests, diagnosis, web/extension packaging, hosting setup and accessible store operations. An approval is a checkpoint, not a transfer of the surrounding work to a human.
 
 | Dependency | Minimum human participation | Codex resumes with |
 |---|---|---|
 | Plan review | Completed: implementation requested after review | Implementation and evidence tracking |
 | Publisher facts | Completed: Samarth; samarth.m.n@gmail.com; echovoice.samarthmn.com. Hosting access remains a later checkpoint | Drafting, configuration and approved hosting |
-| Account challenge | Personal login/2FA/CAPTCHA/identity verification only when tools cannot complete it | OAuth, signing or publisher setup |
+| Account challenge | Personal login/2FA/CAPTCHA/identity verification only when tools cannot complete it | web OAuth or extension publisher setup |
 | Binding/financial decisions | Approve concrete cost/agreement and perform account-holder-only steps | All permitted enrollment/operational steps |
 | Restricted access | Grant narrowly scoped access through secure UI; never paste secrets into chat | Secure configuration and use |
 | Ubuntu qualification | Open Codex with the prepared handoff on Ubuntu or provide an authorized supported connection | Codex executes tests, collects evidence, fixes and retests |

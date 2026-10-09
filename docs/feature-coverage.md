@@ -42,7 +42,7 @@ Echo does not silently switch models, providers or billing methods when a reques
 
 ## Delivery and qualification
 
-A Tauri launcher and native runtime packaging are implemented for Apple Silicon macOS and Ubuntu x64. The Mac unsigned build has development evidence; signing, clean-machine installation/update/uninstall tests and real Ubuntu qualification remain pending. Native Large V3 dependencies are bundled in these desktop runtimes. The extension is loaded unpacked; there is no published store listing supplied by this repository. See the [publishing guide](extension-publishing.md) and [developer guide](development.md).
+Echo runs as a local web server opened in Brave or Chrome. Initial setup uses the source-build guide; separate desktop applications and installers have been removed from scope. Full Large V3 still requires the local Node/native speech setup. Browser/service qualification on macOS and Ubuntu remains incomplete. The extension is loaded unpacked; there is no published store listing supplied by this repository. See the [publishing guide](extension-publishing.md) and [developer guide](development.md).
 
 The interface includes light/dark themes, responsive layouts, labelled controls, keyboard navigation and automated accessibility checks. These checks do not constitute complete assistive-technology qualification. A responsive page does not imply mobile recording support.
 

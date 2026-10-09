@@ -15,40 +15,17 @@ pub struct Config {
 }
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Load the shared file once; packaged binaries retain the same embedded defaults.
+/// Load the shared file once, with embedded defaults when no override is configured.
 pub fn get() -> &'static Config {
     CONFIG.get_or_init(|| {
-        let path = if crate::paths::installed() {
-            crate::paths::installed_data_dir()
-                .expect("Invalid installed data directory")
-                .join("config.json")
-        } else {
-            std::env::var_os("ECHO_CONFIG_FILE")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| "echo.config.json".into())
-        };
-        if crate::paths::installed() && path.exists() {
-            let metadata = fs::symlink_metadata(&path).expect("Cannot inspect installed config");
-            assert!(
-                !metadata.file_type().is_symlink() && metadata.is_file(),
-                "Installed config must be a regular private file"
-            );
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::{MetadataExt, PermissionsExt};
-                assert!(
-                    metadata.uid() == unsafe { libc::geteuid() }
-                        && metadata.permissions().mode() & 0o077 == 0,
-                    "Installed config must be owned by this account with mode 0600"
-                );
-            }
-        }
+        let path = std::env::var_os("ECHO_CONFIG_FILE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| "echo.config.json".into());
         let source = match fs::read_to_string(&path) {
             Ok(source) => source,
             Err(e)
                 if e.kind() == std::io::ErrorKind::NotFound
-                    && (crate::paths::installed()
-                        || std::env::var_os("ECHO_CONFIG_FILE").is_none()) =>
+                    && std::env::var_os("ECHO_CONFIG_FILE").is_none() =>
             {
                 include_str!("../../echo.config.json").to_owned()
             }

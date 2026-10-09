@@ -25,7 +25,7 @@ Tested the source build on macOS 27.0.1 / Apple Silicon with visible, isolated B
 | Real Whisper download and local inference | Passed; the short generated fixture transcribed accurately |
 | Real local Ollama generation | Passed: summary, Friday website-launch decision, Sam's release-checklist action, Maya's design-review action, and valid passage evidence |
 | Restart and cached inference with external HTTP blocked | Passed; zero external requests |
-| `npm audit` | 0 vulnerabilities after rebuild |
+| `npm audit` | 0 vulnerabilities at this earlier review; not a current dependency assessment. See the [current readiness record](production-readiness-status.md). |
 | `git diff --check` | Passed |
 
 The additional diagnostic scripts initially needed two corrected expectations: downloaded-model status includes an adjacent Default label, and regenerated transcripts use new passage IDs. Older notes correctly disable evidence links until their original source transcript is restored from Details. These were test expectation corrections, not application failures.

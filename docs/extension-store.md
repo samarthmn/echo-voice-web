@@ -1,6 +1,6 @@
 # Chrome Web Store release materials
 
-**Local preparation only.** No draft has been submitted or published by this document. The candidate still needs the [qualification matrix](extension-qualification.md), independent security review, signed companion-app distribution, real store-install testing and release approval. The [publishing guide](extension-publishing.md) owns the operator procedure.
+**Local preparation only.** No draft has been submitted or published by this document. The candidate still needs the [qualification matrix](extension-qualification.md), independent security review, verified local web-server setup, real store-install testing and release approval. The [publishing guide](extension-publishing.md) owns the operator procedure.
 
 ## Publisher and destinations
 
@@ -30,7 +30,7 @@ Facts are shared with [release/publisher.json](../release/publisher.json). [Site
 >
 > Start and stop recording yourself, with participant consent. Pause when needed. Closing the popup does not stop the recording. If the local Echo app is closed, the extension keeps committed audio in the browser for later transfer or WAV export.
 >
-> The local Echo desktop app is required for your meeting library, final transcripts and notes. A speech model download is required for local transcription. Optional live text uses the local Turbo model in an open Echo workspace; recording continues when live processing is unavailable.
+> The local Echo web server is required for your meeting library, final transcripts and notes. A speech model download is required for local transcription. Optional live text uses the local Turbo model in an open Echo workspace; recording continues when live processing is unavailable.
 >
 > Setup protects pending recordings with a recovery phrase and connects to Echo with one approval. Keep the phrase privately. After a browser restart without Echo, use it to unlock older recordings. Uninstalling the extension or deleting its browser data can erase pending audio; synchronize or export first.
 >
@@ -45,7 +45,7 @@ Replace the artifact fields with immutable, verified links after qualification. 
 | Candidate field | Required value |
 |---|---|
 | Source commit / app version / extension version | Pending release commit |
-| Approved companion installer(s) and SHA-256 | Pending signed/qualified artifacts |
+| Local web-server commit, build prerequisites and asset hashes | Pending qualified candidate |
 | Minimum OS and qualified browsers/services | Pending per-cell evidence |
 | Store extension ID | Pending assigned ID |
 | Model choice and displayed download size | Verify in the candidate Models screen |
@@ -53,7 +53,7 @@ Replace the artifact fields with immutable, verified links after qualification. 
 
 Reviewer journey:
 
-1. Install the matching Echo desktop app and launch it. Choose an existing qualified Brave or Chrome browser. No developer runtime or terminal is required in the released installer.
+1. Build and start the matching local Echo web server using the supplied source instructions, then open its URL in an existing qualified Brave or Chrome browser. The extension does not install or start the server. This setup currently needs developer tools; disclose those prerequisites to reviewers.
 2. In Echo Settings → Storage, save and confirm the library recovery phrase privately. Open extension Setup and complete its **separate** recovery-phrase confirmation.
 3. Select **Connect to Echo**, approve the installation in Echo and return to Setup. It should show Connected automatically. Codes and custom addresses are under Advanced; they are not needed on the default local address.
 4. Enable the qualified meeting service and optionally permit the microphone. Open a test meeting normally with camera permission denied. The extension neither signs into nor joins it for you.
@@ -101,7 +101,7 @@ Google currently requires a 128×128 PNG icon, a 440×280 promotional image and 
 | Recording/source indicators | Pending actual qualified call with private links/account details excluded. |
 | Pause and saved-state screenshot | Pending actual candidate capture. |
 | Pending history/recovery screenshot | Pending synthetic candidate capture; never show recovery words. |
-| Workspace overview | [Current desktop guide](extension-assets/echo-overview.png), 1440×1050; a documentation preview, requiring a store-sized capture before submission. [Provenance](extension-assets/workspace-capture-provenance.json). |
+| Workspace overview | [Current workspace guide](extension-assets/echo-overview.png), 1440×1050; a documentation preview, requiring a store-sized capture before submission. [Provenance](extension-assets/workspace-capture-provenance.json). |
 | Mobile overview | [Current 390px guide](extension-assets/echo-overview-mobile.png), a documentation preview, not a valid store screenshot size. |
 | Final transcript/notes review screenshot | Pending actual qualified candidate capture with private content excluded. |
 | Earlier mute transcript | [Bounded test evidence](extension-assets/clean-mute-transcript.jpg), not proof of fresh full qualification. |

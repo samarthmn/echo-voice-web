@@ -1,4 +1,4 @@
-//! Validate an isolated migration or update copy before the launcher commits it.
+//! Authenticate an offline local library, including unindexed recovery files.
 use crate::{security::ApiError, store};
 use sha2::{Digest, Sha256};
 use std::path::Path;

@@ -20,9 +20,5 @@ __pycache__/
 /tools/codex/
 
 /extension/dist/
-/artifacts/desktop-runtime/
-/desktop/resources/
-/desktop/gen/
-/desktop/ui/shared/
 
 /artifacts/site/

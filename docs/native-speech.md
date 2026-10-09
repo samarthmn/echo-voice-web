@@ -10,7 +10,7 @@ Install Node.js 22 or newer. In the Echo folder, run:
 npm ci --ignore-scripts
 ```
 
-Start Echo, open **Models**, and download **Whisper Large V3**. Echo downloads the pinned q8 model, executes its encoder and decoder, then checks the browser's speaker models before showing it as ready. Select it in **Settings → General**. A source build installs these dependencies. New desktop runtime packages bundle Node and the native dependencies; older server-only archives still need the optional setup above. Installer qualification is recorded separately. Turbo remains available without a Node runtime.
+Start Echo, open **Models**, and download **Whisper Large V3**. Echo downloads the pinned q8 model, executes its encoder and decoder, then checks the browser's speaker models before showing it as ready. Select it in **Settings → General** for new meetings. For an existing recording, change **Details → Processing choices → Speech recognition**, then choose **Save choices**. The source build installs these dependencies; server-only archives still need the optional setup above. Turbo remains available without a Node runtime.
 
 The first download needs internet access. Later transcription uses only the local cache. The fixed checkpoint is `Xenova/whisper-large-v3` at revision `67bf02d92b7754a1ff82a7f8545f8b8c378b2ef0`. The saved model selection remains `onnx-community/whisper-large-v3` for compatibility. The helper corrects this export's alignment metadata using the [official pinned Large V3 configuration](https://huggingface.co/openai/whisper-large-v3/blob/06f233fe06e710322aca913c1bc4249a0d71fce1/generation_config.json) and crops attention frames for Whisper's stride-two encoder; speech weights and text generation remain unchanged.
 

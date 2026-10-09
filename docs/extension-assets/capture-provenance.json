@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-09T15:48:06.888Z",
+  "capturedAt": "2026-10-09T16:28:51.136Z",
   "extensionVersion": "0.1.0",
   "browserVersion": "154.0.8037.98",
   "extensionId": "poonbmodjfijfbfiopememgfijahgbag",
@@ -22,7 +22,7 @@
     "promo-440x280.png": {
       "width": 440,
       "height": 280,
-      "sha256": "0dc406f082326af2d10c6861ff2fed8df6841f9c44883d8d7f6f2c21ef90c48e"
+      "sha256": "c62d5d45caa64e517054f83ebc5fd4ddfcc58ceb9fc09007ee155e87de2a9460"
     }
   },
   "bundleHashes": {
@@ -49,8 +49,8 @@
     "fonts/LICENSE": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3"
   },
   "sourceHashes": {
-    "scripts/capture-extension-assets.mjs": "fa8e6ebb40973a33fa85110fa5a5f536cc36a4d5cf56783d90125a6e0dc679f1",
-    "docs/extension-assets/promo.html": "4d7db545549d1047271041617aa67b1ca728b42bedcc52ca01a4c2f47d8daf2d",
+    "scripts/capture-extension-assets.mjs": "6618a2a9bb6ad73a516528360194d8b9619d7c7ba9d7b584d0c51a5f840a09c4",
+    "docs/extension-assets/promo.html": "6cd189ca5e1d84eba7eef39899281d918eae243e3cc8da257e6df876087da93d",
     "public/fonts/inter.css": "93e64ea07b9d0cff3853346e59f1d1a71804e06ce33d2f48c0397c71d5186245"
   },
   "pending": [

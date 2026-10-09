@@ -8,9 +8,9 @@ One Chrome Web Store listing can serve desktop Chrome and Brave. Brave users ope
 
 The extension records and temporarily saves audio in the browser. For transcripts, notes, and the Echo meeting library, users also need the local Echo application installed and running on the same computer. Installing the extension does not install or launch that application.
 
-- **Local Echo application:** the development candidate includes a desktop launcher and bundled runtime for Apple Silicon macOS and Ubuntu x64. Signed distribution and clean-machine qualification remain pending. See [application setup](../README.md#set-up-echo) and [packaging](development.md#make-a-downloadable-package).
+- **Local Echo web server:** run it on the same computer as the browser. Initial setup currently requires a source build and developer tools. See [web setup](../README.md#set-up-echo) and [server/extension packaging](development.md#make-a-downloadable-package). Do not imply that the extension installs or starts this server.
 - **Extension:** a store installation will replace the current Developer mode / Load unpacked procedure for end users. Until then, follow [development installation](browser-extension.md#development-installation).
-- **Speech model:** download the selected model in Echo before transcription. Turbo runs in the browser. Desktop runtimes bundle Large V3's Node.js/native dependencies; source builds install them separately. See [native speech setup](native-speech.md).
+- **Speech model:** download the selected model in Echo before transcription. Turbo runs in the browser. Full Large V3 requires local Node.js/native dependencies. See [native speech setup](native-speech.md).
 
 For a nontechnical public audience, deliver and test the local application's download, launch, update, backup, and uninstall flows alongside the extension. A store listing alone does not solve those steps.
 
@@ -79,7 +79,7 @@ Google requires a 128×128 PNG extension icon, a 440×280 small promotional imag
 
 The repository already includes 16, 32, 48, and 128 pixel icons. Prepare genuine, sanitized screenshots showing setup/connection, recording with source indicators, pause, pending audio/recovery, and final review in Echo. Demonstrate the local-app requirement clearly. Do not fabricate screenshots or use account verification screens.
 
-The existing [desktop overview](extension-assets/echo-overview.png) is 1280×800; it illustrates the companion app. The [mobile overview](extension-assets/echo-overview-mobile.png) is 320×740 and is not a correctly sized store screenshot. Neither substitutes for extension interaction evidence. The [draft promotional tile and genuine initial-setup screenshots](extension-assets/README.md) are prepared with capture provenance. Connected, recording, pause and saved-history states still need current qualification captures.
+The current [workspace overview](extension-assets/echo-overview.png) is 1440×1050; the [mobile overview](extension-assets/echo-overview-mobile.png) is 390×844. They are documentation previews, not correctly sized store screenshots. Neither substitutes for extension interaction evidence. The [draft promotional tile and genuine initial-setup screenshots](extension-assets/README.md) are prepared with capture provenance. Connected, recording, pause and saved-history states still need current qualification captures.
 
 ### Permission explanations
 
@@ -127,7 +127,7 @@ Test that an update preserves connection settings and committed pending audio. A
 Track these as work remaining, not completed launch claims:
 
 - Complete the claimed browser/OS/service scenarios. The current matrix is only partially qualified for Brave/macOS Meet; Chrome, Ubuntu capture, Zoom Web, Teams Web, and remaining lifecycle/live cases are pending.
-- Deliver and test the companion-app installation and launch flow for each advertised OS. The new launcher and bundled runtimes require signed artifacts and clean-machine Mac/Ubuntu evidence.
+- Test and clearly disclose the local web-server setup/start prerequisites on each advertised OS. Record initial source-build assistance and actual browser journey evidence separately.
 - Qualify the implemented simpler pairing flow in the actual store-installed candidate before advertising it. Preserve explicit local approval and correct-library transfer checks.
 - Finish independent storage/security review and retests; publish accurate privacy disclosures using the approved publisher facts only after release approval.
 - Finish the connection/recording/recovery screenshots, accessible local-app download, and reviewer instructions; refresh the prepared draft images against the final candidate.

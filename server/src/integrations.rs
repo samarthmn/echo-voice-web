@@ -193,10 +193,10 @@ fn read_tokens() -> Result<Option<Tokens>, ApiError> {
     }
     Ok(Some(tokens))
 }
-/// Copy validation is local only: authenticate every saved byte and validate
+/// Library validation is local only: authenticate every saved byte and validate
 /// the token schema without contacting Google or refreshing the connection.
 pub(crate) fn validate_saved_credentials() -> Result<(), ApiError> {
-    read_tokens().map(|_| ()).map_err(|_| ApiError::bad("The selected library contains damaged Google credentials. Reconnect Calendar in the original library before copying it. Saved files have not been changed."))
+    read_tokens().map(|_| ()).map_err(|_| ApiError::bad("The library contains damaged Google credentials. Restore a verified backup or disconnect and reconnect Calendar. Saved files have not been changed."))
 }
 /// Atomically publish Google credentials with private file and directory permissions.
 fn save_tokens(tokens: &Tokens) -> Result<(), ApiError> {
@@ -253,14 +253,14 @@ fn oauth_error(bytes: &[u8]) -> ApiError {
                 || description.eq_ignore_ascii_case("missing required parameter: client_secret")
         });
     match code {
-        "invalid_request" if missing_secret => ApiError::new(503, "Google requires additional publisher configuration for this Desktop OAuth client (client_secret_required). Your previous connection has not been changed."),
-        "invalid_client" => ApiError::new(503, "Google rejected this build's OAuth client configuration (invalid_client). Ask the publisher for an updated build. Your previous connection has not been changed."),
-        "unauthorized_client" => ApiError::new(503, "Google has not authorized this OAuth client for the requested flow (unauthorized_client). Ask the publisher to check its configuration."),
+        "invalid_request" if missing_secret => ApiError::new(503, "Google requires the configured Web OAuth client secret (client_secret_required). Your previous connection has not been changed."),
+        "invalid_client" => ApiError::new(503, "Google rejected the Web OAuth client configuration (invalid_client). Check GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. Your previous connection has not been changed."),
+        "unauthorized_client" => ApiError::new(503, "Google has not authorized this OAuth client for the requested flow (unauthorized_client). Check the Web OAuth configuration in docs/integrations.md."),
         "invalid_grant" => ApiError::new(401, "Google rejected the authorization code or refresh grant (invalid_grant). Connect your calendar again."),
-        "invalid_request" => ApiError::new(503, "Google rejected the OAuth request configuration (invalid_request). Ask the publisher to check this build. Your previous connection has not been changed."),
-        "redirect_uri_mismatch" => ApiError::new(503, "Google rejected the OAuth callback configuration (redirect_uri_mismatch). Ask the publisher to check this build."),
-        "invalid_scope" => ApiError::new(503, "Google rejected this build's requested Calendar permissions (invalid_scope). Ask the publisher to check its configuration."),
-        "unsupported_grant_type" => ApiError::new(503, "Google rejected this build's authorization flow (unsupported_grant_type). Ask the publisher to check its configuration."),
+        "invalid_request" => ApiError::new(503, "Google rejected the OAuth request configuration (invalid_request). Check the Web OAuth configuration in docs/integrations.md. Your previous connection has not been changed."),
+        "redirect_uri_mismatch" => ApiError::new(503, "Google rejected the OAuth callback configuration (redirect_uri_mismatch). Check the Web OAuth configuration in docs/integrations.md."),
+        "invalid_scope" => ApiError::new(503, "Google rejected the requested Calendar permissions (invalid_scope). Check the Web OAuth configuration in docs/integrations.md."),
+        "unsupported_grant_type" => ApiError::new(503, "Google rejected the configured authorization flow (unsupported_grant_type). Check the Web OAuth configuration in docs/integrations.md."),
         "access_denied" => ApiError::new(403, "Google declined Calendar authorization (access_denied). Your previous connection has not been changed."),
         "temporarily_unavailable" | "server_error" => ApiError::new(503, "Google authorization is temporarily unavailable (oauth_service_unavailable). Retry shortly."),
         _ => ApiError::new(502, "Google rejected the authorization request (oauth_response_unrecognized). No response details were retained. Your previous connection has not been changed."),
@@ -371,7 +371,7 @@ fn expiry(token: &Value) -> Result<i64, ApiError> {
 fn client_matches(tokens: &Tokens, config: &oauth::Config) -> bool {
     match &tokens.client_id {
         Some(id) => id == &config.id,
-        None => !config.installed,
+        None => true,
     }
 }
 async fn cancel_connection() -> Json<Value> {
@@ -397,7 +397,7 @@ async fn disconnect() -> Result<Json<Value>, ApiError> {
     Ok(Json(json!({"disconnected":true})))
 }
 /// Refresh only credentials issued to the configured OAuth client. Legacy
-/// source credentials remain usable in source mode; installed copies reconnect.
+/// credentials remain usable until refreshed and bound to this Web OAuth client.
 async fn access_token() -> Result<Tokens, ApiError> {
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let saved = read_tokens()?
@@ -593,7 +593,7 @@ async fn status() -> Result<Json<Value>, ApiError> {
         tokens.reconnect_required || config.as_ref().is_ok_and(|c| !client_matches(tokens, c))
     });
     let connected = tokens.is_some() && config.is_ok() && !reconnect;
-    let mut google = json!({"configured":config.is_ok(),"connected":connected,"mode":if crate::paths::installed(){"installed"}else{"source"},"pending":oauth::pending(),"reconnectRequired":reconnect});
+    let mut google = json!({"configured":config.is_ok(),"connected":connected,"mode":"source","pending":oauth::pending(),"reconnectRequired":reconnect});
     if let Err(error) = config {
         google["configurationError"] = json!(error.message);
     }

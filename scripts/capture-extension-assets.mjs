@@ -25,7 +25,18 @@ const hashes = {};
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 async function capture(page, name, width, height) {
   await page.setViewportSize({width, height});
-  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(async ({width, height}) => {
+    await document.fonts.ready;
+    // A viewport resize and font completion can precede the compositor's new
+    // frame. Wait for layout/paint before capturing responsive or fixed content.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    assertViewport();
+    function assertViewport() {
+      if (window.innerWidth !== width || window.innerHeight !== height) {
+        throw new Error('Capture viewport has not reached the requested dimensions.');
+      }
+    }
+  }, {width, height});
   const png = await page.screenshot({animations: 'disabled', fullPage: false, type: 'png'});
   assert.equal(png.readUInt32BE(16), width);
   assert.equal(png.readUInt32BE(20), height);

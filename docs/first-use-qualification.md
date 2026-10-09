@@ -1,6 +1,6 @@
 # First-use qualification: five participants
 
-Release criterion: at least four of five consenting, first-time participants independently complete installation, pairing and a short recording. This is a test protocol, not completed study evidence. No participants have been counted by this document.
+Release criterion: at least four of five consenting, first-time participants independently complete extension installation, pairing and a short recording in the local web app. This is a test protocol, not completed study evidence. No participants have been counted by this document.
 
 Use the same candidate artifacts and documentation for all five people. Recruit people from the intended audience, including people who do not write code. Do not collect names, private meeting content or demographic details that the study does not need. Give participants synthetic task content and tell them they may stop at any point.
 
@@ -8,7 +8,7 @@ Use the same candidate artifacts and documentation for all five people. Recruit 
 
 - Record commit, artifact hashes, app/extension versions, OS and browser versions. Confirm the candidate is safe to test and its installation instructions match the files.
 - Prepare a clean supported desktop or test account, working output/microphone and a consenting test meeting. Use only the authorized Google test identity for project live tests. Keep camera permission blocked.
-- Provide the candidate installation guide and files through the intended download/install path. If the store or signed installer is unavailable, label the result an unpacked/development rehearsal; it cannot satisfy the public installation gate.
+- Prepare the local server using the source-build guide before the browser study. Record that assistance explicitly: this study does not establish independent nontechnical server setup. Provide the extension installation guide and actual store path, or label an unpacked installation as a development rehearsal rather than a public-installation pass.
 - Prepare a short consent explanation, success rubric, timer and evidence form. Agree to observe only the product journey. Do not record faces, passwords, recovery phrases or account verification.
 - Let each participant save their test recovery phrases privately. Codex does not request the words. Use a synthetic library and remove it only with the participant's explicit agreement after accounting for saved audio.
 
@@ -16,7 +16,7 @@ Use the same candidate artifacts and documentation for all five people. Recruit 
 
 > You want to save a short conversation and review it later. Using the supplied Echo instructions:
 >
-> 1. Install and open Echo in Brave or Chrome.
+> 1. Open the supplied local Echo address in Brave or Chrome and install its meeting recorder extension.
 > 2. Set up recovery and connect the meeting recorder to Echo.
 > 3. Join the supplied test call with the camera off. Everyone in this call has agreed to this test recording.
 > 4. Start recording with your microphone included. Say: “The planning meeting is on Tuesday. We need three sample reports.” Mute yourself in the meeting, say: “This sentence is muted,” then unmute.
@@ -30,8 +30,8 @@ The observer may repeat the task, address consent or stop an unsafe action. Do n
 
 An independent pass requires all of these:
 
-- Installs and launches through the intended supported-user route without terminal commands.
-- Understands that the desktop app and extension are separate, and completes recovery confirmation without sharing the phrase.
+- Opens the supplied local web address and installs the extension through the tested route without terminal commands during this browser journey.
+- Understands that the local web server and extension are separate, and completes recovery confirmation without sharing the phrase.
 - Connects to the correct Echo library with one approval and no copied code in the normal flow.
 - Starts a consented recording, identifies microphone inclusion and stops it.
 - Finds the saved recording and plays it. The unmuted phrase is audible and the muted contribution is absent; Codex verifies audio separately.
@@ -68,4 +68,4 @@ Track time and confusion without inventing a time-based pass threshold. Ask afte
 | P04 | Pending | — | — |
 | P05 | Pending | — | — |
 
-Codex analyzes failures, implements fixes and repeats affected checks. A participant who already learned the interface cannot count as a new first-time participant for the changed candidate. Use fresh participants where necessary and keep earlier results in the record. Report withdrawals separately; do not turn missing attempts into passes. The final result must state the actual numerator/denominator and whether it used a store-installed, qualified desktop candidate.
+Codex analyzes failures, implements fixes and repeats affected checks. A participant who already learned the interface cannot count as a new first-time participant for the changed candidate. Use fresh participants where necessary and keep earlier results in the record. Report withdrawals separately; do not turn missing attempts into passes. The final result must state the actual numerator/denominator and whether it used a store-installed extension and which local-server setup was supplied beforehand.

@@ -23,7 +23,7 @@ The returned notes are saved in the local meeting record with their provider and
 
 The helper stores its account credential in the operating system's credential store using a dedicated Echo helper identity. It does not read another Codex installation's login. Temporary helper databases/logs use a native encrypted volume on macOS or an owned memory-backed directory on Linux. If protected storage or the keyring is unavailable, the optional connection fails with a recovery action; it does not fall back to plaintext.
 
-Older helper account files are migrated only after keyring write and readback succeed; conflicts retain the source for recovery. Library-copy account preservation is separately reviewed before release. Portable library backups exclude credentials. Do not copy or share helper files to move a login.
+Older helper account files are migrated only after keyring write and readback succeed; conflicts retain the source for recovery. Moving a library directory can require reconnecting ChatGPT because its OS credential identity depends on the local helper location. Portable library backups exclude credentials. Do not copy or share helper files to move a login.
 
 Moving a supported library archive to another computer does not connect that computer to your account. Sign in there separately. Existing notes remain readable without a connected account.
 
@@ -31,7 +31,7 @@ Moving a supported library archive to another computer does not connect that com
 
 The integration targets **Codex CLI 0.160.0**, supplied by the official `@openai/codex@0.160.0` package. The helper’s app-server protocol is version sensitive, including experimental surfaces; Echo rejects an incompatible helper version instead of guessing how to communicate with it.
 
-Desktop runtime packaging includes the pinned native helper by default and can explicitly omit it. Source builds include this package as an optional dependency. Whether a native helper is present depends on the installed platform package and package-manager options. Check **Models → ChatGPT** for the actual status. A release archive must explicitly include a compatible platform helper to work without a separate install; do not assume every release or platform does.
+The source project includes this package as an optional dependency. Whether a native helper is present depends on the platform package and package-manager options. Check **Models → ChatGPT** for the actual status. A release archive must explicitly include a compatible platform helper to work without a separate install; do not assume every release or platform does.
 
 Echo looks for the executable in this order:
 

@@ -1,5 +1,7 @@
 # Echo onboarding and release design
 
+> **Scope superseded October 9, 2026:** The user subsequently requested the web version with the browser extension only, and removal of all separate Mac/desktop application work. The original proposal below is retained as design history. A7 and all launcher, bundled installer, signing/notarization, installed-client OAuth and automatic application-update tasks are cancelled, not pending release gates. Current work retains the locally served web app, approved pairing flow, A4 guidance, A6 protection/recovery, library-schema safeguards, manual backup/source updates, native Large V3 speech helper and browser qualification on macOS/Ubuntu. Use the [current setup guide](../../install.md) and [readiness record](../../production-readiness-status.md) for the active scope. Initial local-server setup currently requires developer tools; the former terminal-free installation goal is not a shipped capability.
+
 Status: planning, October 9, 2026. The user approved the Connect → approve pairing experience, then requested a detailed plan before product implementation. Documentation cleanup is authorized now. The broader release recommendations below are proposals, not shipped features or evidence of qualification.
 
 ## Outcome and audience

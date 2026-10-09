@@ -2,7 +2,8 @@ import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, mkdir } from 'node:fs/promises';
+import { stopTestServer, removeTestDirectory } from './helpers/server-cleanup.mjs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const root = process.cwd();
@@ -14,16 +15,14 @@ const port = socket.address().port;
 await new Promise(resolve => socket.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
- cwd: root, env: { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' }, stdio: 'pipe',
+ cwd: root, env: { ...process.env, TMPDIR: path.join(root, 'tmp'), ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), ECHO_TEST_CHATGPT_RUNTIME: 'fixture', ECHO_CODEX_BIN: path.join(root, 'tests/fixtures/codex-helper.mjs'), ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' }, stdio: 'pipe',
 });
 let browser, serverError, serverExited = false, serverLog = '';
 const errors = [];
 server.stdout.on('data', value => { serverLog = (serverLog + value).slice(-8000); });
 server.stderr.on('data', value => { serverLog = (serverLog + value).slice(-8000); });
-const serverExit = new Promise(resolve => {
- server.once('error', error => { serverError = error; serverExited = true; resolve(); });
- server.once('exit', () => { serverExited = true; resolve(); });
-});
+server.once('error', error => { serverError = error; serverExited = true; });
+server.once('exit', () => { serverExited = true; });
 function requireServer() {
  if (serverError) throw new Error(`The isolated workspace test server could not start: ${serverError.message}`);
  if (serverExited) throw new Error(`The isolated workspace test server exited. Refusing to use another workspace. ${serverLog}`);
@@ -50,11 +49,13 @@ async function ready() {
  throw new Error(`The isolated workspace test server did not become ready within 15 seconds. ${serverLog}`);
 }
 async function shutdown() {
- if (!serverExited) server.kill('SIGINT');
- await Promise.race([serverExit, delay(2000, undefined, { ref: false })]);
- if (!serverExited) { server.kill('SIGKILL'); await Promise.race([serverExit, delay(1000, undefined, { ref: false })]); }
- if (serverExited) await rm(data, { recursive: true, force: true });
- else console.error(`The test server did not exit; isolated data was preserved at ${data}.`);
+ try {
+  await stopTestServer(server);
+  await removeTestDirectory(data);
+ } catch (error) {
+  console.error(`Workspace test data was preserved at ${data}.`);
+  throw error;
+ }
 }
 try{
  await ready();

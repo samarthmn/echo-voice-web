@@ -189,9 +189,9 @@ pub(crate) fn preflight(
     }
     Ok(encrypted)
 }
-/// Authenticate all copied legacy files and require a stopped session before
-/// the desktop launcher selects the copy or transfers its optional account.
-pub(crate) fn validate_copy() -> Result<(), ApiError> {
+/// Authenticate legacy files and require a stopped session when explicitly
+/// validating an offline library.
+pub(crate) fn validate_stored_sessions() -> Result<(), ApiError> {
     let root = store::data_dir();
     store::with_key(|key| {
         preflight(&root, Some(key))
@@ -542,13 +542,13 @@ mod tests {
             br#"{"status":"completed","audioAvailable":true}"#,
         )
         .unwrap();
-        validate_copy().unwrap();
+        validate_stored_sessions().unwrap();
         let mut disk = fs::read(&path).unwrap();
         let last = disk.len() - 1;
         disk[last] ^= 1;
         fs::write(&path, &disk).unwrap();
         assert!(finalized_wav(&path).is_ok());
-        assert!(validate_copy().is_err());
+        assert!(validate_stored_sessions().is_err());
         assert_eq!(fs::read(&path).unwrap(), disk);
         store::reset_for_tests();
     }

@@ -1,8 +1,6 @@
 mod api;
 mod chatgpt;
 mod config;
-#[cfg(unix)]
-mod control_protocol;
 mod extensions;
 mod integrations;
 mod legacy;
@@ -12,8 +10,6 @@ mod notes;
 mod paths;
 mod protected_storage;
 mod recovery;
-#[cfg(unix)]
-mod runtime_control;
 mod security;
 mod speech;
 mod store;
@@ -29,11 +25,8 @@ use tower_http::{
 #[tokio::main]
 /// Initialize the local library and integrations, serve the workspace, and shut down the helper gracefully.
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if !paths::installed() {
-        dotenvy::dotenv().ok();
-    }
+    dotenvy::dotenv().ok();
     let runtime_paths = paths::RuntimePaths::resolve().map_err(|e| e.to_string())?;
-    runtime_paths.prepare().map_err(|e| e.to_string())?;
     if std::env::args().nth(1).as_deref() == Some("--recover-library") {
         use std::io::Read;
         let mut input = zeroize::Zeroizing::new(String::new());
@@ -63,27 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     store::init()?;
     if std::env::args().nth(1).as_deref() == Some("--check-library") {
         library_validation::verify()?;
-        legacy::validate_copy()?;
-        if std::env::args().nth(2).as_deref() == Some("--copy-connection") {
-            use std::io::Read;
-            #[derive(serde::Deserialize)]
-            #[serde(rename_all = "camelCase", deny_unknown_fields)]
-            struct ConnectionCopy {
-                chatgpt_source_root: std::path::PathBuf,
-                chatgpt_destination_root: std::path::PathBuf,
-            }
-            let mut input = zeroize::Zeroizing::new(String::new());
-            std::io::stdin().take(16_385).read_to_string(&mut input)?;
-            if input.len() > 16_384 {
-                return Err("Library connection-copy input is too long.".into());
-            }
-            let selected: ConnectionCopy = serde_json::from_str(&input)
-                .map_err(|_| "Invalid library connection-copy selection.")?;
-            chatgpt::copy_connection(
-                &selected.chatgpt_source_root,
-                &selected.chatgpt_destination_root,
-            )?;
-        }
+        legacy::validate_stored_sessions()?;
         println!("Library validation completed.");
         return Ok(());
     }
@@ -138,18 +111,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             HeaderValue::from_static("no-referrer"),
         ));
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    #[cfg(unix)]
-    let control = runtime_control::start(format!("http://localhost:{}", bind.port())).await?;
-    #[cfg(unix)]
-    let router = router.layer(axum::middleware::from_fn(runtime_control::activity));
-    #[cfg(unix)]
-    let shutdown = control.shutdown.clone();
     tracing::info!("Echo Voice is ready at http://{}", bind);
     axum::serve(listener, router)
         .with_graceful_shutdown(async move {
-            #[cfg(unix)]
-            tokio::select! { _=tokio::signal::ctrl_c()=>{},_=shutdown.notified()=>{} }
-            #[cfg(not(unix))]
             let _ = tokio::signal::ctrl_c().await;
             integrations::shutdown();
             speech::shutdown().await;
