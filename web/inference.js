@@ -349,9 +349,7 @@ export function downloadModel(id, onProgress) {
       detail: 'Preparing download…',
     });
     if (typeof caches === 'undefined')
-      throw new Error(
-        'Model storage requires a secure browser context. Open Echo Voice on localhost.',
-      );
+      throw new Error('Model storage requires a secure browser context. Open Echo on localhost.');
     await navigator.storage?.persist?.().catch(() => false);
     if (token !== generation) throw cancelled();
     const progress = (progress) => {

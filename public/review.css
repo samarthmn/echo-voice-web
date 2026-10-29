@@ -224,7 +224,7 @@
 .review-body {
   padding: 29px 0 16px;
   min-height: 390px;
-  animation: review-appear 0.25s ease;
+  animation: review-appear 0.15s ease;
 }
 .review-section-heading {
   display: flex;

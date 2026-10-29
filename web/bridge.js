@@ -7,6 +7,7 @@ import './files.js';
 import './recorder.js';
 import './accessibility.js';
 import './extension-workspace.js';
+import './extension-connection.js';
 
 const IMPORT_CHUNK_BYTES = 8 * 1024 * 1024;
 const imports = new Map();

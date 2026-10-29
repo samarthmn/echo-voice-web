@@ -50,7 +50,11 @@ pub fn ActionButton(
             r#type: button_type.unwrap_or_else(|| "button".into()),
             aria_label,
             disabled,
-            onclick: move |event| { if let Some(handler) = onclick { handler.call(event); } },
+            onclick: move |event| {
+                if let Some(handler) = onclick {
+                    handler.call(event);
+                }
+            },
             {children}
         }
     }
@@ -81,7 +85,14 @@ pub fn IconButton(
 
 #[component]
 pub fn PageHeading(title: String, #[props(default)] children: Element) -> Element {
-    rsx! { header { class: "page-heading", div { h1 { "{title}" } } {children} } }
+    rsx! {
+        header { class: "page-heading",
+            div {
+                h1 { "{title}" }
+            }
+            {children}
+        }
+    }
 }
 
 #[component]
@@ -94,7 +105,12 @@ pub fn SectionHeading(
 ) -> Element {
     rsx! {
         div { class: "section-heading {class}", id,
-            div { h2 { "{title}" } if !description.is_empty() { p { "{description}" } } }
+            div {
+                h2 { "{title}" }
+                if !description.is_empty() {
+                    p { "{description}" }
+                }
+            }
             {children}
         }
     }
@@ -117,5 +133,33 @@ pub fn StatusBadge(children: Element, #[props(default)] tone: BadgeTone) -> Elem
         BadgeTone::Accent => "badge badge-purple",
         BadgeTone::Warning => "badge badge-amber",
     };
-    rsx! { span { class, {children} } }
+    rsx! {
+        span { class, {children} }
+    }
+}
+
+/// Call back on a visible-only interval; remove its timer when the component unmounts.
+pub fn use_poll_every(ms: u32, callback: impl FnMut() + Copy + 'static) {
+    let id = use_hook(|| format!("echo-poll-{}", js_sys::Math::random()));
+    let cleanup = id.clone();
+    use_drop(move || {
+        let _ = document::eval(&format!(
+            "window.echoPollStop?.({});",
+            serde_json::json!(cleanup)
+        ));
+    });
+    use_future(move || {
+        let id = id.clone();
+        let mut callback = callback;
+        async move {
+            let mut eval = document::eval(&format!(
+                r#"const id={}; window.echoPolls ||= {{}}; const tick=()=>{{if(!document.hidden)dioxus.send(true)}}; const timer=setInterval(tick,{}); window.echoPolls[id]=()=>clearInterval(timer); window.echoPollStop=(id)=>{{window.echoPolls[id]?.(); delete window.echoPolls[id];}};"#,
+                serde_json::json!(id),
+                ms
+            ));
+            while eval.recv::<bool>().await.is_ok() {
+                callback();
+            }
+        }
+    });
 }

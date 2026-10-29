@@ -51,28 +51,49 @@ pub fn Settings(
     snapshot: Signal<Value>,
     on_change: EventHandler<Value>,
     notify: EventHandler<String>,
-    initial_section: String,
+    mut section: Signal<String>,
 ) -> Element {
-    let mut section = use_signal(|| {
-        if ["general", "vocabulary", "storage"].contains(&initial_section.as_str()) {
-            initial_section.clone()
-        } else {
-            "general".into()
-        }
-    });
     rsx! {
-        div { class:"settings-page",
-            PageHeading { title:"Settings" }
-            nav { class:"settings-tabs", "aria-label":"Settings sections",
-                for (id,label,icon) in [("general","General","settings"),("vocabulary","Vocabulary","book"),("storage","Storage","hard-drive")] {
-                    button { r#type:"button", class:if section()==id {"is-active"} else {""}, "aria-current":if section()==id {"page"} else {"false"}, onclick:move |_| section.set(id.into()), Icon { name:icon,size:17 } span { "{label}" } }
+        div { class: "settings-page",
+            PageHeading { title: "Settings" }
+            nav { class: "settings-tabs", "aria-label": "Settings sections",
+                for (id, label, icon) in [
+                    ("general", "General", "settings"),
+                    ("extension", "Browser extension", "video"),
+                    ("vocabulary", "Vocabulary", "book"),
+                    ("storage", "Storage", "hard-drive"),
+                ]
+                {
+                    button {
+                        r#type: "button",
+                        class: if section() == id { "is-active" } else { "" },
+                        "aria-current": if section() == id { "page" } else { "false" },
+                        onclick: move |_| section.set(id.into()),
+                        Icon { name: icon, size: 17 }
+                        span { "{label}" }
+                    }
                 }
             }
-            div { class:"settings-content",
+            div { class: "settings-content",
                 match section().as_str() {
-                    "vocabulary" => rsx! { VocabularySettings { notify } },
-                    "storage" => rsx! { StorageSettings { notify } },
-                    _ => rsx! { GeneralSettings { settings,draft,snapshot,on_change,notify } crate::extension::ExtensionConnectionPanel { notify } }
+                    "extension" => rsx! {
+                        crate::extension::ExtensionConnectionPanel { notify }
+                    },
+                    "vocabulary" => rsx! {
+                        VocabularySettings { notify }
+                    },
+                    "storage" => rsx! {
+                        StorageSettings { notify }
+                    },
+                    _ => rsx! {
+                        GeneralSettings {
+                            settings,
+                            draft,
+                            snapshot,
+                            on_change,
+                            notify,
+                        }
+                    },
                 }
             }
         }
@@ -87,7 +108,18 @@ fn Toggle(
     onchange: EventHandler<()>,
     #[props(default = false)] disabled: bool,
 ) -> Element {
-    rsx! { button { r#type:"button",class:"settings-switch",role:"switch","aria-checked":checked.to_string(),"aria-label":label,disabled,onclick:move |_| onchange.call(()),span {} } }
+    rsx! {
+        button {
+            r#type: "button",
+            class: "settings-switch",
+            role: "switch",
+            "aria-checked": checked.to_string(),
+            "aria-label": label,
+            disabled,
+            onclick: move |_| onchange.call(()),
+            span {}
+        }
+    }
 }
 
 #[component]
@@ -100,6 +132,8 @@ fn GeneralSettings(
     notify: EventHandler<String>,
 ) -> Element {
     let mut saving = use_signal(|| false);
+    let mut saved_generation = use_signal(|| 0u32);
+    let mut saved = use_signal(|| false);
     let mut error = use_signal(String::new);
     use_effect(move || {
         let incoming = settings();
@@ -125,33 +159,320 @@ fn GeneralSettings(
     };
     let chatgpt_model = text(&draft(), "chatgptModel");
     rsx! {
-        form { class:"settings-form", onsubmit:move |event| { event.prevent_default(); if saving(){return;} saving.set(true); error.set(String::new()); spawn(async move { match patch("/settings",draft()).await { Ok(updated)=>{draft.set(updated.clone());on_change.call(updated);notify.call("Preferences saved.".into());},Err(message)=>error.set(message) } saving.set(false); }); },
-            section { class:"settings-card", div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"settings",size:19}} div {h2 {"Profile"}}}
-                div { class:"settings-field-grid",
-                    label {class:"settings-field",span {"Your name"}input {class:"input",value:text(&draft(),"name"),placeholder:"Name",maxlength:120,oninput:move |e|draft.write()["name"]=json!(e.value())}}
-                    label {class:"settings-field",span {"Recording language"}select {class:"input",value:text(&draft(),"language"),onchange:move |e|draft.write()["language"]=json!(e.value()),option {value:"en",selected:text(&draft(),"language")=="en","English"}option {value:"auto",selected:text(&draft(),"language")=="auto","Auto-detect · multilingual model"}option {value:"es",selected:text(&draft(),"language")=="es","Spanish"}option {value:"fr",selected:text(&draft(),"language")=="fr","French"}option {value:"de",selected:text(&draft(),"language")=="de","German"}option {value:"hi",selected:text(&draft(),"language")=="hi","Hindi"}option {value:"ja",selected:text(&draft(),"language")=="ja","Japanese"}option {value:"pt",selected:text(&draft(),"language")=="pt","Portuguese"}option {value:"zh",selected:text(&draft(),"language")=="zh","Chinese"}}}
+        form {
+            class: if changed || saving() || saved() { "settings-form has-unsaved" } else { "settings-form" },
+            onsubmit: move |event| {
+                event.prevent_default();
+                if saving() {
+                    return;
+                }
+                saving.set(true);
+                error.set(String::new());
+                spawn(async move {
+                    match patch("/settings", draft()).await {
+                        Ok(updated) => {
+                            draft.set(updated.clone());
+                            on_change.call(updated);
+                            notify.call("Preferences saved.".into());
+                            saved_generation += 1;
+                            let generation = saved_generation();
+                            saved.set(true);
+                            spawn(async move {
+                                let _ = crate::api::evaluate(
+                                        "await new Promise(r=>setTimeout(r,3000)); return true;",
+                                    )
+                                    .await;
+                                if saved_generation() == generation {
+                                    saved.set(false);
+                                }
+                            });
+                        }
+                        Err(message) => error.set(message),
+                    }
+                    saving.set(false);
+                });
+            },
+            section { class: "settings-card",
+                div { class: "settings-card-heading",
+                    div { class: "settings-section-icon",
+                        Icon { name: "settings", size: 19 }
+                    }
+                    div {
+                        h2 { "Profile" }
+                    }
+                }
+                div { class: "settings-field-grid",
+                    label { class: "settings-field",
+                        span { "Your name" }
+                        input {
+                            class: "input",
+                            value: text(&draft(), "name"),
+                            placeholder: "Name",
+                            maxlength: 120,
+                            oninput: move |e| draft.write()["name"] = json!(e.value()),
+                        }
+                    }
+                    label { class: "settings-field",
+                        span { "Recording language" }
+                        select {
+                            class: "input",
+                            value: text(&draft(), "language"),
+                            onchange: move |e| draft.write()["language"] = json!(e.value()),
+                            option {
+                                value: "en",
+                                selected: text(&draft(), "language") == "en",
+                                "English"
+                            }
+                            option {
+                                value: "auto",
+                                selected: text(&draft(), "language") == "auto",
+                                "Auto-detect · multilingual model"
+                            }
+                            option {
+                                value: "es",
+                                selected: text(&draft(), "language") == "es",
+                                "Spanish"
+                            }
+                            option {
+                                value: "fr",
+                                selected: text(&draft(), "language") == "fr",
+                                "French"
+                            }
+                            option {
+                                value: "de",
+                                selected: text(&draft(), "language") == "de",
+                                "German"
+                            }
+                            option {
+                                value: "hi",
+                                selected: text(&draft(), "language") == "hi",
+                                "Hindi"
+                            }
+                            option {
+                                value: "ja",
+                                selected: text(&draft(), "language") == "ja",
+                                "Japanese"
+                            }
+                            option {
+                                value: "pt",
+                                selected: text(&draft(), "language") == "pt",
+                                "Portuguese"
+                            }
+                            option {
+                                value: "zh",
+                                selected: text(&draft(), "language") == "zh",
+                                "Chinese"
+                            }
+                        }
+                    }
                 }
             }
-            section {class:"settings-card",div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"cpu",size:19}}div {h2 {"Processing preferences"}}span {class:"settings-soft-badge","Local speech"}}
-                div {class:"settings-field-grid",
-                    label {class:"settings-field",span {"Default speech model"}select {class:"input",value:text(&draft(),"speechModel"),onchange:move |e|draft.write()["speechModel"]=json!(e.value()),option {value:"onnx-community/whisper-large-v3-turbo",selected:text(&draft(),"speechModel")=="onnx-community/whisper-large-v3-turbo","Whisper Large V3 Turbo"}option {value:"onnx-community/whisper-large-v3",selected:text(&draft(),"speechModel")=="onnx-community/whisper-large-v3","Whisper Large V3"}}small {"Turbo runs in this browser. Full Large V3 uses the local speech engine."}}
-                    label {class:"settings-field",span {"Default notes provider"}select {class:"input",value:notes_provider,"aria-describedby":"settings-provider-help",onchange:move |e|{let provider=e.value();draft.write()["notesProvider"]=json!(provider);if draft()["chatgptModel"].is_null(){draft.write()["chatgptModel"]=json!("");}},option {value:"ollama",selected:notes_provider=="ollama","Ollama · Local"}option {value:"chatgpt",selected:notes_provider=="chatgpt","ChatGPT · Optional cloud"}}small {id:"settings-provider-help","Applies when you request notes. Recording and transcription remain local."}}
+            section { class: "settings-card",
+                div { class: "settings-card-heading",
+                    div { class: "settings-section-icon",
+                        Icon { name: "cpu", size: 19 }
+                    }
+                    div {
+                        h2 { "Processing preferences" }
+                    }
+                    span { class: "settings-soft-badge", "Local speech" }
+                }
+                div { class: "settings-field-grid",
+                    label { class: "settings-field",
+                        span { "Default speech model" }
+                        select {
+                            class: "input",
+                            value: text(&draft(), "speechModel"),
+                            onchange: move |e| draft.write()["speechModel"] = json!(e.value()),
+                            option {
+                                value: "onnx-community/whisper-large-v3-turbo",
+                                selected: text(&draft(), "speechModel") == "onnx-community/whisper-large-v3-turbo",
+                                "Whisper Large V3 Turbo"
+                            }
+                            option {
+                                value: "onnx-community/whisper-large-v3",
+                                selected: text(&draft(), "speechModel") == "onnx-community/whisper-large-v3",
+                                "Whisper Large V3"
+                            }
+                        }
+                        small { "Turbo runs in this browser. Full Large V3 uses the local speech engine." }
+                    }
+                    label { class: "settings-field",
+                        span { "Default notes provider" }
+                        select {
+                            class: "input",
+                            value: notes_provider,
+                            "aria-describedby": "settings-provider-help",
+                            onchange: move |e| {
+                                let provider = e.value();
+                                draft.write()["notesProvider"] = json!(provider);
+                                if draft()["chatgptModel"].is_null() {
+                                    draft.write()["chatgptModel"] = json!("");
+                                }
+                            },
+                            option {
+                                value: "ollama",
+                                selected: notes_provider == "ollama",
+                                "Ollama · Local"
+                            }
+                            option {
+                                value: "chatgpt",
+                                selected: notes_provider == "chatgpt",
+                                "ChatGPT · Optional cloud"
+                            }
+                        }
+                        small { id: "settings-provider-help",
+                            "Applies when you request notes. Recording and transcription remain local."
+                        }
+                    }
                 }
                 if notes_provider == "chatgpt" {
-                    div {class:"settings-provider-card",div {class:"settings-provider-heading",span {class:"settings-provider-icon",Icon {name:"sparkles",size:19}}div {h3 {"ChatGPT"}span {"Optional cloud processing"}}}
-                        p {"When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content."}
-                        p {class:"settings-provider-allowance","Sign in through the official Codex flow with an eligible ChatGPT plan. Requests use your plan’s Codex allowance, not API credits. No API key is needed."}
-                        div {class:"settings-provider-bottom",div {span {"ChatGPT model"}strong {if chatgpt_model.is_empty(){"Account default"}else{"{chatgpt_model}"}}small {"Choose from your account’s available models in Models → ChatGPT."}}ActionButton {button_type:"button",kind:ButtonKind::Secondary,onclick:move |_|open_chatgpt_models(),"Set up ChatGPT" Icon {name:"arrow-right",size:15}}}
+                    div { class: "settings-provider-card",
+                        div { class: "settings-provider-heading",
+                            span { class: "settings-provider-icon",
+                                Icon { name: "sparkles", size: 19 }
+                            }
+                            div {
+                                h3 { "ChatGPT" }
+                                span { "Optional cloud processing" }
+                            }
+                        }
+                        p {
+                            "When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content."
+                        }
+                        p { class: "settings-provider-allowance",
+                            "Sign in through the official Codex flow with an eligible ChatGPT plan. Requests use your plan’s Codex allowance, not API credits. No API key is needed."
+                        }
+                        div { class: "settings-provider-bottom",
+                            div {
+                                span { "ChatGPT model" }
+                                strong {
+                                    if chatgpt_model.is_empty() {
+                                        "Account default"
+                                    } else {
+                                        "{chatgpt_model}"
+                                    }
+                                }
+                                small {
+                                    "Choose from your account’s available models in Models → ChatGPT."
+                                }
+                            }
+                            ActionButton {
+                                button_type: "button",
+                                kind: ButtonKind::Secondary,
+                                onclick: move |_| open_chatgpt_models(),
+                                "Set up ChatGPT"
+                                Icon { name: "arrow-right", size: 15 }
+                            }
+                        }
                     }
                 } else {
-                    div {class:"settings-local-notes-field",label {class:"settings-field",span {"Default local notes model"}input {class:"input",value:text(&draft(),"notesModel"),maxlength:120,placeholder:"qwen2.5:3b",oninput:move |e|draft.write()["notesModel"]=json!(e.value())}small {"The name of a model installed in your local Ollama library. Notes are generated on this computer."}}}
+                    div { class: "settings-local-notes-field",
+                        label { class: "settings-field",
+                            span { "Default local notes model" }
+                            input {
+                                class: "input",
+                                value: text(&draft(), "notesModel"),
+                                maxlength: 120,
+                                placeholder: "qwen2.5:3b",
+                                oninput: move |e| draft.write()["notesModel"] = json!(e.value()),
+                            }
+                            small {
+                                "The name of a model installed in your local Ollama library. Notes are generated on this computer."
+                            }
+                        }
+                    }
                 }
-                div {class:"settings-toggle-row",div {h3 {"Transcribe after recording"}p {"Start local transcription when a recording is saved. Audio is kept if processing fails."}}Toggle {checked:draft()["autoTranscribe"].as_bool().unwrap_or(true),label:"Transcribe after recording",onchange:move |_|{let enabled=draft()["autoTranscribe"].as_bool().unwrap_or(true);draft.write()["autoTranscribe"]=json!(!enabled);}}}
-                div {class:"settings-info",Icon {name:"info",size:16}p {"Final transcription runs after recording. Browser meetings can also show live text. Select a speaker label in the final transcript to rename it."}}
-                if notes_provider == "ollama" {details {class:"settings-advanced",summary {"Local notes connection" Icon {name:"chevron-down",size:16}}div {label {class:"settings-field",span {"Ollama address"}input {class:"input",r#type:"url",value:text(&draft(),"ollamaUrl"),placeholder:"http://127.0.0.1:11434",required:true,oninput:move |e|draft.write()["ollamaUrl"]=json!(e.value())}small {"Only a service running on this computer is supported. Ollama is optional; recording and transcription work without it."}}}}}
+                div { class: "settings-toggle-row",
+                    div {
+                        h3 { "Transcribe after recording" }
+                        p {
+                            "Start local transcription when a recording is saved. Audio is kept if processing fails."
+                        }
+                    }
+                    Toggle {
+                        checked: draft()["autoTranscribe"].as_bool().unwrap_or(true),
+                        label: "Transcribe after recording",
+                        onchange: move |_| {
+                            let enabled = draft()["autoTranscribe"].as_bool().unwrap_or(true);
+                            draft.write()["autoTranscribe"] = json!(! enabled);
+                        },
+                    }
+                }
+                div { class: "settings-info",
+                    Icon { name: "info", size: 16 }
+                    p {
+                        "Final transcription runs after recording. Browser meetings can also show live text. Select a speaker label in the final transcript to rename it."
+                    }
+                }
+                if notes_provider == "ollama" {
+                    details { class: "settings-advanced",
+                        summary {
+                            "Local notes connection"
+                            Icon { name: "chevron-down", size: 16 }
+                        }
+                        div {
+                            label { class: "settings-field",
+                                span { "Ollama address" }
+                                input {
+                                    class: "input",
+                                    r#type: "url",
+                                    value: text(&draft(), "ollamaUrl"),
+                                    placeholder: "http://127.0.0.1:11434",
+                                    required: true,
+                                    oninput: move |e| draft.write()["ollamaUrl"] = json!(e.value()),
+                                }
+                                small {
+                                    "Only a service running on this computer is supported. Ollama is optional; recording and transcription work without it."
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            if !error().is_empty() {div {class:"settings-error",role:"alert","{error}"}}
-            div {class:"settings-save-row",span {if changed {"You have unsaved changes."}else {Icon {name:"check",size:15}"Changes saved"}}div {class:"settings-save-actions",if changed {ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:saving(),onclick:move |_|{draft.set(settings());error.set(String::new());},"Discard changes"}}ActionButton {button_type:"submit",kind:ButtonKind::Primary,disabled:!changed||saving(),Icon {name:if saving(){"loader"}else{"check"},size:16}if saving(){"Saving…"}else{"Save changes"}}}}
+            if !error().is_empty() {
+                div { class: "settings-error", role: "alert", "{error}" }
+            }
+            if changed || saving() || saved() {
+                div { class: "settings-save-row",
+                    span {
+                        if changed || saving() {
+                            "You have unsaved changes."
+                        } else {
+                            Icon { name: "check", size: 15 }
+                            "Changes saved"
+                        }
+                    }
+                    div { class: "settings-save-actions",
+                        if changed {
+                            ActionButton {
+                                button_type: "button",
+                                kind: ButtonKind::Secondary,
+                                disabled: saving(),
+                                onclick: move |_| {
+                                    draft.set(settings());
+                                    error.set(String::new());
+                                },
+                                "Discard changes"
+                            }
+                        }
+                        ActionButton {
+                            button_type: "submit",
+                            kind: ButtonKind::Primary,
+                            disabled: !changed || saving(),
+                            Icon {
+                                name: if saving() { "loader" } else { "check" },
+                                size: 16,
+                            }
+                            if saving() {
+                                "Saving…"
+                            } else {
+                                "Save changes"
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -220,26 +541,310 @@ fn VocabularySettings(notify: EventHandler<String>) -> Element {
         .filter(|entry| entry["enabled"].as_bool().unwrap_or(true))
         .count();
     rsx! {
-        div {class:"settings-section-top",div {h2 {"Vocabulary"}}ActionButton {id:"settings-add-word",button_type:"button",kind:ButtonKind::Primary,disabled:busy()||loading(),onclick:move |_|editor.set(Some(json!({"term":"","aliases":""}))),Icon {name:"plus",size:17}"Add word"}}
-        div {class:"settings-info settings-info-vocabulary",Icon {name:"sparkles",size:18}p {"Enabled aliases replace exact phrases in new transcripts. Existing versions remain unchanged."}}
-        section {class:"settings-card settings-vocabulary-card",
-            div {class:"settings-vocabulary-toolbar",label {class:"settings-search",Icon {name:"search",size:17}input {value:search(),placeholder:"Search your vocabulary…","aria-label":"Search vocabulary",oninput:move |e|search.set(e.value())}}div {
-                ActionButton {button_type:"button",kind:ButtonKind::Ghost,disabled:busy()||loading(),onclick:move |_|{spawn(async move {match choose_json_file().await {Ok(Some((_,value)))=>{busy.set(true);error.set(String::new());let result=import_vocabulary(value,entries,progress).await;match result {Ok(message)=>notify.call(message),Err(message)=>error.set(message)}busy.set(false);progress.set(String::new());},Ok(None)=>{},Err(message)=>error.set(message)}});},Icon {name:"upload",size:15}"Import"}
-                ActionButton {button_type:"button",kind:ButtonKind::Ghost,disabled:busy()||loading()||entries().is_empty(),onclick:move |_|{spawn(async move {if let Err(message)=download_json(json!({"version":1,"entries":entries()}),"echo-voice-vocabulary.json").await {error.set(message);}});},Icon {name:"download",size:15}"Export"}
-            }}
-            if let Some(current)=editor() {
-                form {class:"settings-word-editor",onsubmit:move |event|{event.prevent_default();if busy(){return;}let Some(edit)=editor()else{return;};let current_id=text(&edit,"id");let preferred=text(&edit,"term").trim().to_lowercase();if entries().iter().any(|row|text(row,"id")!=current_id&&text(row,"term").trim().to_lowercase()==preferred){error.set("That spelling already exists. Edit the existing word to add more aliases.".into());return;}busy.set(true);error.set(String::new());spawn(async move {let id=text(&edit,"id");let aliases:Vec<String>=text(&edit,"aliases").split(',').map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned).collect();let mut value=json!({"term":text(&edit,"term").trim(),"aliases":aliases});if id.is_empty(){value["enabled"]=json!(true);}let saved=if id.is_empty(){post("/vocabulary",value).await}else{patch(&format!("/vocabulary/{id}"),value).await};match saved{Ok(saved)=>{if id.is_empty(){entries.write().push(saved);}else{let mut rows=entries();for entry in &mut rows {if text(entry,"id")==id{*entry=saved.clone();}}entries.set(rows);}close_vocabulary_editor(editor);notify.call("Vocabulary saved.".into());},Err(message)=>error.set(message)}busy.set(false);});},
-                    div {class:"settings-editor-title",h3 {if text(&current,"id").is_empty(){"Add word"}else{"Edit preferred spelling"}}button {r#type:"button",class:"icon-button","aria-label":"Cancel vocabulary editing",disabled:busy(),onclick:move |_|close_vocabulary_editor(editor),Icon {name:"x",size:17}}}
-                    div {class:"settings-field-grid",label {class:"settings-field",span {"Preferred spelling"}input {class:"input",onmounted:move |event| async move {let _=event.data().set_focus(true).await;},value:text(&current,"term"),required:true,maxlength:120,placeholder:"e.g. Figma",oninput:move |e|{if let Some(value)=editor.write().as_mut(){value["term"]=json!(e.value());}}}}label {class:"settings-field",span {"Heard as " small {"(comma-separated)"}}input {class:"input",value:text(&current,"aliases"),placeholder:"e.g. fig ma, figmah",maxlength:2500,oninput:move |e|{if let Some(value)=editor.write().as_mut(){value["aliases"]=json!(e.value());}}}}}
-                    div {class:"settings-editor-actions",ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:busy(),onclick:move |_|close_vocabulary_editor(editor),"Cancel"}ActionButton {button_type:"submit",kind:ButtonKind::Primary,disabled:busy()||text(&current,"term").trim().is_empty(),Icon {name:if busy(){"loader"}else{"check"},size:15}"Save word"}}
+        div { class: "settings-section-top",
+            div {
+                h2 { "Vocabulary" }
+            }
+            ActionButton {
+                id: "settings-add-word",
+                button_type: "button",
+                kind: ButtonKind::Primary,
+                disabled: busy() || loading(),
+                onclick: move |_| editor.set(Some(json!({ "term" : "", "aliases" : "" }))),
+                Icon { name: "plus", size: 17 }
+                "Add word"
+            }
+        }
+        div { class: "settings-info settings-info-vocabulary",
+            Icon { name: "sparkles", size: 18 }
+            p {
+                "Enabled aliases replace exact phrases in new transcripts. Existing versions remain unchanged."
+            }
+        }
+        section { class: "settings-card settings-vocabulary-card",
+            div { class: "settings-vocabulary-toolbar",
+                label { class: "settings-search",
+                    Icon { name: "search", size: 17 }
+                    input {
+                        value: search(),
+                        placeholder: "Search your vocabulary…",
+                        "aria-label": "Search vocabulary",
+                        oninput: move |e| search.set(e.value()),
+                    }
+                }
+                div {
+                    ActionButton {
+                        button_type: "button",
+                        kind: ButtonKind::Ghost,
+                        disabled: busy() || loading(),
+                        onclick: move |_| {
+                            spawn(async move {
+                                match choose_json_file().await {
+                                    Ok(Some((_, value))) => {
+                                        busy.set(true);
+                                        error.set(String::new());
+                                        let result = import_vocabulary(value, entries, progress).await;
+                                        match result {
+                                            Ok(message) => notify.call(message),
+                                            Err(message) => error.set(message),
+                                        }
+                                        busy.set(false);
+                                        progress.set(String::new());
+                                    }
+                                    Ok(None) => {}
+                                    Err(message) => error.set(message),
+                                }
+                            });
+                        },
+                        Icon { name: "upload", size: 15 }
+                        "Import"
+                    }
+                    ActionButton {
+                        button_type: "button",
+                        kind: ButtonKind::Ghost,
+                        disabled: busy() || loading() || entries().is_empty(),
+                        onclick: move |_| {
+                            spawn(async move {
+                                if let Err(message) = download_json(
+                                        json!({ "version" : 1, "entries" : entries() }),
+                                        "echo-voice-vocabulary.json",
+                                    )
+                                    .await
+                                {
+                                    error.set(message);
+                                }
+                            });
+                        },
+                        Icon { name: "download", size: 15 }
+                        "Export"
+                    }
                 }
             }
-            if !error().is_empty() {div {class:"settings-error settings-inset",role:"alert","{error}" if entries().is_empty()&&!loading(){button {r#type:"button",class:"settings-text-button",onclick:move |_|{let next=refresh()+1;refresh.set(next);},"Try again"}}}}
-            if !progress().is_empty() {p {class:"settings-load-state",role:"status",Icon {name:"loader",size:18}"{progress}"}}
-            if loading() {div {class:"settings-load-state",role:"status",Icon {name:"loader",size:20}"Loading vocabulary…"}}
-            else if filtered.is_empty() {div {class:"settings-empty",span {Icon {name:"book",size:27}}h3 {if search().is_empty(){"No vocabulary yet"}else{"No matching words"}}p {if search().is_empty(){"Add terms and their recognized spellings."}else{"Try another spelling or alias."}}if search().is_empty(){button {r#type:"button",class:"settings-text-button",disabled:busy(),onclick:move |_|editor.set(Some(json!({"term":"","aliases":""}))),"Add your first word" Icon {name:"arrow-right",size:16}}}}}
-            else {div {class:"settings-word-list",div {class:"settings-word-list-header",span {"Preferred spelling / heard as"}span {"Enabled"}}for (id,entry) in filtered {VocabularyRow {key:"{id}",entry,entries,busy,error,on_edit:move |value:Value|editor.set(Some(value)),notify}}}}
-            div {class:"settings-vocabulary-footer",span {{format!("{} · {enabled} enabled",count_label(entries().len(),"word","words"))}}span {"Saved on this computer"}}
+            if let Some(current) = editor() {
+                form {
+                    class: "settings-word-editor",
+                    onsubmit: move |event| {
+                        event.prevent_default();
+                        if busy() {
+                            return;
+                        }
+                        let Some(edit) = editor() else {
+                            return;
+                        };
+                        let current_id = text(&edit, "id");
+                        let preferred = text(&edit, "term").trim().to_lowercase();
+                        if entries()
+                            .iter()
+                            .any(|row| {
+                                text(row, "id") != current_id
+                                    && text(row, "term").trim().to_lowercase() == preferred
+                            })
+                        {
+                            error
+                                .set(
+                                    "That spelling already exists. Edit the existing word to add more aliases."
+                                        .into(),
+                                );
+                            return;
+                        }
+                        busy.set(true);
+                        error.set(String::new());
+                        spawn(async move {
+                            let id = text(&edit, "id");
+                            let aliases: Vec<String> = text(&edit, "aliases")
+                                .split(',')
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_owned)
+                                .collect();
+                            let mut value = json!(
+                                { "term" : text(& edit, "term").trim(), "aliases" : aliases }
+                            );
+                            if id.is_empty() {
+                                value["enabled"] = json!(true);
+                            }
+                            let saved = if id.is_empty() {
+                                post("/vocabulary", value).await
+                            } else {
+                                patch(&format!("/vocabulary/{id}"), value).await
+                            };
+                            match saved {
+                                Ok(saved) => {
+                                    if id.is_empty() {
+                                        entries.write().push(saved);
+                                    } else {
+                                        let mut rows = entries();
+                                        for entry in &mut rows {
+                                            if text(entry, "id") == id {
+                                                *entry = saved.clone();
+                                            }
+                                        }
+                                        entries.set(rows);
+                                    }
+                                    close_vocabulary_editor(editor);
+                                    notify.call("Vocabulary saved.".into());
+                                }
+                                Err(message) => error.set(message),
+                            }
+                            busy.set(false);
+                        });
+                    },
+                    div { class: "settings-editor-title",
+                        h3 {
+                            if text(&current, "id").is_empty() {
+                                "Add word"
+                            } else {
+                                "Edit preferred spelling"
+                            }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "icon-button",
+                            "aria-label": "Cancel vocabulary editing",
+                            disabled: busy(),
+                            onclick: move |_| close_vocabulary_editor(editor),
+                            Icon { name: "x", size: 17 }
+                        }
+                    }
+                    div { class: "settings-field-grid",
+                        label { class: "settings-field",
+                            span { "Preferred spelling" }
+                            input {
+                                class: "input",
+                                onmounted: move |event| async move {
+                                    let _ = event.data().set_focus(true).await;
+                                },
+                                value: text(&current, "term"),
+                                required: true,
+                                maxlength: 120,
+                                placeholder: "e.g. Figma",
+                                oninput: move |e| {
+                                    if let Some(value) = editor.write().as_mut() {
+                                        value["term"] = json!(e.value());
+                                    }
+                                },
+                            }
+                        }
+                        label { class: "settings-field",
+                            span {
+                                "Heard as "
+                                small { "(comma-separated)" }
+                            }
+                            input {
+                                class: "input",
+                                value: text(&current, "aliases"),
+                                placeholder: "e.g. fig ma, figmah",
+                                maxlength: 2500,
+                                oninput: move |e| {
+                                    if let Some(value) = editor.write().as_mut() {
+                                        value["aliases"] = json!(e.value());
+                                    }
+                                },
+                            }
+                        }
+                    }
+                    div { class: "settings-editor-actions",
+                        ActionButton {
+                            button_type: "button",
+                            kind: ButtonKind::Secondary,
+                            disabled: busy(),
+                            onclick: move |_| close_vocabulary_editor(editor),
+                            "Cancel"
+                        }
+                        ActionButton {
+                            button_type: "submit",
+                            kind: ButtonKind::Primary,
+                            disabled: busy() || text(&current, "term").trim().is_empty(),
+                            Icon { name: if busy() { "loader" } else { "check" }, size: 15 }
+                            "Save word"
+                        }
+                    }
+                }
+            }
+            if !error().is_empty() {
+                div { class: "settings-error settings-inset", role: "alert",
+                    "{error}"
+                    if entries().is_empty() && !loading() {
+                        button {
+                            r#type: "button",
+                            class: "settings-text-button",
+                            onclick: move |_| {
+                                let next = refresh() + 1;
+                                refresh.set(next);
+                            },
+                            "Try again"
+                        }
+                    }
+                }
+            }
+            if !progress().is_empty() {
+                p { class: "settings-load-state", role: "status",
+                    Icon { name: "loader", size: 18 }
+                    "{progress}"
+                }
+            }
+            if loading() {
+                div { class: "settings-load-state", role: "status",
+                    Icon { name: "loader", size: 20 }
+                    "Loading vocabulary…"
+                }
+            } else if filtered.is_empty() {
+                div { class: "settings-empty",
+                    span {
+                        Icon { name: "book", size: 27 }
+                    }
+                    h3 {
+                        if search().is_empty() {
+                            "No vocabulary yet"
+                        } else {
+                            "No matching words"
+                        }
+                    }
+                    p {
+                        if search().is_empty() {
+                            "Add terms and their recognized spellings."
+                        } else {
+                            "Try another spelling or alias."
+                        }
+                    }
+                    if search().is_empty() {
+                        button {
+                            r#type: "button",
+                            class: "settings-text-button",
+                            disabled: busy(),
+                            onclick: move |_| editor.set(Some(json!({ "term" : "", "aliases" : "" }))),
+                            "Add your first word"
+                            Icon { name: "arrow-right", size: 16 }
+                        }
+                    }
+                }
+            } else {
+                div { class: "settings-word-list",
+                    div { class: "settings-word-list-header",
+                        span { "Preferred spelling / heard as" }
+                        span { "Enabled" }
+                    }
+                    for (id, entry) in filtered {
+                        VocabularyRow {
+                            key: "{id}",
+                            entry,
+                            entries,
+                            busy,
+                            error,
+                            on_edit: move |value: Value| editor.set(Some(value)),
+                            notify,
+                        }
+                    }
+                }
+            }
+            div { class: "settings-vocabulary-footer",
+                span {
+                    {
+                        format!("{} · {enabled} enabled", count_label(entries().len(), "word", "words"))
+                    }
+                }
+                span { "Saved on this computer" }
+            }
         }
     }
 }
@@ -268,13 +873,92 @@ fn VocabularyRow(
                 .collect()
         })
         .unwrap_or_default();
-    rsx! {div {class:if enabled{"settings-word-row"}else{"settings-word-row settings-word-disabled"},
-        div {class:"settings-word-copy",h3 {"{term}"}p {if aliases.is_empty(){span {class:"settings-no-alias","No aliases added"}}else{for alias in aliases{span {"{alias}"}}}}}
-        div {class:"settings-word-actions",Toggle {checked:enabled,label:format!("Enable {term}"),disabled:busy(),onchange:move |_|{let id=toggle_id.clone();busy.set(true);error.set(String::new());spawn(async move {match patch(&format!("/vocabulary/{id}"),json!({"enabled":!enabled})).await{Ok(saved)=>{let rows=entries().into_iter().map(|row|if text(&row,"id")==id{saved.clone()}else{row}).collect();entries.set(rows);},Err(message)=>error.set(message)}busy.set(false);});}}
-            button {r#type:"button",class:"icon-button",disabled:busy(),"aria-label":format!("Edit {term}"),onclick:move |_|{let mut value=edit.clone();value["aliases"]=json!(edit["aliases"].as_array().map(|a|a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default());on_edit.call(value);},Icon {name:"edit",size:15}}
-            button {r#type:"button",class:"icon-button settings-delete-word",disabled:busy(),"aria-label":format!("Remove {term}"),onclick:move |_|{let id=delete_id.clone();busy.set(true);error.set(String::new());spawn(async move {match delete(&format!("/vocabulary/{id}")).await{Ok(_)=>{let rows=entries().into_iter().filter(|row|text(row,"id")!=id).collect();entries.set(rows);notify.call("Vocabulary entry removed.".into());},Err(message)=>error.set(message)}busy.set(false);});},Icon {name:"trash",size:15}}
+    rsx! {
+        div { class: if enabled { "settings-word-row" } else { "settings-word-row settings-word-disabled" },
+            div { class: "settings-word-copy",
+                h3 { "{term}" }
+                p {
+                    if aliases.is_empty() {
+                        span { class: "settings-no-alias", "No aliases added" }
+                    } else {
+                        for alias in aliases {
+                            span { "{alias}" }
+                        }
+                    }
+                }
+            }
+            div { class: "settings-word-actions",
+                Toggle {
+                    checked: enabled,
+                    label: format!("Enable {term}"),
+                    disabled: busy(),
+                    onchange: move |_| {
+                        let id = toggle_id.clone();
+                        busy.set(true);
+                        error.set(String::new());
+                        spawn(async move {
+                            match patch(&format!("/vocabulary/{id}"), json!({ "enabled":! enabled }))
+                                .await
+                            {
+                                Ok(saved) => {
+                                    let rows = entries()
+                                        .into_iter()
+                                        .map(|row| {
+                                            if text(&row, "id") == id { saved.clone() } else { row }
+                                        })
+                                        .collect();
+                                    entries.set(rows);
+                                }
+                                Err(message) => error.set(message),
+                            }
+                            busy.set(false);
+                        });
+                    },
+                }
+                button {
+                    r#type: "button",
+                    class: "icon-button",
+                    disabled: busy(),
+                    "aria-label": format!("Edit {term}"),
+                    onclick: move |_| {
+                        let mut value = edit.clone();
+                        value["aliases"] = json!(
+                            edit["aliases"].as_array().map(| a | a.iter().filter_map(Value::as_str)
+                            .collect::< Vec < _ >> ().join(", ")).unwrap_or_default()
+                        );
+                        on_edit.call(value);
+                    },
+                    Icon { name: "edit", size: 15 }
+                }
+                button {
+                    r#type: "button",
+                    class: "icon-button settings-delete-word",
+                    disabled: busy(),
+                    "aria-label": format!("Remove {term}"),
+                    onclick: move |_| {
+                        let id = delete_id.clone();
+                        busy.set(true);
+                        error.set(String::new());
+                        spawn(async move {
+                            match delete(&format!("/vocabulary/{id}")).await {
+                                Ok(_) => {
+                                    let rows = entries()
+                                        .into_iter()
+                                        .filter(|row| text(row, "id") != id)
+                                        .collect();
+                                    entries.set(rows);
+                                    notify.call("Vocabulary entry removed.".into());
+                                }
+                                Err(message) => error.set(message),
+                            }
+                            busy.set(false);
+                        });
+                    },
+                    Icon { name: "trash", size: 15 }
+                }
+            }
         }
-    }}
+    }
 }
 
 /// Validate imported terms before merging them into the workspace vocabulary.
@@ -372,34 +1056,263 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
     let used = (size / (size + available).max(1.) * 100.).clamp(1., 100.);
     let storage_path = text(&storage(), "path");
     rsx! {
-        div {class:"settings-section-top",div {h2 {"Library backups"}}}
-        crate::privacy::RecoverySettings {on_ready:move |ready|recovery_ready.set(ready)}
-        if !error().is_empty(){div {class:"settings-error",role:"alert","{error}"}}
-        section {class:"settings-card",div {class:"settings-card-heading",div {class:"settings-section-icon",Icon {name:"hard-drive",size:20}}div {h2 {"Local storage"}}span {class:"settings-soft-badge",Icon {name:"lock",size:12}"Private"}}
-            if loading(){p {class:"settings-load-state",role:"status",Icon {name:"loader",size:19}"Checking local storage…"}}
-            else if !storage().is_null(){div {class:"settings-storage-stats",div {span {"Library size"}strong {"{bytes(size)}"}}div {span {"Saved meetings"}strong {"{count}"}}div {span {"Available on disk"}strong {"{bytes(available)}"}}}div {class:"settings-storage-meter",role:"img","aria-label":format!("{} used by Echo Voice; {} available",bytes(size),bytes(available)),span {style:"width:{used}%"}}div {class:"settings-storage-legend",span {i {}"Echo Voice library"}span {"Available disk space"}}if available<500.*1024.*1024.{div {class:"settings-storage-warning",role:"status","Your disk has less than 500 MB free. Export your library and free up disk space before a long recording."}}div {class:"settings-storage-path",Icon {name:"folder",size:19}div {span {"Library location on this computer"}code {"{storage_path}"}}}}
-            else{ActionButton {button_type:"button",kind:ButtonKind::Secondary,onclick:move |_|{let n=refresh()+1;refresh.set(n);},"Retry storage check"}}
+        div { class: "settings-section-top",
+            div {
+                h2 { "Library backups" }
+            }
         }
-        div {class:"settings-backup-grid",
-            section {class:"settings-card",div {class:"settings-backup-icon",Icon {name:"download",size:22}}h2 {"Export library"}p {"Download an encrypted backup of your recordings, transcripts, notes, and saved moments. Keep your recovery phrase separately."}if !recovery_ready(){small {"Save and confirm your recovery phrase above to enable backups."}}ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:!recovery_ready()||!busy().is_empty()||loading()||storage().is_null(),onclick:move |_|{busy.set("export".into());error.set(String::new());spawn(async move {match export_library().await{Ok(())=>notify.call("Library backup prepared. Check your browser downloads.".into()),Err(message)=>error.set(message)}busy.set(String::new());});},Icon {name:if busy()=="export"{"loader"}else{"download"},size:16}if busy()=="export"{"Preparing backup…"}else{"Export library"}}}
-            section {class:"settings-card",div {class:"settings-backup-icon",Icon {name:"upload",size:22}}h2 {"Restore library"}p {"Restore an Echo Voice Web archive. Requires an empty meeting library and vocabulary list."}ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:!busy().is_empty()||loading()||storage().is_null()||count>0||vocabulary_count().is_none_or(|n|n>0),onclick:move |_|{spawn(async move {match choose_json_file().await{Ok(Some((name,value)))=>{if !["echo-voice-web","echo-voice-encrypted"].contains(&value["format"].as_str().unwrap_or(""))||value["version"]!=1{error.set("Choose a supported Echo library backup.".into());}else{error.set(String::new());recovery_phrase.set(String::new());archive.set(Some((name,value)));}},Ok(None)=>{},Err(message)=>error.set(message)}});},Icon {name:"file",size:16}"Choose library file"}if count>0||vocabulary_count().is_some_and(|n|n>0){small {class:"settings-import-note","Import requires an empty meeting library and vocabulary list."}}}
+        crate::privacy::RecoverySettings { on_ready: move |ready| recovery_ready.set(ready) }
+        if !error().is_empty() {
+            div { class: "settings-error", role: "alert", "{error}" }
         }
-        if let Some((name,value))=archive(){
-            section {class:"settings-card settings-import-review",
-                div {h3 {"Ready to restore" span {"{name}"}}p {"The backup is checked before importing. Account credentials and downloaded models are excluded."}}
-                if value["format"]=="echo-voice-encrypted" {label {class:"settings-field",span {"Library recovery phrase"}textarea {class:"input",rows:3,autocomplete:"off",spellcheck:"false",value:recovery_phrase(),oninput:move |event|recovery_phrase.set(event.value())}small {"Enter the 24 words saved when this backup was created. You can leave this blank when restoring on the same unlocked library."}}}
-                div {ActionButton {button_type:"button",kind:ButtonKind::Secondary,disabled:!busy().is_empty(),onclick:move |_|{archive.set(None);recovery_phrase.set(String::new());},"Cancel"}
-                    ActionButton {button_type:"button",kind:ButtonKind::Primary,disabled:!busy().is_empty(),onclick:move |_|{
-                        if let Some((_,value))=archive(){
-                            let payload=if value["format"]=="echo-voice-encrypted"{json!({"backup":value,"recoveryPhrase":recovery_phrase()})}else{value};
-                            recovery_phrase.set(String::new());busy.set("import".into());error.set(String::new());
-                            spawn(async move {match post("/storage/import",payload).await{Ok(restored)=>{vocabulary_count.set(Some(restored["vocabulary"].as_u64().unwrap_or(0) as usize));archive.set(None);if let Ok(data)=get("/storage").await{storage.set(data);}let _=document::eval("window.dispatchEvent(new CustomEvent('echo-library-changed'));");notify.call("Your library was restored from the backup.".into());},Err(message)=>error.set(message)}busy.set(String::new());});
-                        }
-                    },Icon {name:if busy()=="import"{"loader"}else{"upload"},size:16}if busy()=="import"{"Restoring…"}else{"Restore library"}}
+        section { class: "settings-card",
+            div { class: "settings-card-heading",
+                div { class: "settings-section-icon",
+                    Icon { name: "hard-drive", size: 20 }
+                }
+                div {
+                    h2 { "Local storage" }
+                }
+                span { class: "settings-soft-badge",
+                    Icon { name: "lock", size: 12 }
+                    "Private"
+                }
+            }
+            if loading() {
+                p { class: "settings-load-state", role: "status",
+                    Icon { name: "loader", size: 19 }
+                    "Checking local storage…"
+                }
+            } else if !storage().is_null() {
+                div { class: "settings-storage-stats",
+                    div {
+                        span { "Library size" }
+                        strong { "{bytes(size)}" }
+                    }
+                    div {
+                        span { "Saved meetings" }
+                        strong { "{count}" }
+                    }
+                    div {
+                        span { "Available on disk" }
+                        strong { "{bytes(available)}" }
+                    }
+                }
+                div {
+                    class: "settings-storage-meter",
+                    role: "img",
+                    "aria-label": format!("{} used by Echo; {} available", bytes(size), bytes(available)),
+                    span { style: "width:{used}%" }
+                }
+                div { class: "settings-storage-legend",
+                    span {
+                        i {}
+                        "Echo library"
+                    }
+                    span { "Available disk space" }
+                }
+                if available < 500. * 1024. * 1024. {
+                    div { class: "settings-storage-warning", role: "status",
+                        "Your disk has less than 500 MB free. Export your library and free up disk space before a long recording."
+                    }
+                }
+                div { class: "settings-storage-path",
+                    Icon { name: "folder", size: 19 }
+                    div {
+                        span { "Library location on this computer" }
+                        code { "{storage_path}" }
+                    }
+                }
+            } else {
+                ActionButton {
+                    button_type: "button",
+                    kind: ButtonKind::Secondary,
+                    onclick: move |_| {
+                        let n = refresh() + 1;
+                        refresh.set(n);
+                    },
+                    "Retry storage check"
                 }
             }
         }
-        div {class:"settings-info",Icon {name:"info",size:18}p {"Backups exclude model downloads and account credentials. Turbo models are stored in this browser; clearing browser data removes them. Large V3 and Ollama models are stored separately on this computer."}}
+        div { class: "settings-backup-grid",
+            section { class: "settings-card",
+                div { class: "settings-backup-icon",
+                    Icon { name: "download", size: 22 }
+                }
+                h2 { "Export library" }
+                p {
+                    "Download an encrypted backup of your recordings, transcripts, notes, and saved moments. Keep your recovery phrase separately."
+                }
+                if !recovery_ready() {
+                    small { "Save and confirm your recovery phrase above to enable backups." }
+                }
+                ActionButton {
+                    button_type: "button",
+                    kind: ButtonKind::Secondary,
+                    disabled: !recovery_ready() || !busy().is_empty() || loading() || storage().is_null(),
+                    onclick: move |_| {
+                        busy.set("export".into());
+                        error.set(String::new());
+                        spawn(async move {
+                            match export_library().await {
+                                Ok(()) => {
+                                    notify
+                                        .call(
+                                            "Library backup prepared. Check your browser downloads."
+                                                .into(),
+                                        )
+                                }
+                                Err(message) => error.set(message),
+                            }
+                            busy.set(String::new());
+                        });
+                    },
+                    Icon {
+                        name: if busy() == "export" { "loader" } else { "download" },
+                        size: 16,
+                    }
+                    if busy() == "export" {
+                        "Preparing backup…"
+                    } else {
+                        "Export library"
+                    }
+                }
+            }
+            section { class: "settings-card",
+                div { class: "settings-backup-icon",
+                    Icon { name: "upload", size: 22 }
+                }
+                h2 { "Restore library" }
+                p { "Restore an Echo archive. Requires an empty meeting library and vocabulary list." }
+                ActionButton {
+                    button_type: "button",
+                    kind: ButtonKind::Secondary,
+                    disabled: !busy().is_empty() || loading() || storage().is_null() || count > 0
+                        || vocabulary_count().is_none_or(|n| n > 0),
+                    onclick: move |_| {
+                        spawn(async move {
+                            match choose_json_file().await {
+                                Ok(Some((name, value))) => {
+                                    if !["echo-voice-web", "echo-voice-encrypted"]
+                                        .contains(&value["format"].as_str().unwrap_or(""))
+                                        || value["version"] != 1
+                                    {
+                                        error.set("Choose a supported Echo library backup.".into());
+                                    } else {
+                                        error.set(String::new());
+                                        recovery_phrase.set(String::new());
+                                        archive.set(Some((name, value)));
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(message) => error.set(message),
+                            }
+                        });
+                    },
+                    Icon { name: "file", size: 16 }
+                    "Choose library file"
+                }
+                if count > 0 || vocabulary_count().is_some_and(|n| n > 0) {
+                    small { class: "settings-import-note",
+                        "Import requires an empty meeting library and vocabulary list."
+                    }
+                }
+            }
+        }
+        if let Some((name, value)) = archive() {
+            section { class: "settings-card settings-import-review",
+                div {
+                    h3 {
+                        "Ready to restore"
+                        span { "{name}" }
+                    }
+                    p {
+                        "The backup is checked before importing. Account credentials and downloaded models are excluded."
+                    }
+                }
+                if value["format"] == "echo-voice-encrypted" {
+                    label { class: "settings-field",
+                        span { "Library recovery phrase" }
+                        textarea {
+                            class: "input",
+                            rows: 3,
+                            autocomplete: "off",
+                            spellcheck: "false",
+                            value: recovery_phrase(),
+                            oninput: move |event| recovery_phrase.set(event.value()),
+                        }
+                        small {
+                            "Enter the 24 words saved when this backup was created. You can leave this blank when restoring on the same unlocked library."
+                        }
+                    }
+                }
+                div {
+                    ActionButton {
+                        button_type: "button",
+                        kind: ButtonKind::Secondary,
+                        disabled: !busy().is_empty(),
+                        onclick: move |_| {
+                            archive.set(None);
+                            recovery_phrase.set(String::new());
+                        },
+                        "Cancel"
+                    }
+                    ActionButton {
+                        button_type: "button",
+                        kind: ButtonKind::Primary,
+                        disabled: !busy().is_empty(),
+                        onclick: move |_| {
+                            if let Some((_, value)) = archive() {
+                                let payload = if value["format"] == "echo-voice-encrypted" {
+                                    json!({ "backup" : value, "recoveryPhrase" : recovery_phrase() })
+                                } else {
+                                    value
+                                };
+                                recovery_phrase.set(String::new());
+                                busy.set("import".into());
+                                error.set(String::new());
+                                spawn(async move {
+                                    match post("/storage/import", payload).await {
+                                        Ok(restored) => {
+                                            vocabulary_count
+                                                .set(
+                                                    Some(restored["vocabulary"].as_u64().unwrap_or(0) as usize),
+                                                );
+                                            archive.set(None);
+                                            if let Ok(data) = get("/storage").await {
+                                                storage.set(data);
+                                            }
+                                            let _ = document::eval(
+                                                "window.dispatchEvent(new CustomEvent('echo-library-changed'));",
+                                            );
+                                            notify.call("Your library was restored from the backup.".into());
+                                        }
+                                        Err(message) => error.set(message),
+                                    }
+                                    busy.set(String::new());
+                                });
+                            }
+                        },
+                        Icon {
+                            name: if busy() == "import" { "loader" } else { "upload" },
+                            size: 16,
+                        }
+                        if busy() == "import" {
+                            "Restoring…"
+                        } else {
+                            "Restore library"
+                        }
+                    }
+                }
+            }
+        }
+        div { class: "settings-info",
+            Icon { name: "info", size: 18 }
+            p {
+                "Backups exclude model downloads and account credentials. Turbo models are stored in this browser; clearing browser data removes them. Large V3 and Ollama models are stored separately on this computer."
+            }
+        }
     }
 }
 

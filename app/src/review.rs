@@ -163,40 +163,261 @@ pub fn MeetingReview(
     let delete_id = id.clone();
     rsx! {
         article { class: "review-workspace",
-            div { class: "review-breadcrumb", button { class: "review-back", onclick: move |_| on_back.call(()), Icon { name: "arrow-left", size: 15 } "All meetings" } span { "/" } span { "Meeting workspace" } }
+            div { class: "review-breadcrumb",
+                button { class: "review-back", onclick: move |_| on_back.call(()),
+                    Icon { name: "arrow-left", size: 15 }
+                    "All meetings"
+                }
+                span { "/" }
+                span { "Meeting workspace" }
+            }
             header { class: "review-header",
                 div { class: "review-heading",
-                    if demo { span { class: "review-example", "Sample meeting" } }
+                    if demo {
+                        span { class: "review-example", "Sample meeting" }
+                    }
                     if rename() {
-                        form { class: "review-title-form", onsubmit: move |event| { event.prevent_default(); let next=title().trim().to_string(); if next.is_empty() {notify.call("Give this meeting a name.".into());return;} let path=format!("/meetings/{}",text(&meeting(),"id")); busy.set(true); spawn(async move { if save("PATCH",path,json!({"title":next}),meeting,on_change,notify,"Meeting renamed.").await {rename.set(false);}busy.set(false);}); },
-                            input { class: "input", aria_label: "Meeting name", maxlength: "200", value: "{title}", autofocus: true, oninput: move |event| title.set(event.value()) }
-                            button { r#type: "submit", class: "icon-button", aria_label: "Save meeting name", disabled: busy(), Icon { name: "check", size: 17 } }
-                            button { r#type: "button", class: "icon-button", aria_label: "Cancel rename", onclick: move |_| rename.set(false), Icon { name: "close", size: 17 } }
+                        form {
+                            class: "review-title-form",
+                            onsubmit: move |event| {
+                                event.prevent_default();
+                                let next = title().trim().to_string();
+                                if next.is_empty() {
+                                    notify.call("Give this meeting a name.".into());
+                                    return;
+                                }
+                                let path = format!("/meetings/{}", text(&meeting(), "id"));
+                                busy.set(true);
+                                spawn(async move {
+                                    if save(
+                                            "PATCH",
+                                            path,
+                                            json!({ "title" : next }),
+                                            meeting,
+                                            on_change,
+                                            notify,
+                                            "Meeting renamed.",
+                                        )
+                                        .await
+                                    {
+                                        rename.set(false);
+                                    }
+                                    busy.set(false);
+                                });
+                            },
+                            input {
+                                class: "input",
+                                aria_label: "Meeting name",
+                                maxlength: "200",
+                                value: "{title}",
+                                autofocus: true,
+                                oninput: move |event| title.set(event.value()),
+                            }
+                            button {
+                                r#type: "submit",
+                                class: "icon-button",
+                                aria_label: "Save meeting name",
+                                disabled: busy(),
+                                Icon { name: "check", size: 17 }
+                            }
+                            button {
+                                r#type: "button",
+                                class: "icon-button",
+                                aria_label: "Cancel rename",
+                                onclick: move |_| rename.set(false),
+                                Icon { name: "close", size: 17 }
+                            }
                         }
                     } else {
-                        div { class: "review-title-line", h1 { "{heading}" } if !demo { button { class: "icon-button review-title-edit", aria_label: "Rename meeting", onclick: move |_| {title.set(text(&meeting(),"title"));rename.set(true);}, Icon { name: "edit", size: 16 } } } }
+                        div { class: "review-title-line",
+                            h1 { "{heading}" }
+                            if !demo {
+                                button {
+                                    class: "icon-button review-title-edit",
+                                    aria_label: "Rename meeting",
+                                    onclick: move |_| {
+                                        title.set(text(&meeting(), "title"));
+                                        rename.set(true);
+                                    },
+                                    Icon { name: "edit", size: 16 }
+                                }
+                            }
+                        }
                     }
-                    div { class: "review-meta", span { Icon { name: "clock", size: 14 } "{created}" } i {} span { "{duration}" } i {} span { Icon { name: "mic", size: 14 } "{mode}" } span { class: "review-status review-status-{status}", if status=="ready" {Icon { name: "check", size: 11 }} "{status_label}" } if demo {span {"No audio"}} }
+                    div { class: "review-meta",
+                        span {
+                            Icon { name: "clock", size: 14 }
+                            "{created}"
+                        }
+                        i {}
+                        span { "{duration}" }
+                        i {}
+                        span {
+                            Icon { name: "mic", size: 14 }
+                            "{mode}"
+                        }
+                        span { class: "review-status review-status-{status}",
+                            if status == "ready" {
+                                Icon { name: "check", size: 11 }
+                            }
+                            "{status_label}"
+                        }
+                        if demo {
+                            span { "No audio" }
+                        }
+                    }
                 }
-                div { class: "review-header-actions", details { class: "review-export", summary { class: "button button-secondary", Icon { name: "download", size: 15 } "Export" Icon { name: "chevron", size: 13 } } div { class: "review-dropdown", div { class: "review-dropdown-label", "INDEPENDENT COPIES" }
-                    if demo {p { "Record or import a meeting to export your own files." }} else { for (format,label,hint) in [("json","Meeting data","Text, history & metadata"),("txt","Transcript","Readable text"),("srt","Subtitles","Timestamped captions"),("md","Meeting notes","Notes and evidence")] { a { href: "/api/meetings/{id}/export?format={format}", download: true, Icon { name: "file", size: 16 } span { "{label}" small { "{hint}" } } span { class: "review-format", ".{format}" } } } p { "For a full backup including audio, use Storage in Settings." } }
-                } } }
+                div { class: "review-header-actions",
+                    details { class: "review-export",
+                        summary { class: "button button-secondary",
+                            Icon { name: "download", size: 15 }
+                            "Export"
+                            Icon { name: "chevron-down", size: 13 }
+                        }
+                        div { class: "review-dropdown",
+                            div { class: "review-dropdown-label", "INDEPENDENT COPIES" }
+                            if demo {
+                                p { "Record or import a meeting to export your own files." }
+                            } else {
+                                for (format, label, hint) in [
+                                    ("json", "Meeting data", "Text, history & metadata"),
+                                    ("txt", "Transcript", "Readable text"),
+                                    ("srt", "Subtitles", "Timestamped captions"),
+                                    ("md", "Meeting notes", "Notes and evidence"),
+                                ]
+                                {
+                                    a {
+                                        href: "/api/meetings/{id}/export?format={format}",
+                                        download: true,
+                                        Icon { name: "file", size: 16 }
+                                        span {
+                                            "{label}"
+                                            small { "{hint}" }
+                                        }
+                                        span { class: "review-format", ".{format}" }
+                                    }
+                                }
+                                p { "For a full backup including audio, use Storage in Settings." }
+                            }
+                        }
+                    }
+                }
             }
-            if !error.is_empty() && !transcribing { div { class: "review-notice review-notice-warning", role: "status", Icon { name: "help", size: 17 } span { "{error}" } } }
-            if active { div { class: "review-notice", span { class: "review-recording-dot" } span { "This meeting is recording or processing. Your saved material remains available to review." } } }
-            nav { class: "review-tabs", aria_label: "Meeting views", for (key,label,icon) in [("notes","Notes","file"),("transcript","Transcript","volume"),("moments","Saved moments","bookmark"),("details","Details","help")] {
-                button { class: if tab()==key {"review-tab review-tab-active"} else {"review-tab"}, aria_current: if tab()==key {"page"} else {"false"}, onclick: move |_| tab.set(key.into()), Icon { name: icon, size: 16 } span { "{label}" } if key=="moments" && moment_count>0 {span { class: "review-tab-count", "{moment_count}" }} }
-            } }
+            if !error.is_empty() && !transcribing {
+                div {
+                    class: "review-notice review-notice-warning",
+                    role: "status",
+                    Icon { name: "help", size: 17 }
+                    span { "{error}" }
+                }
+            }
+            if active {
+                div { class: "review-notice",
+                    span { class: "review-recording-dot" }
+                    span {
+                        "This meeting is recording or processing. Your saved material remains available to review."
+                    }
+                }
+            }
+            nav { class: "review-tabs", aria_label: "Meeting views",
+                for (key, label, icon) in [
+                    ("notes", "Notes", "file"),
+                    ("transcript", "Transcript", "volume"),
+                    ("moments", "Saved moments", "bookmark"),
+                    ("details", "Details", "help"),
+                ]
+                {
+                    button {
+                        class: if tab() == key { "review-tab review-tab-active" } else { "review-tab" },
+                        aria_current: if tab() == key { "page" } else { "false" },
+                        onclick: move |_| tab.set(key.into()),
+                        Icon { name: icon, size: 16 }
+                        span { "{label}" }
+                        if key == "moments" && moment_count > 0 {
+                            span { class: "review-tab-count", "{moment_count}" }
+                        }
+                    }
+                }
+            }
             div { class: "review-body",
-                div { hidden: tab()!="notes", NotesPane { meeting, transcribing, generating_notes, on_change, notify, tab } }
-                div { hidden: tab()!="transcript", TranscriptPane { meeting, transcribing, on_change, notify } }
-                div { hidden: tab()!="moments", MomentsPane { meeting, on_change, notify, tab } }
-                div { hidden: tab()!="details", DetailsPane { meeting, on_change, notify } }
+                div { hidden: tab() != "notes",
+                    NotesPane {
+                        meeting,
+                        transcribing,
+                        generating_notes,
+                        on_change,
+                        notify,
+                        tab,
+                    }
+                }
+                div { hidden: tab() != "transcript",
+                    TranscriptPane {
+                        meeting,
+                        transcribing,
+                        on_change,
+                        notify,
+                    }
+                }
+                div { hidden: tab() != "moments",
+                    MomentsPane {
+                        meeting,
+                        on_change,
+                        notify,
+                        tab,
+                    }
+                }
+                div { hidden: tab() != "details",
+                    DetailsPane { meeting, on_change, notify }
+                }
             }
-            if !list(&value,"tracks").is_empty() { AudioPlayer { meeting, on_change, notify } }
-            dialog { id: "review-delete-dialog", class: "review-dialog", aria_labelledby: "review-delete-title",
-                div { class: "review-dialog-icon", Icon { name: "trash", size: 23 } } h2 { id: "review-delete-title", "Delete this meeting?" } p { "“{heading}” and all of its managed recordings, transcript versions, notes, and saved moments will be permanently deleted." } p { class: "review-muted", "This cannot be undone. Independent exports and backups will remain." }
-                div { class: "review-dialog-actions", ActionButton { id: "review-keep-meeting", kind:ButtonKind::Secondary, disabled: busy(), onclick: move |_| js("document.getElementById('review-delete-dialog').close()".into()), "Keep meeting" } button { class: "button review-delete-solid", disabled: busy(), onclick: move |_| {let path=format!("/meetings/{delete_id}");busy.set(true);spawn(async move {match api::delete(&path).await {Ok(_)=>{js("document.getElementById('review-delete-dialog')?.close()".into());notify.call("Meeting and its local files deleted.".into());on_back.call(());},Err(error)=>notify.call(error)}busy.set(false);});}, "Delete permanently" } }
+            if !list(&value, "tracks").is_empty() {
+                AudioPlayer { meeting, on_change, notify }
+            }
+            dialog {
+                id: "review-delete-dialog",
+                class: "review-dialog",
+                aria_labelledby: "review-delete-title",
+                div { class: "review-dialog-icon",
+                    Icon { name: "trash", size: 23 }
+                }
+                h2 { id: "review-delete-title", "Delete this meeting?" }
+                p {
+                    "“{heading}” and all of its managed recordings, transcript versions, notes, and saved moments will be permanently deleted."
+                }
+                p { class: "review-muted",
+                    "This cannot be undone. Independent exports and backups will remain."
+                }
+                div { class: "review-dialog-actions",
+                    ActionButton {
+                        id: "review-keep-meeting",
+                        kind: ButtonKind::Secondary,
+                        disabled: busy(),
+                        onclick: move |_| js("document.getElementById('review-delete-dialog').close()".into()),
+                        "Keep meeting"
+                    }
+                    button {
+                        class: "button review-delete-solid",
+                        disabled: busy(),
+                        onclick: move |_| {
+                            let path = format!("/meetings/{delete_id}");
+                            busy.set(true);
+                            spawn(async move {
+                                match api::delete(&path).await {
+                                    Ok(_) => {
+                                        js(
+                                            "document.getElementById('review-delete-dialog')?.close()".into(),
+                                        );
+                                        notify.call("Meeting and its local files deleted.".into());
+                                        on_back.call(());
+                                    }
+                                    Err(error) => notify.call(error),
+                                }
+                                busy.set(false);
+                            });
+                        },
+                        "Delete permanently"
+                    }
+                }
             }
         }
     }
@@ -327,70 +548,507 @@ fn NotesPane(
             request_generation(false);
         }
     };
-    rsx! {section { class: "review-notes", aria_label: "Meeting notes",
-        if !demo && !editing {
-            div { class: "review-notes-options",
-                div { class: "review-notes-provider", label { r#for: "review-notes-provider", "Create notes with" } select { id: "review-notes-provider", class: "input", value: "{provider}", disabled: locked, onchange: move |event| { let selected=event.value();provider_touched.set(true);provider.set(selected.clone());if selected=="chatgpt" {spawn(refresh_chatgpt(account,account_loading));} }, option { value: "ollama", "Local · Ollama" } option { value: "chatgpt", "ChatGPT · OpenAI" } } }
-                div { class: "review-notes-provider-info", if cloud_selected {
-                    p { "Sends the transcript to OpenAI after confirmation. Audio stays on this device." }
-                    div { class: "review-provider-account", role: "status", if account_loading() { span { "Checking your ChatGPT connection…" } } else if account_connected { span { class: "review-provider-connected", Icon { name: "check", size: 13 } if account_email.is_empty() { "ChatGPT connected" } else { "{account_email}" } } if account_busy {span { "Another ChatGPT request is running." }} } else if !account_error.is_empty() {span {"Connection status unavailable."}button {class:"review-provider-link",onclick:move |_|{spawn(refresh_chatgpt(account,account_loading));},"Retry connection",Icon{name:"refresh",size:13}}} else { span { "ChatGPT is not connected." } button { class: "review-provider-link", onclick: move |_| js("window.dispatchEvent(new Event('echo-open-models'))".into()), "Connect in Models", Icon { name: "arrow", size: 13 } } } }
-                    if !account_error.is_empty() { p { class: "review-provider-error", "{account_error}" } }
-                } else { p { "Transcript stays on this device." } } }
-            }
-        }
-        if notes.is_null() {
-            div { class: "review-empty", span { class: "review-empty-icon", Icon { name: "sparkles", size: 27 } } h2 { "No notes yet" } p { if transcript.is_null() {"Create a transcript first to generate notes."} else {"Generate a summary, decisions, and actions from the transcript."} }
-                if !transcript.is_null() {ActionButton { kind:ButtonKind::Primary, disabled: locked, onclick: generate, Icon { name: "sparkles", size: 16 } if generating {"Generating notes…"} else {"Generate meeting notes"} }} else {ActionButton { kind:ButtonKind::Primary, disabled: locked||transcribing||list(&value,"tracks").is_empty(), onclick: move |_| audio_transcribe(&meeting()), Icon { name: "volume", size: 16 } "Create transcript" }}
-                span { class: "review-empty-footnote", Icon { name: "shield", size: 13 } if transcript.is_null() {"Speech recognition runs locally in your browser."} else if cloud_selected {"Uses your ChatGPT account through Codex, subject to your plan’s usage limits."} else {"Requires a running local Ollama model. Configure it in Settings."} }
-            }
-        } else {
-            SectionHeading { class:"review-section-heading", title:"Meeting notes",
-                div { class: "review-section-actions", if editing {
-                    ActionButton { kind:ButtonKind::Ghost, onclick: move |_| draft.set(Value::Null), "Cancel" }
-                    ActionButton { kind:ButtonKind::Primary, disabled: busy(), onclick: move |_| {let mut body=draft();if ["summary","decisions","actions"].iter().any(|key|list(&body,key).iter().any(|item|text(item,"text").trim().is_empty())){notify.call("Each note needs some text before saving.".into());return;}body["edited"]=json!(true);let path=format!("/meetings/{}/notes",text(&meeting(),"id"));busy.set(true);spawn(async move {if save("POST",path,body,meeting,on_change,notify,"Notes saved as a new version.").await{draft.set(Value::Null);}busy.set(false);});}, Icon { name: "check", size: 14 } "Save version" }
-                } else {
-                    ActionButton { kind:ButtonKind::Secondary, disabled: locked, onclick: move |_| draft.set(current(&meeting(),"notes","activeNotesId")), Icon { name: "edit", size: 14 } "Edit notes" }
-                    if !demo {button { class: "icon-button", aria_label: "Generate a new notes version", title: "Generate a new draft, preserving this version", disabled: locked, onclick: generate, Icon { name: "sparkles", size: 16 } }}
-                } }
-            }
-            if generating {div { class: "review-notice", role: "status", span { class: "review-spin", Icon { name: "refresh", size: 16 } } span { if generating_notes=="chatgpt" {"Generating notes with ChatGPT…"} else {"Generating notes locally…"} } }}
-            if stale {div { class: "review-notice review-notice-warning", Icon { name: "refresh", size: 17 } span { "These notes use an earlier transcript. Review the source version in Details, or generate a new draft." } }}
-            div { class: "review-draft-label", Icon { name: "sparkles", size: 13 } span { if notes["edited"].as_bool().unwrap_or(false) {"Edited notes"} else {"AI draft · review for accuracy"} } span { class: "review-draft-divider", "·" } if !demo {span { "{source_label}" } span { class: "review-draft-divider", "·" }} span { title: "{model}", "{model}" } }
-            if !usage_label.is_empty() {p { class: "review-notes-usage", "{usage_label}" }}
-            div { class: "review-notes-grid", for (group,title,icon) in [("summary","Summary","file"),("decisions","Key decisions","check"),("actions","Action items","check")] {
-                section { class: "review-note-card review-note-{group}", header { span { class: "review-section-icon review-icon-{group}", Icon { name: icon, size: 19 } } div { h3 { "{title}" } } span { class: "review-note-count", "{list(&shown,group).len()}" } }
-                    div { class: "review-note-items", if list(&shown,group).is_empty() {p { class: "review-muted", if group=="summary"{"No summary."}else if group=="decisions"{"No decisions."}else{"No action items."} }}
-                        for (index,item) in list(&shown,group).into_iter().enumerate() {
-                            {let done=item["done"].as_bool().unwrap_or(false);let note_text=text(&item,"text");let owner=text(&item,"owner");let due=text(&item,"dueDate");let source=meeting()["transcripts"].as_array().and_then(|items|items.iter().find(|v|v["id"]==shown["transcriptVersionId"])).cloned().unwrap_or(Value::Null);rsx!{
-                                div { class: if done {"review-note-item review-note-done"} else {"review-note-item"},
-                                    if group=="actions" {button { class: if done {"review-check review-checked"} else {"review-check"}, aria_label: "Toggle action completion", aria_pressed: done, disabled: locked, onclick: move |_| {if editing {let mut next=draft();next[group][index]["done"]=json!(!done);draft.set(next);}else{let mut body=current(&meeting(),"notes","activeNotesId");body[group][index]["done"]=json!(!done);body["edited"]=json!(true);let path=format!("/meetings/{}/notes",text(&meeting(),"id"));busy.set(true);spawn(async move {save("POST",path,body,meeting,on_change,notify,"Action item updated.").await;busy.set(false);});}}, if done {Icon { name: "check", size: 13 }} }}
-                                    if group=="decisions" {span { class: "review-decision-index", "{index+1:02}" }}
-                                    div { class: "review-note-content", if editing {textarea { class: "input review-note-textarea", aria_label: "Edit {title} {index+1}", rows: "3", value: "{note_text}", oninput: move |event|{let mut next=draft();next[group][index]["text"]=json!(event.value());draft.set(next);} }
-                                        if group=="actions" {div { class: "review-action-edit", label { "Owner" input { class: "input", value: "{owner}", placeholder: "Unassigned", oninput: move |event| {let mut next=draft();next[group][index]["owner"]=json!(event.value());draft.set(next);} } } label { "Due date" input { class: "input", r#type: "date", value: "{due}", oninput: move |event|{let mut next=draft();next[group][index]["dueDate"]=json!(event.value());draft.set(next);} } } } }
-                                    } else {p { "{note_text}" } if group=="actions"&&(!owner.is_empty()||!due.is_empty()) {div { class: "review-action-meta", if !owner.is_empty() {span {span { class: "review-avatar", "{owner.chars().next().unwrap_or(' ')}" } "{owner}" }} if !due.is_empty() {span {Icon { name: "clock", size: 12 } "{due}" }} } }}
-                                    div { class: "review-evidence", for evidence_id in list(&item,"passageIds") { {let pid=evidence_id.as_str().unwrap_or_default().to_string();let passage=list(&source,"passages").into_iter().find(|p|text(p,"id")==pid).unwrap_or(Value::Null);let timestamp=num(&passage,"start");let excerpt=text(&passage,"text");let valid=list(&transcript,"passages").iter().any(|p|text(p,"id")==pid);rsx!{button { class: "review-evidence-link", title: "{excerpt}", disabled: !valid, onclick: move |_| {tab.set("transcript".into());seek(timestamp,Some(pid.clone()));}, Icon { name: "volume", size: 12 } "{api::time(timestamp)}" }}} } if list(&item,"passageIds").is_empty() {span { class: "review-no-evidence", "No linked evidence · review this note" }} }
+    rsx! {
+        section { class: "review-notes", aria_label: "Meeting notes",
+            if !demo && !editing {
+                div { class: "review-notes-options",
+                    div { class: "review-notes-provider",
+                        label { r#for: "review-notes-provider", "Create notes with" }
+                        select {
+                            id: "review-notes-provider",
+                            class: "input",
+                            value: "{provider}",
+                            disabled: locked,
+                            onchange: move |event| {
+                                let selected = event.value();
+                                provider_touched.set(true);
+                                provider.set(selected.clone());
+                                if selected == "chatgpt" {
+                                    spawn(refresh_chatgpt(account, account_loading));
+                                }
+                            },
+                            option { value: "ollama", "Local · Ollama" }
+                            option { value: "chatgpt", "ChatGPT · OpenAI" }
+                        }
+                    }
+                    div { class: "review-notes-provider-info",
+                        if cloud_selected {
+                            p {
+                                "Sends the transcript to OpenAI after confirmation. Audio stays on this device."
+                            }
+                            div {
+                                class: "review-provider-account",
+                                role: "status",
+                                if account_loading() {
+                                    span { "Checking your ChatGPT connection…" }
+                                } else if account_connected {
+                                    span { class: "review-provider-connected",
+                                        Icon { name: "check", size: 13 }
+                                        if account_email.is_empty() {
+                                            "ChatGPT connected"
+                                        } else {
+                                            "{account_email}"
+                                        }
+                                    }
+                                    if account_busy {
+                                        span { "Another ChatGPT request is running." }
+                                    }
+                                } else if !account_error.is_empty() {
+                                    span { "Connection status unavailable." }
+                                    button {
+                                        class: "review-provider-link",
+                                        onclick: move |_| {
+                                            spawn(refresh_chatgpt(account, account_loading));
+                                        },
+                                        "Retry connection"
+                                        Icon { name: "refresh", size: 13 }
+                                    }
+                                } else {
+                                    span { "ChatGPT is not connected." }
+                                    button {
+                                        class: "review-provider-link",
+                                        onclick: move |_| js("window.dispatchEvent(new Event('echo-open-models'))".into()),
+                                        "Connect in Models"
+                                        Icon { name: "arrow", size: 13 }
                                     }
                                 }
-                            }}
+                            }
+                            if !account_error.is_empty() {
+                                p { class: "review-provider-error", "{account_error}" }
+                            }
+                        } else {
+                            p { "Transcript stays on this device." }
                         }
                     }
                 }
-            } }
-        }
-        dialog { id: "review-chatgpt-dialog", class: "review-dialog review-cloud-dialog", aria_labelledby: "review-chatgpt-title", aria_describedby: "review-chatgpt-description",
-            div { class: "review-dialog-icon", Icon { name: "sparkles", size: 23 } }
-            span { class: "review-eyebrow", "OPTIONAL CLOUD PROCESSING" }
-            h2 { id: "review-chatgpt-title", "Create notes with ChatGPT?" }
-            p { id: "review-chatgpt-description", "Echo will send this meeting’s transcript, including speaker labels and spoken text, to OpenAI through your connected ChatGPT account." }
-            div { class: "review-cloud-facts", p { Icon { name: "shield", size: 16 } span { "Your original audio is not sent. The resulting notes are saved in your local library." } } p { Icon { name: "clock", size: 16 } span { "Uses Codex usage included with your ChatGPT plan, subject to your plan’s limits. Availability and limits depend on your account." } } }
-            div { class: "review-cloud-status", role: "status", if account_loading() {"Checking your ChatGPT connection…"} else if account_connected {Icon { name: "check", size: 14 } if account_email.is_empty() {"ChatGPT connected"} else {"Connected as {account_email}"} } else if !account_error.is_empty() {"Connection status unavailable."} else {"Connect your ChatGPT account in Models to continue."} }
-            if account_busy {p { class: "review-provider-error", "Another ChatGPT request is running. Wait for it to finish, then try again." }}
-            if !account_error.is_empty() {p { class: "review-provider-error", "{account_error}" }}
-            div { class: "review-dialog-actions", ActionButton { id: "review-chatgpt-cancel", kind:ButtonKind::Secondary, onclick: move |_| js("document.getElementById('review-chatgpt-dialog').close()".into()), "Cancel" }
-                if !account_loading() && !account_connected && !account_error.is_empty() {ActionButton {kind:ButtonKind::Primary,onclick:move |_|{spawn(refresh_chatgpt(account,account_loading));},"Retry connection"}} else if !account_loading() && !account_connected {ActionButton { kind:ButtonKind::Primary, onclick: move |_| js("document.getElementById('review-chatgpt-dialog').close();window.dispatchEvent(new Event('echo-open-models'))".into()), "Connect in Models" }} else {ActionButton { kind:ButtonKind::Primary, disabled: locked||account_loading()||!account_connected||account_busy, onclick: move |_| request_generation(true), Icon { name: "sparkles", size: 15 } "Generate with ChatGPT" }}
+            }
+            if notes.is_null() {
+                div { class: "review-empty",
+                    span { class: "review-empty-icon",
+                        Icon { name: "sparkles", size: 27 }
+                    }
+                    h2 { "No notes yet" }
+                    p {
+                        if transcript.is_null() {
+                            "Create a transcript first to generate notes."
+                        } else {
+                            "Generate a summary, decisions, and actions from the transcript."
+                        }
+                    }
+                    if !transcript.is_null() {
+                        ActionButton {
+                            kind: ButtonKind::Primary,
+                            disabled: locked,
+                            onclick: generate,
+                            Icon { name: "sparkles", size: 16 }
+                            if generating {
+                                "Generating notes…"
+                            } else {
+                                "Generate meeting notes"
+                            }
+                        }
+                    } else {
+                        ActionButton {
+                            kind: ButtonKind::Primary,
+                            disabled: locked || transcribing || list(&value, "tracks").is_empty(),
+                            onclick: move |_| audio_transcribe(&meeting()),
+                            Icon { name: "volume", size: 16 }
+                            "Create transcript"
+                        }
+                    }
+                    span { class: "review-empty-footnote",
+                        Icon { name: "shield", size: 13 }
+                        if transcript.is_null() {
+                            "Speech recognition runs locally in your browser."
+                        } else if cloud_selected {
+                            "Uses your ChatGPT account through Codex, subject to your plan’s usage limits."
+                        } else {
+                            "Requires a running local Ollama model. Configure it in Settings."
+                        }
+                    }
+                }
+            } else {
+                SectionHeading { class: "review-section-heading", title: "Meeting notes",
+                    div { class: "review-section-actions",
+                        if editing {
+                            ActionButton {
+                                kind: ButtonKind::Ghost,
+                                onclick: move |_| draft.set(Value::Null),
+                                "Cancel"
+                            }
+                            ActionButton {
+                                kind: ButtonKind::Primary,
+                                disabled: busy(),
+                                onclick: move |_| {
+                                    let mut body = draft();
+                                    if ["summary", "decisions", "actions"]
+                                        .iter()
+                                        .any(|key| {
+                                            list(&body, key).iter().any(|item| text(item, "text").trim().is_empty())
+                                        })
+                                    {
+                                        notify.call("Each note needs some text before saving.".into());
+                                        return;
+                                    }
+                                    body["edited"] = json!(true);
+                                    let path = format!("/meetings/{}/notes", text(&meeting(), "id"));
+                                    busy.set(true);
+                                    spawn(async move {
+                                        if save(
+                                                "POST",
+                                                path,
+                                                body,
+                                                meeting,
+                                                on_change,
+                                                notify,
+                                                "Notes saved as a new version.",
+                                            )
+                                            .await
+                                        {
+                                            draft.set(Value::Null);
+                                        }
+                                        busy.set(false);
+                                    });
+                                },
+                                Icon { name: "check", size: 14 }
+                                "Save version"
+                            }
+                        } else {
+                            ActionButton {
+                                kind: ButtonKind::Secondary,
+                                disabled: locked,
+                                onclick: move |_| draft.set(current(&meeting(), "notes", "activeNotesId")),
+                                Icon { name: "edit", size: 14 }
+                                "Edit notes"
+                            }
+                            if !demo {
+                                button {
+                                    class: "icon-button",
+                                    aria_label: "Generate a new notes version",
+                                    title: "Generate a new draft, preserving this version",
+                                    disabled: locked,
+                                    onclick: generate,
+                                    Icon { name: "sparkles", size: 16 }
+                                }
+                            }
+                        }
+                    }
+                }
+                if generating {
+                    div { class: "review-notice", role: "status",
+                        span { class: "review-spin",
+                            Icon { name: "refresh", size: 16 }
+                        }
+                        span {
+                            if generating_notes == "chatgpt" {
+                                "Generating notes with ChatGPT…"
+                            } else {
+                                "Generating notes locally…"
+                            }
+                        }
+                    }
+                }
+                if stale {
+                    div { class: "review-notice review-notice-warning",
+                        Icon { name: "refresh", size: 17 }
+                        span {
+                            "These notes use an earlier transcript. Review the source version in Details, or generate a new draft."
+                        }
+                    }
+                }
+                div { class: "review-draft-label",
+                    Icon { name: "sparkles", size: 13 }
+                    span {
+                        if notes["edited"].as_bool().unwrap_or(false) {
+                            "Edited notes"
+                        } else {
+                            "AI draft · review for accuracy"
+                        }
+                    }
+                    span { class: "review-draft-divider", "·" }
+                    if !demo {
+                        span { "{source_label}" }
+                        span { class: "review-draft-divider", "·" }
+                    }
+                    span { title: "{model}", "{model}" }
+                }
+                if !usage_label.is_empty() {
+                    p { class: "review-notes-usage", "{usage_label}" }
+                }
+                div { class: "review-notes-grid",
+                    for (group, title, icon) in [
+                        ("summary", "Summary", "file"),
+                        ("decisions", "Key decisions", "check"),
+                        ("actions", "Action items", "check"),
+                    ]
+                    {
+                        section { class: "review-note-card review-note-{group}",
+                            header {
+                                span { class: "review-section-icon review-icon-{group}",
+                                    Icon { name: icon, size: 19 }
+                                }
+                                div {
+                                    h3 { "{title}" }
+                                }
+                                span { class: "review-note-count", "{list(&shown,group).len()}" }
+                            }
+                            div { class: "review-note-items",
+                                if list(&shown, group).is_empty() {
+                                    p { class: "review-muted",
+                                        if group == "summary" {
+                                            "No summary."
+                                        } else if group == "decisions" {
+                                            "No decisions."
+                                        } else {
+                                            "No action items."
+                                        }
+                                    }
+                                }
+                                for (index, item) in list(&shown, group).into_iter().enumerate() {
+                                    {
+                                        let done = item["done"].as_bool().unwrap_or(false);
+                                        let note_text = text(&item, "text");
+                                        let owner = text(&item, "owner");
+                                        let due = text(&item, "dueDate");
+                                        let source = meeting()["transcripts"]
+                                            .as_array()
+                                            .and_then(|items| {
+                                                items.iter().find(|v| v["id"] == shown["transcriptVersionId"])
+                                            })
+                                            .cloned()
+                                            .unwrap_or(Value::Null);
+                                        rsx! {
+                                            div { class: if done { "review-note-item review-note-done" } else { "review-note-item" },
+                                                if group == "actions" {
+                                                    button {
+                                                        class: if done { "review-check review-checked" } else { "review-check" },
+                                                        aria_label: "Toggle action completion",
+                                                        aria_pressed: done,
+                                                        disabled: locked,
+                                                        onclick: move |_| {
+                                                            if editing {
+                                                                let mut next = draft();
+                                                                next[group][index]["done"] = json!(! done);
+                                                                draft.set(next);
+                                                            } else {
+                                                                let mut body = current(&meeting(), "notes", "activeNotesId");
+                                                                body[group][index]["done"] = json!(! done);
+                                                                body["edited"] = json!(true);
+                                                                let path = format!("/meetings/{}/notes", text(&meeting(), "id"));
+                                                                busy.set(true);
+                                                                spawn(async move {
+                                                                    save(
+                                                                            "POST",
+                                                                            path,
+                                                                            body,
+                                                                            meeting,
+                                                                            on_change,
+                                                                            notify,
+                                                                            "Action item updated.",
+                                                                        )
+                                                                        .await;
+                                                                    busy.set(false);
+                                                                });
+                                                            }
+                                                        },
+                                                        if done {
+                                                            Icon { name: "check", size: 13 }
+                                                        }
+                                                    }
+                                                }
+                                                if group == "decisions" {
+                                                    span { class: "review-decision-index", "{index+1:02}" }
+                                                }
+                                                div { class: "review-note-content",
+                                                    if editing {
+                                                        textarea {
+                                                            class: "input review-note-textarea",
+                                                            aria_label: "Edit {title} {index+1}",
+                                                            rows: "3",
+                                                            value: "{note_text}",
+                                                            oninput: move |event| {
+                                                                let mut next = draft();
+                                                                next[group][index]["text"] = json!(event.value());
+                                                                draft.set(next);
+                                                            },
+                                                        }
+                                                        if group == "actions" {
+                                                            div { class: "review-action-edit",
+                                                                label {
+                                                                    "Owner"
+                                                                    input {
+                                                                        class: "input",
+                                                                        value: "{owner}",
+                                                                        placeholder: "Unassigned",
+                                                                        oninput: move |event| {
+                                                                            let mut next = draft();
+                                                                            next[group][index]["owner"] = json!(event.value());
+                                                                            draft.set(next);
+                                                                        },
+                                                                    }
+                                                                }
+                                                                label {
+                                                                    "Due date"
+                                                                    input {
+                                                                        class: "input",
+                                                                        r#type: "date",
+                                                                        value: "{due}",
+                                                                        oninput: move |event| {
+                                                                            let mut next = draft();
+                                                                            next[group][index]["dueDate"] = json!(event.value());
+                                                                            draft.set(next);
+                                                                        },
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        p { "{note_text}" }
+                                                        if group == "actions" && (!owner.is_empty() || !due.is_empty()) {
+                                                            div { class: "review-action-meta",
+                                                                if !owner.is_empty() {
+                                                                    span {
+                                                                        span { class: "review-avatar", "{owner.chars().next().unwrap_or(' ')}" }
+                                                                        "{owner}"
+                                                                    }
+                                                                }
+                                                                if !due.is_empty() {
+                                                                    span {
+                                                                        Icon { name: "clock", size: 12 }
+                                                                        "{due}"
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    div { class: "review-evidence",
+                                                        for evidence_id in list(&item, "passageIds") {
+                                                            {
+                                                                let pid = evidence_id.as_str().unwrap_or_default().to_string();
+                                                                let passage = list(&source, "passages")
+                                                                    .into_iter()
+                                                                    .find(|p| text(p, "id") == pid)
+                                                                    .unwrap_or(Value::Null);
+                                                                let timestamp = num(&passage, "start");
+                                                                let excerpt = text(&passage, "text");
+                                                                let valid = list(&transcript, "passages").iter().any(|p| text(p, "id") == pid);
+                                                                rsx! {
+                                                                    button {
+                                                                        class: "review-evidence-link",
+                                                                        title: "{excerpt}",
+                                                                        disabled: !valid,
+                                                                        onclick: move |_| {
+                                                                            tab.set("transcript".into());
+                                                                            seek(timestamp, Some(pid.clone()));
+                                                                        },
+                                                                        Icon { name: "volume", size: 12 }
+                                                                        "{api::time(timestamp)}"
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        if list(&item, "passageIds").is_empty() {
+                                                            span { class: "review-no-evidence", "No linked evidence · review this note" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            dialog {
+                id: "review-chatgpt-dialog",
+                class: "review-dialog review-cloud-dialog",
+                aria_labelledby: "review-chatgpt-title",
+                aria_describedby: "review-chatgpt-description",
+                div { class: "review-dialog-icon",
+                    Icon { name: "sparkles", size: 23 }
+                }
+                span { class: "review-eyebrow", "OPTIONAL CLOUD PROCESSING" }
+                h2 { id: "review-chatgpt-title", "Create notes with ChatGPT?" }
+                p { id: "review-chatgpt-description",
+                    "Echo will send this meeting’s transcript, including speaker labels and spoken text, to OpenAI through your connected ChatGPT account."
+                }
+                div { class: "review-cloud-facts",
+                    p {
+                        Icon { name: "shield", size: 16 }
+                        span {
+                            "Your original audio is not sent. The resulting notes are saved in your local library."
+                        }
+                    }
+                    p {
+                        Icon { name: "clock", size: 16 }
+                        span {
+                            "Uses Codex usage included with your ChatGPT plan, subject to your plan’s limits. Availability and limits depend on your account."
+                        }
+                    }
+                }
+                div { class: "review-cloud-status", role: "status",
+                    if account_loading() {
+                        "Checking your ChatGPT connection…"
+                    } else if account_connected {
+                        Icon { name: "check", size: 14 }
+                        if account_email.is_empty() {
+                            "ChatGPT connected"
+                        } else {
+                            "Connected as {account_email}"
+                        }
+                    } else if !account_error.is_empty() {
+                        "Connection status unavailable."
+                    } else {
+                        "Connect your ChatGPT account in Models to continue."
+                    }
+                }
+                if account_busy {
+                    p { class: "review-provider-error",
+                        "Another ChatGPT request is running. Wait for it to finish, then try again."
+                    }
+                }
+                if !account_error.is_empty() {
+                    p { class: "review-provider-error", "{account_error}" }
+                }
+                div { class: "review-dialog-actions",
+                    ActionButton {
+                        id: "review-chatgpt-cancel",
+                        kind: ButtonKind::Secondary,
+                        onclick: move |_| js("document.getElementById('review-chatgpt-dialog').close()".into()),
+                        "Cancel"
+                    }
+                    if !account_loading() && !account_connected && !account_error.is_empty() {
+                        ActionButton {
+                            kind: ButtonKind::Primary,
+                            onclick: move |_| {
+                                spawn(refresh_chatgpt(account, account_loading));
+                            },
+                            "Retry connection"
+                        }
+                    } else if !account_loading() && !account_connected {
+                        ActionButton {
+                            kind: ButtonKind::Primary,
+                            onclick: move |_| js(
+                                "document.getElementById('review-chatgpt-dialog').close();window.dispatchEvent(new Event('echo-open-models'))"
+                                    .into(),
+                            ),
+                            "Connect in Models"
+                        }
+                    } else {
+                        ActionButton {
+                            kind: ButtonKind::Primary,
+                            disabled: locked || account_loading() || !account_connected || account_busy,
+                            onclick: move |_| request_generation(true),
+                            Icon { name: "sparkles", size: 15 }
+                            "Generate with ChatGPT"
+                        }
+                    }
+                }
             }
         }
-    }}
+    }
 }
 
 #[component]
@@ -436,39 +1094,395 @@ fn TranscriptPane(
         })
         .collect();
     let shown = passages.iter().take(limit()).cloned().collect::<Vec<_>>();
-    rsx! {section { class: "review-transcript", aria_label: "Transcript",
-        SectionHeading {class:"review-section-heading",title:"Transcript",description:if transcript.is_null(){String::new()}else{format!("{} · Select a timestamp to jump to audio.",count_label(total,"passage","passages"))}, if !transcript.is_null() {ActionButton { kind:ButtonKind::Secondary, disabled: locked||transcribing||list(&value,"tracks").is_empty(), onclick: move |_| audio_transcribe(&meeting()), Icon { name: "refresh", size: 14 } "Regenerate" }} }
-        if transcript.is_null() {div { class: "review-empty", span { class: "review-empty-icon", Icon { name: "volume", size: 27 } } h2 { "No transcript yet" } p { if transcribing {"Transcribing saved audio on this device…"} else if is_active(&value) {"Your audio is being saved. Create the transcript after the meeting ends."} else {"Transcribe the saved audio on this device."} } ActionButton { kind:ButtonKind::Primary, disabled: locked||transcribing||list(&value,"tracks").is_empty(), onclick: move |_| audio_transcribe(&meeting()), Icon { name: "volume", size: 16 } "Create transcript" } }} else {
-            div { class: "review-transcript-toolbar", label { class: "review-search", Icon { name: "search", size: 16 } input { id: "review-transcript-search", placeholder: "Search transcript…", aria_label: "Search transcript", value: "{query}", oninput: move |event|{query.set(event.value());limit.set(60);} } if !query().is_empty() {button { class: "icon-button", aria_label: "Clear transcript search", onclick: move |_|query.set(String::new()), Icon { name: "close", size: 13 } }} }
-                button { id: "review-highlight-filter", class: if only_highlights(){"button review-filter review-filter-active"}else{"button button-secondary review-filter"}, aria_pressed: only_highlights(), onclick: move |_|only_highlights.toggle(), Icon { name: "bookmark", size: 14 } "Highlights" }
-                if !list(&value,"tracks").is_empty() { ActionButton { kind:ButtonKind::Ghost,class:"review-follow", onclick: move |_|js("window.echoReviewFollow=true;document.querySelector('.review-passage-playing')?.scrollIntoView({behavior:'smooth',block:'center'})".into()), Icon { name: "volume", size: 14 } "Follow playback" } }
-            }
-            if only_highlights() {p { class: "review-filter-hint", "Showing highlighted passages. Playback still includes the full recording." }}
-            div { class: "review-passages", onwheel: move |_| js("window.echoReviewFollow=false".into()), ontouchmove: move |_| js("window.echoReviewFollow=false".into()), onmouseup: move |_|js("if(window.getSelection()?.toString())window.echoReviewFollow=false".into()),
-                for (index,passage) in shown.into_iter().enumerate() {
-                    {let pid=text(&passage,"id");let passage_id=pid.clone();let edit_id=pid.clone();let highlight_id=pid.clone();let passage_text=text(&passage,"text");let copy_text=passage_text.clone();let edit_text=passage_text.clone();let speaker_label=text(&passage,"speaker");let speaker_color=speaker_labels.iter().position(|label|label==&speaker_label).unwrap_or(0)%4;let rename_label=speaker_label.clone();let start=num(&passage,"start");let end=num(&passage,"end");let highlighted=moments.iter().any(|m|m["passageId"]==passage["id"]&&text(m,"kind")=="highlight");let highlight_text=passage_text.clone();rsx!{
-                        div { id: "passage-{pid}", "data-start": "{start}", "data-end": "{end}", tabindex: "-1", class: if highlighted {"review-passage review-passage-highlighted"} else {"review-passage"},
-                            div { class: "review-passage-gutter", button { class: "review-timestamp", aria_label: "Seek to {api::time(start)}", onclick: move |_|seek(start,None), "{api::time(start)}" } span { class: "review-speaker-avatar review-speaker-color-{speaker_color}", "{speaker_label.chars().next().unwrap_or('S')}" } }
-                            div { class: "review-passage-main", div { class: "review-passage-label", button { class: "review-speaker", disabled: locked, title: "Rename this speaker throughout the transcript", onclick: move |_|{speaker.set(rename_label.clone());speaker_name.set(rename_label.clone());js("const dialog=document.getElementById('review-speaker-dialog');dialog.onclose=()=>document.getElementById('review-speaker-sample')?.pause();dialog.showModal();document.getElementById('review-speaker-name').focus()".into());}, "{speaker_label}" if !is_demo(&value) {Icon { name: "edit", size: 11 }} } if passage["uncertain"].as_bool().unwrap_or(false) {span { class: "review-uncertain", "Needs review" }} }
-                                if editing()==passage_id {div { class: "review-passage-edit", textarea { class: "input", aria_label: "Edit passage text", rows: "4", autofocus: true, value: "{correction}", oninput: move |event|correction.set(event.value()) } div { ActionButton { kind:ButtonKind::Ghost, onclick: move |_|editing.set(String::new()), "Cancel" } ActionButton { kind:ButtonKind::Primary, disabled: busy()||correction().trim().is_empty(), onclick: move |_| {let mut body=current(&meeting(),"transcripts","activeTranscriptId");if let Some(items)=body["passages"].as_array_mut(){for p in items.iter_mut(){if text(p,"id")==editing(){p["text"]=json!(correction().trim());}}}body["label"]=json!("Edited transcript");let path=format!("/meetings/{}/transcripts",text(&meeting(),"id"));busy.set(true);spawn(async move {if save("POST",path,body,meeting,on_change,notify,"Transcript saved as a new version.").await{editing.set(String::new());}busy.set(false);});}, "Save correction" } } }} else {p { "{passage_text}" }}
-                                div { class: "review-passage-actions", button { r#type: "button", class: "review-text-action", onclick: move |_| {let script=format!("return navigator.clipboard.writeText({}).then(()=>true).catch(()=>false)",json!(copy_text));spawn(async move {match document::eval(&script).await {Ok(Value::Bool(true))=>notify.call("Copied to clipboard.".into()),_=>notify.call("Select the text and use your browser’s Copy command.".into())}});}, Icon { name: "file", size: 12 } "Copy" } button { r#type: "button", class: "review-text-action", disabled: locked, onclick: move |_|{editing.set(edit_id.clone());correction.set(edit_text.clone());}, Icon { name: "edit", size: 12 } "Edit" } button { r#type: "button", class: "review-text-action", disabled: locked||highlighted, onclick: move |_|{let path=format!("/meetings/{}/moments",text(&meeting(),"id"));let body=json!({"time":start,"kind":"highlight","passageId":highlight_id,"label":highlight_text.chars().take(500).collect::<String>()});busy.set(true);spawn(async move{save("POST",path,body,meeting,on_change,notify,"Passage saved to your moments.").await;busy.set(false);});}, Icon { name: "bookmark", size: 12 } if highlighted {"Highlighted"} else {"Highlight"} } }
-                            } span { class: "review-passage-number", "{index+1:02}" }
-                        }
-                    }}
+    rsx! {
+        section { class: "review-transcript", aria_label: "Transcript",
+            SectionHeading {
+                class: "review-section-heading",
+                title: "Transcript",
+                description: if transcript.is_null() { String::new() } else { format!(
+                    "{} · Select a timestamp to jump to audio.",
+                    count_label(total, "passage", "passages"),
+                ) },
+                if !transcript.is_null() {
+                    ActionButton {
+                        kind: ButtonKind::Secondary,
+                        disabled: locked || transcribing || list(&value, "tracks").is_empty(),
+                        onclick: move |_| audio_transcribe(&meeting()),
+                        Icon { name: "refresh", size: 14 }
+                        "Regenerate"
+                    }
                 }
-                if passages.is_empty() {div { class: "review-small-empty", Icon { name: "search", size: 23 } h3 { "No matching passages" } p { "Try a different phrase, or save a passage using Highlight." } }}
             }
-            if passages.len()>limit() {ActionButton { id: "review-show-more", kind:ButtonKind::Secondary,class:"review-load-more", onclick: move |_|limit+=60, "Show more passages" Icon { name: "chevron", size: 15 } }}
-            div { class: "review-transcript-footer", Icon { name: "help", size: 13 } "Select a speaker label to rename it. Review passages marked “Needs review.”" }
-        }
-        dialog { id: "review-speaker-dialog", class: "review-dialog", aria_labelledby: "review-speaker-title", h2 { id: "review-speaker-title", "Who was speaking?" } p { "Rename “{speaker}” throughout this transcript. The original version stays in your history." }
-            SpeakerSamples { key: speaker(), meeting, speaker: speaker(), notify }
-            form { onsubmit: move |event|{event.prevent_default();if speaker_name().trim().is_empty(){return;}let mut body=current(&meeting(),"transcripts","activeTranscriptId");if let Some(items)=body["passages"].as_array_mut(){for p in items.iter_mut(){if text(p,"speaker")==speaker(){p["speaker"]=json!(speaker_name().trim());}}}body["label"]=json!("Speaker labels edited");let path=format!("/meetings/{}/transcripts",text(&meeting(),"id"));busy.set(true);spawn(async move{if save("POST",path,body,meeting,on_change,notify,"Speaker updated throughout this transcript.").await{js("document.getElementById('review-speaker-dialog').close()".into());}busy.set(false);});},
-                label { class: "review-form-label", "Speaker name" input { id: "review-speaker-name", class: "input", maxlength: "100", value: "{speaker_name}", oninput: move |event|speaker_name.set(event.value()) } }
-                div { class: "review-dialog-actions", ActionButton { button_type: "button", kind:ButtonKind::Secondary, onclick: move |_|js("document.getElementById('review-speaker-dialog').close()".into()), "Cancel" } ActionButton { button_type: "submit", kind:ButtonKind::Primary, disabled: busy()||speaker_name().trim().is_empty(), "Save speaker" } }
+            if transcript.is_null() {
+                div { class: "review-empty",
+                    span { class: "review-empty-icon",
+                        Icon { name: "volume", size: 27 }
+                    }
+                    h2 { "No transcript yet" }
+                    p {
+                        if transcribing {
+                            "Transcribing saved audio on this device…"
+                        } else if is_active(&value) {
+                            "Your audio is being saved. Create the transcript after the meeting ends."
+                        } else {
+                            "Transcribe the saved audio on this device."
+                        }
+                    }
+                    ActionButton {
+                        kind: ButtonKind::Primary,
+                        disabled: locked || transcribing || list(&value, "tracks").is_empty(),
+                        onclick: move |_| audio_transcribe(&meeting()),
+                        Icon { name: "volume", size: 16 }
+                        "Create transcript"
+                    }
+                }
+            } else {
+                div { class: "review-transcript-toolbar",
+                    label { class: "review-search",
+                        Icon { name: "search", size: 16 }
+                        input {
+                            id: "review-transcript-search",
+                            placeholder: "Search transcript…",
+                            aria_label: "Search transcript",
+                            value: "{query}",
+                            oninput: move |event| {
+                                query.set(event.value());
+                                limit.set(60);
+                            },
+                        }
+                        if !query().is_empty() {
+                            button {
+                                class: "icon-button",
+                                aria_label: "Clear transcript search",
+                                onclick: move |_| query.set(String::new()),
+                                Icon { name: "close", size: 13 }
+                            }
+                        }
+                    }
+                    button {
+                        id: "review-highlight-filter",
+                        class: if only_highlights() { "button review-filter review-filter-active" } else { "button button-secondary review-filter" },
+                        aria_pressed: only_highlights(),
+                        onclick: move |_| only_highlights.toggle(),
+                        Icon { name: "bookmark", size: 14 }
+                        "Highlights"
+                    }
+                    if !list(&value, "tracks").is_empty() {
+                        ActionButton {
+                            kind: ButtonKind::Ghost,
+                            class: "review-follow",
+                            onclick: move |_| js(
+                                "window.echoReviewFollow=true;document.querySelector('.review-passage-playing')?.scrollIntoView({behavior:'smooth',block:'center'})"
+                                    .into(),
+                            ),
+                            Icon { name: "volume", size: 14 }
+                            "Follow playback"
+                        }
+                    }
+                }
+                if only_highlights() {
+                    p { class: "review-filter-hint",
+                        "Showing highlighted passages. Playback still includes the full recording."
+                    }
+                }
+                div {
+                    class: "review-passages",
+                    onwheel: move |_| js("window.echoReviewFollow=false".into()),
+                    ontouchmove: move |_| js("window.echoReviewFollow=false".into()),
+                    onmouseup: move |_| js(
+                        "if(window.getSelection()?.toString())window.echoReviewFollow=false".into(),
+                    ),
+                    for (index, passage) in shown.into_iter().enumerate() {
+                        {
+                            let pid = text(&passage, "id");
+                            let passage_id = pid.clone();
+                            let edit_id = pid.clone();
+                            let highlight_id = pid.clone();
+                            let passage_text = text(&passage, "text");
+                            let copy_text = passage_text.clone();
+                            let edit_text = passage_text.clone();
+                            let speaker_label = text(&passage, "speaker");
+                            let speaker_color = speaker_labels
+                                .iter()
+                                .position(|label| label == &speaker_label)
+                                .unwrap_or(0) % 4;
+                            let rename_label = speaker_label.clone();
+                            let start = num(&passage, "start");
+                            let end = num(&passage, "end");
+                            let highlighted = moments
+                                .iter()
+                                .any(|m| m["passageId"] == passage["id"] && text(m, "kind") == "highlight");
+                            let highlight_text = passage_text.clone();
+                            rsx! {
+                                div {
+                                    id: "passage-{pid}",
+                                    "data-start": "{start}",
+                                    "data-end": "{end}",
+                                    tabindex: "-1",
+                                    class: if highlighted { "review-passage review-passage-highlighted" } else { "review-passage" },
+                                    div { class: "review-passage-gutter",
+                                        button {
+                                            class: "review-timestamp",
+                                            aria_label: "Seek to {api::time(start)}",
+                                            onclick: move |_| seek(start, None),
+                                            "{api::time(start)}"
+                                        }
+                                        span { class: "review-speaker-avatar review-speaker-color-{speaker_color}",
+                                            "{speaker_label.chars().next().unwrap_or('S')}"
+                                        }
+                                    }
+                                    div { class: "review-passage-main",
+                                        div { class: "review-passage-label",
+                                            button {
+                                                class: "review-speaker",
+                                                disabled: locked,
+                                                title: "Rename this speaker throughout the transcript",
+                                                onclick: move |_| {
+                                                    speaker.set(rename_label.clone());
+                                                    speaker_name.set(rename_label.clone());
+                                                    js(
+                                                        "const dialog=document.getElementById('review-speaker-dialog');dialog.onclose=()=>document.getElementById('review-speaker-sample')?.pause();dialog.showModal();document.getElementById('review-speaker-name').focus()"
+                                                            .into(),
+                                                    );
+                                                },
+                                                "{speaker_label}"
+                                                if !is_demo(&value) {
+                                                    Icon { name: "edit", size: 11 }
+                                                }
+                                            }
+                                            if passage["uncertain"].as_bool().unwrap_or(false) {
+                                                span { class: "review-uncertain", "Needs review" }
+                                            }
+                                        }
+                                        if editing() == passage_id {
+                                            div { class: "review-passage-edit",
+                                                textarea {
+                                                    class: "input",
+                                                    aria_label: "Edit passage text",
+                                                    rows: "4",
+                                                    autofocus: true,
+                                                    value: "{correction}",
+                                                    oninput: move |event| correction.set(event.value()),
+                                                }
+                                                div {
+                                                    ActionButton {
+                                                        kind: ButtonKind::Ghost,
+                                                        onclick: move |_| editing.set(String::new()),
+                                                        "Cancel"
+                                                    }
+                                                    ActionButton {
+                                                        kind: ButtonKind::Primary,
+                                                        disabled: busy() || correction().trim().is_empty(),
+                                                        onclick: move |_| {
+                                                            let mut body = current(&meeting(), "transcripts", "activeTranscriptId");
+                                                            if let Some(items) = body["passages"].as_array_mut() {
+                                                                for p in items.iter_mut() {
+                                                                    if text(p, "id") == editing() {
+                                                                        p["text"] = json!(correction().trim());
+                                                                    }
+                                                                }
+                                                            }
+                                                            body["label"] = json!("Edited transcript");
+                                                            let path = format!("/meetings/{}/transcripts", text(&meeting(), "id"));
+                                                            busy.set(true);
+                                                            spawn(async move {
+                                                                if save(
+                                                                        "POST",
+                                                                        path,
+                                                                        body,
+                                                                        meeting,
+                                                                        on_change,
+                                                                        notify,
+                                                                        "Transcript saved as a new version.",
+                                                                    )
+                                                                    .await
+                                                                {
+                                                                    editing.set(String::new());
+                                                                }
+                                                                busy.set(false);
+                                                            });
+                                                        },
+                                                        "Save correction"
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            p { "{passage_text}" }
+                                        }
+                                        div { class: "review-passage-actions",
+                                            button {
+                                                r#type: "button",
+                                                class: "review-text-action",
+                                                onclick: move |_| {
+                                                    let script = format!(
+                                                        "return navigator.clipboard.writeText({}).then(()=>true).catch(()=>false)",
+                                                        json!(copy_text),
+                                                    );
+                                                    spawn(async move {
+                                                        match document::eval(&script).await {
+                                                            Ok(Value::Bool(true)) => notify.call("Copied to clipboard.".into()),
+                                                            _ => {
+                                                                notify
+                                                                    .call(
+                                                                        "Select the text and use your browser’s Copy command."
+                                                                            .into(),
+                                                                    )
+                                                            }
+                                                        }
+                                                    });
+                                                },
+                                                Icon { name: "file", size: 12 }
+                                                "Copy"
+                                            }
+                                            button {
+                                                r#type: "button",
+                                                class: "review-text-action",
+                                                disabled: locked,
+                                                onclick: move |_| {
+                                                    editing.set(edit_id.clone());
+                                                    correction.set(edit_text.clone());
+                                                },
+                                                Icon { name: "edit", size: 12 }
+                                                "Edit"
+                                            }
+                                            button {
+                                                r#type: "button",
+                                                class: "review-text-action",
+                                                disabled: locked || highlighted,
+                                                onclick: move |_| {
+                                                    let path = format!("/meetings/{}/moments", text(&meeting(), "id"));
+                                                    let body = json!(
+                                                        { "time" : start, "kind" : "highlight", "passageId" : highlight_id, "label" :
+                                                        highlight_text.chars().take(500).collect::< String > () }
+                                                    );
+                                                    busy.set(true);
+                                                    spawn(async move {
+                                                        save(
+                                                                "POST",
+                                                                path,
+                                                                body,
+                                                                meeting,
+                                                                on_change,
+                                                                notify,
+                                                                "Passage saved to your moments.",
+                                                            )
+                                                            .await;
+                                                        busy.set(false);
+                                                    });
+                                                },
+                                                Icon { name: "bookmark", size: 12 }
+                                                if highlighted {
+                                                    "Highlighted"
+                                                } else {
+                                                    "Highlight"
+                                                }
+                                            }
+                                        }
+                                    }
+                                    span { class: "review-passage-number", "{index+1:02}" }
+                                }
+                            }
+                        }
+                    }
+                    if passages.is_empty() {
+                        div { class: "review-small-empty",
+                            Icon { name: "search", size: 23 }
+                            h3 { "No matching passages" }
+                            p { "Try a different phrase, or save a passage using Highlight." }
+                        }
+                    }
+                }
+                if passages.len() > limit() {
+                    ActionButton {
+                        id: "review-show-more",
+                        kind: ButtonKind::Secondary,
+                        class: "review-load-more",
+                        onclick: move |_| limit += 60,
+                        "Show more passages"
+                        Icon { name: "chevron", size: 15 }
+                    }
+                }
+                div { class: "review-transcript-footer",
+                    Icon { name: "help", size: 13 }
+                    "Select a speaker label to rename it. Review passages marked “Needs review.”"
+                }
+            }
+            dialog {
+                id: "review-speaker-dialog",
+                class: "review-dialog",
+                aria_labelledby: "review-speaker-title",
+                h2 { id: "review-speaker-title", "Who was speaking?" }
+                p {
+                    "Rename “{speaker}” throughout this transcript. The original version stays in your history."
+                }
+                SpeakerSamples {
+                    key: speaker(),
+                    meeting,
+                    speaker: speaker(),
+                    notify,
+                }
+                form {
+                    onsubmit: move |event| {
+                        event.prevent_default();
+                        if speaker_name().trim().is_empty() {
+                            return;
+                        }
+                        let mut body = current(&meeting(), "transcripts", "activeTranscriptId");
+                        if let Some(items) = body["passages"].as_array_mut() {
+                            for p in items.iter_mut() {
+                                if text(p, "speaker") == speaker() {
+                                    p["speaker"] = json!(speaker_name().trim());
+                                }
+                            }
+                        }
+                        body["label"] = json!("Speaker labels edited");
+                        let path = format!("/meetings/{}/transcripts", text(&meeting(), "id"));
+                        busy.set(true);
+                        spawn(async move {
+                            if save(
+                                    "POST",
+                                    path,
+                                    body,
+                                    meeting,
+                                    on_change,
+                                    notify,
+                                    "Speaker updated throughout this transcript.",
+                                )
+                                .await
+                            {
+                                js("document.getElementById('review-speaker-dialog').close()".into());
+                            }
+                            busy.set(false);
+                        });
+                    },
+                    label { class: "review-form-label",
+                        "Speaker name"
+                        input {
+                            id: "review-speaker-name",
+                            class: "input",
+                            maxlength: "100",
+                            value: "{speaker_name}",
+                            oninput: move |event| speaker_name.set(event.value()),
+                        }
+                    }
+                    div { class: "review-dialog-actions",
+                        ActionButton {
+                            button_type: "button",
+                            kind: ButtonKind::Secondary,
+                            onclick: move |_| js("document.getElementById('review-speaker-dialog').close()".into()),
+                            "Cancel"
+                        }
+                        ActionButton {
+                            button_type: "submit",
+                            kind: ButtonKind::Primary,
+                            disabled: busy() || speaker_name().trim().is_empty(),
+                            "Save speaker"
+                        }
+                    }
+                }
             }
         }
-    }}
+    }
 }
 
 #[component]
@@ -506,15 +1520,61 @@ fn SpeakerSamples(
     let unavailable = source.is_empty() || samples.is_empty();
     rsx! {
         div { class: "review-speaker-samples",
-            if !source.is_empty() { audio { id: "review-speaker-sample", src: "{source}", preload: "metadata" } }
-            div { class: "review-speaker-sample-heading", span { "LISTEN TO THE ORIGINAL" } span { if !samples.is_empty() { "{index()%samples.len()+1} / {samples.len()}" } } }
-            if unavailable { p { "A speaker sample needs the original audio for this meeting." } } else { p { "“{excerpt}”" } }
+            if !source.is_empty() {
+                audio {
+                    id: "review-speaker-sample",
+                    src: "{source}",
+                    preload: "metadata",
+                }
+            }
+            div { class: "review-speaker-sample-heading",
+                span { "LISTEN TO THE ORIGINAL" }
+                span {
+                    if !samples.is_empty() {
+                        "{index()%samples.len()+1} / {samples.len()}"
+                    }
+                }
+            }
+            if unavailable {
+                p { "A speaker sample needs the original audio for this meeting." }
+            } else {
+                p { "“{excerpt}”" }
+            }
             div { class: "review-speaker-sample-actions",
-                ActionButton { button_type: "button", kind:ButtonKind::Secondary, aria_label: "Play speaker sample", disabled: unavailable, onclick: move |_| {
-                    let script = format!("document.getElementById('review-audio')?.pause();const a=document.getElementById('review-speaker-sample');try{{a.currentTime={start};a.ontimeupdate=()=>{{if(a.currentTime>={end})a.pause();}};await a.play();return true;}}catch(error){{return false;}}");
-                    spawn(async move { if document::eval(&script).await.ok() != Some(json!(true)) { notify.call("The sample could not be played. Try the original recording or download it from Details.".into()); } });
-                }, Icon { name: "play", size: 13 } "Listen · {api::time(start)}" }
-                ActionButton { button_type: "button", kind:ButtonKind::Ghost, aria_label: "Next speaker sample", disabled: unavailable || samples.len() < 2, onclick: move |_| { js("document.getElementById('review-speaker-sample')?.pause()".into()); index += 1; }, "Next sample" Icon { name: "arrow", size: 13 } }
+                ActionButton {
+                    button_type: "button",
+                    kind: ButtonKind::Secondary,
+                    aria_label: "Play speaker sample",
+                    disabled: unavailable,
+                    onclick: move |_| {
+                        let script = format!(
+                            "document.getElementById('review-audio')?.pause();const a=document.getElementById('review-speaker-sample');try{{a.currentTime={start};a.ontimeupdate=()=>{{if(a.currentTime>={end})a.pause();}};await a.play();return true;}}catch(error){{return false;}}",
+                        );
+                        spawn(async move {
+                            if document::eval(&script).await.ok() != Some(json!(true)) {
+                                notify
+                                    .call(
+                                        "The sample could not be played. Try the original recording or download it from Details."
+                                            .into(),
+                                    );
+                            }
+                        });
+                    },
+                    Icon { name: "play", size: 13 }
+                    "Listen · {api::time(start)}"
+                }
+                ActionButton {
+                    button_type: "button",
+                    kind: ButtonKind::Ghost,
+                    aria_label: "Next speaker sample",
+                    disabled: unavailable || samples.len() < 2,
+                    onclick: move |_| {
+                        js("document.getElementById('review-speaker-sample')?.pause()".into());
+                        index += 1;
+                    },
+                    "Next sample"
+                    Icon { name: "arrow", size: 13 }
+                }
             }
             small { "Samples come from the shared recording. Labels are not verified identities." }
         }
@@ -536,13 +1596,167 @@ fn MomentsPane(
     let mut editing = use_signal(String::new);
     let mut label = use_signal(String::new);
     let locked = is_demo(&value) || is_active(&value) || busy();
-    rsx! {section { class: "review-moments", aria_label: "Saved moments", SectionHeading { class:"review-section-heading", title:"Saved moments", ActionButton { kind:ButtonKind::Secondary, disabled: locked||list(&value,"tracks").is_empty(), onclick: move |_|{busy.set(true);spawn(async move{bookmark(meeting,on_change,notify).await;busy.set(false);});}, Icon { name: "plus", size: 15 } "Bookmark current time" } }
-        if moments.is_empty() {div { class: "review-empty", span { class: "review-empty-icon", Icon { name: "bookmark", size: 27 } } h2 { "No saved moments" } p { "Highlight a transcript passage or bookmark the audio." } ActionButton { kind:ButtonKind::Secondary, onclick: move |_|tab.set("transcript".into()), "Open transcript" Icon { name: "arrow", size: 14 } } }} else {div { class: "review-moment-list", for moment in moments { {let mid=text(&moment,"id");let edit_id=mid.clone();let remove_id=mid.clone();let moment_label=text(&moment,"label");let edit_label=moment_label.clone();let kind=text(&moment,"kind");let start=num(&moment,"time");let passage=text(&moment,"passageId");rsx!{
-            div { class: "review-moment", span { class: "review-moment-icon review-moment-{kind}", Icon { name: "bookmark", size: 17 } } div { class: "review-moment-content", div { class: "review-moment-label", span { "{kind.to_uppercase()}" } button { class: "review-timestamp", onclick: move |_|{if !passage.is_empty(){tab.set("transcript".into());seek(start,Some(passage.clone()));}else{seek(start,None)}}, "{api::time(start)}" Icon { name: "arrow", size: 11 } } }
-                if editing()==mid {form { onsubmit: move |event|{event.prevent_default();if label().trim().is_empty(){return;}let path=format!("/meetings/{}/moments/{}",text(&meeting(),"id"),editing());let body=json!({"label":label().trim()});busy.set(true);spawn(async move{if save("PATCH",path,body,meeting,on_change,notify,"Saved moment updated.").await{editing.set(String::new());}busy.set(false);});}, input { class: "input", aria_label: "Saved moment label", maxlength: "500", autofocus: true, value: "{label}", oninput: move |event|label.set(event.value()) } button { class: "icon-button", aria_label: "Save moment label", disabled: busy()||label().trim().is_empty(), Icon { name: "check", size: 16 } } button { r#type: "button", class: "icon-button", aria_label: "Cancel editing moment", onclick: move |_|editing.set(String::new()), Icon { name: "close", size: 16 } } }} else {p { "{moment_label}" }}
-            } div { class: "review-moment-actions", button { class: "icon-button", aria_label: "Edit saved moment label", disabled: locked, onclick: move |_|{editing.set(edit_id.clone());label.set(edit_label.clone());}, Icon { name: "edit", size: 15 } } button { class: "icon-button", aria_label: "Remove saved moment", disabled: locked, onclick: move |_|{let path=format!("/meetings/{}/moments/{remove_id}",text(&meeting(),"id"));busy.set(true);spawn(async move {save("DELETE",path,Value::Null,meeting,on_change,notify,"Saved moment removed.").await;busy.set(false);});}, Icon { name: "close", size: 16 } } } }
-        }} } }}
-    }}
+    rsx! {
+        section { class: "review-moments", aria_label: "Saved moments",
+            SectionHeading { class: "review-section-heading", title: "Saved moments",
+                ActionButton {
+                    kind: ButtonKind::Secondary,
+                    disabled: locked || list(&value, "tracks").is_empty(),
+                    onclick: move |_| {
+                        busy.set(true);
+                        spawn(async move {
+                            bookmark(meeting, on_change, notify).await;
+                            busy.set(false);
+                        });
+                    },
+                    Icon { name: "plus", size: 15 }
+                    "Bookmark current time"
+                }
+            }
+            if moments.is_empty() {
+                div { class: "review-empty",
+                    span { class: "review-empty-icon",
+                        Icon { name: "bookmark", size: 27 }
+                    }
+                    h2 { "No saved moments" }
+                    p { "Highlight a transcript passage or bookmark the audio." }
+                    ActionButton {
+                        kind: ButtonKind::Secondary,
+                        onclick: move |_| tab.set("transcript".into()),
+                        "Open transcript"
+                        Icon { name: "arrow", size: 14 }
+                    }
+                }
+            } else {
+                div { class: "review-moment-list",
+                    for moment in moments {
+                        {
+                            let mid = text(&moment, "id");
+                            let edit_id = mid.clone();
+                            let remove_id = mid.clone();
+                            let moment_label = text(&moment, "label");
+                            let edit_label = moment_label.clone();
+                            let kind = text(&moment, "kind");
+                            let start = num(&moment, "time");
+                            let passage = text(&moment, "passageId");
+                            rsx! {
+                                div { class: "review-moment",
+                                    span { class: "review-moment-icon review-moment-{kind}",
+                                        Icon { name: "bookmark", size: 17 }
+                                    }
+                                    div { class: "review-moment-content",
+                                        div { class: "review-moment-label",
+                                            span { "{kind.to_uppercase()}" }
+                                            button {
+                                                class: "review-timestamp",
+                                                onclick: move |_| {
+                                                    if !passage.is_empty() {
+                                                        tab.set("transcript".into());
+                                                        seek(start, Some(passage.clone()));
+                                                    } else {
+                                                        seek(start, None)
+                                                    }
+                                                },
+                                                "{api::time(start)}"
+                                                Icon { name: "arrow", size: 11 }
+                                            }
+                                        }
+                                        if editing() == mid {
+                                            form {
+                                                onsubmit: move |event| {
+                                                    event.prevent_default();
+                                                    if label().trim().is_empty() {
+                                                        return;
+                                                    }
+                                                    let path = format!("/meetings/{}/moments/{}", text(&meeting(), "id"), editing());
+                                                    let body = json!({ "label" : label().trim() });
+                                                    busy.set(true);
+                                                    spawn(async move {
+                                                        if save(
+                                                                "PATCH",
+                                                                path,
+                                                                body,
+                                                                meeting,
+                                                                on_change,
+                                                                notify,
+                                                                "Saved moment updated.",
+                                                            )
+                                                            .await
+                                                        {
+                                                            editing.set(String::new());
+                                                        }
+                                                        busy.set(false);
+                                                    });
+                                                },
+                                                input {
+                                                    class: "input",
+                                                    aria_label: "Saved moment label",
+                                                    maxlength: "500",
+                                                    autofocus: true,
+                                                    value: "{label}",
+                                                    oninput: move |event| label.set(event.value()),
+                                                }
+                                                button {
+                                                    class: "icon-button",
+                                                    aria_label: "Save moment label",
+                                                    disabled: busy() || label().trim().is_empty(),
+                                                    Icon { name: "check", size: 16 }
+                                                }
+                                                button {
+                                                    r#type: "button",
+                                                    class: "icon-button",
+                                                    aria_label: "Cancel editing moment",
+                                                    onclick: move |_| editing.set(String::new()),
+                                                    Icon { name: "close", size: 16 }
+                                                }
+                                            }
+                                        } else {
+                                            p { "{moment_label}" }
+                                        }
+                                    }
+                                    div { class: "review-moment-actions",
+                                        button {
+                                            class: "icon-button",
+                                            aria_label: "Edit saved moment label",
+                                            disabled: locked,
+                                            onclick: move |_| {
+                                                editing.set(edit_id.clone());
+                                                label.set(edit_label.clone());
+                                            },
+                                            Icon { name: "edit", size: 15 }
+                                        }
+                                        button {
+                                            class: "icon-button",
+                                            aria_label: "Remove saved moment",
+                                            disabled: locked,
+                                            onclick: move |_| {
+                                                let path = format!("/meetings/{}/moments/{remove_id}", text(&meeting(), "id"));
+                                                busy.set(true);
+                                                spawn(async move {
+                                                    save(
+                                                            "DELETE",
+                                                            path,
+                                                            Value::Null,
+                                                            meeting,
+                                                            on_change,
+                                                            notify,
+                                                            "Saved moment removed.",
+                                                        )
+                                                        .await;
+                                                    busy.set(false);
+                                                });
+                                            },
+                                            Icon { name: "close", size: 16 }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[component]
@@ -574,23 +1788,325 @@ fn DetailsPane(
     let duration = api::time(num(&value, "duration"));
     let mode = text(&value, "mode");
     let gaps = list(&value, "gaps");
-    rsx! {section { class: "review-details", aria_label: "Meeting details", SectionHeading { class:"review-section-heading", title:"Meeting details" }
-        div { class: "review-details-grid",
-            section { class: "review-detail-card", h3 {Icon { name: "help", size: 17 } "Recording information"} dl { div {dt {"Created"} dd {"{date}"}} div {dt {"Duration"} dd {"{duration}"}} div {dt {"Recording mode"} dd {"{mode}"}} div {dt {"Participant consent"} dd {if has_consent {"Acknowledged"} else {"Not recorded"}}} div {dt {"Audio stored"} dd {"{api::bytes(bytes)}"}} } }
-            section { class: "review-detail-card", h3 {Icon { name: "volume", size: 17 } "Original audio"} if tracks.is_empty() {p { class: "review-muted", "No original audio is available for this meeting." }} else if continuous {div { class: "review-track-list", div {span {class:"review-file-icon",Icon {name:"volume",size:18}} span {strong {"Meeting recording"} small {"{api::bytes(bytes)} · WAV"}} a {class:"icon-button",href:"{download_url}",download:true,aria_label:"Download meeting recording",Icon {name:"download",size:16}}}}} else {div { class: "review-track-list", for track in tracks { {let label=text(&track,"label");let size=api::bytes(num(&track,"bytes"));let mime=text(&track,"mimeType");let url=text(&track,"url");rsx!{div { span { class: "review-file-icon", Icon { name: "volume", size: 18 } } span {strong {"{label}"} small {"{size} · {mime}"}} if !is_demo(&value) {a { class: "icon-button", href: "{url}", download: true, aria_label: "Download {label}", Icon { name: "download", size: 16 } }} }}} } }} p { class: "review-detail-help", "Speaker labels do not represent separate audio files." } }
-            section { class: "review-detail-card review-processing-card", h3 {Icon { name: "sparkles", size: 17 } "Processing choices"} form { onsubmit: move |event|{event.prevent_default();let path=format!("/meetings/{}",text(&meeting(),"id"));let body=json!({"speechModel":speech(),"notesModel":notes().trim()});busy.set(true);spawn(async move {save("PATCH",path,body,meeting,on_change,notify,"Processing choices saved for future runs.").await;busy.set(false);});},
-                label {"Speech recognition" select { class: "input", value: "{speech}", disabled: locked, onchange: move |event|speech.set(event.value()), option {value:"onnx-community/whisper-large-v3-turbo",selected:speech()=="onnx-community/whisper-large-v3-turbo","Whisper Large V3 Turbo"} option {value:"onnx-community/whisper-large-v3",selected:speech()=="onnx-community/whisper-large-v3","Whisper Large V3"} }}
-                label {"Local notes model" input { class: "input", value: "{notes}", maxlength: "100", disabled: locked, placeholder: "qwen2.5:3b", oninput: move |event|notes.set(event.value()) }} ActionButton { button_type: "submit", kind:ButtonKind::Secondary, disabled: locked||notes().trim().is_empty()||(speech()==saved_speech_model&&notes()==text(&value,"notesModel")), "Save choices" }
-            } p { class: "review-detail-help", "Applies to future runs. Download models in Models." } }
-            for (collection,active_id,title,icon) in [("transcripts","activeTranscriptId","Transcript history","refresh"),("notes","activeNotesId","Notes history","file")] {
-                section { class: "review-detail-card", h3 {Icon { name: icon, size: 17 } "{title}" span { class: "review-note-count", "{list(&value,collection).len()}" }}
-                    if list(&value,collection).is_empty() {p { class: "review-muted", "No versions yet." }} else { div { class: "review-version-list", for (index,version) in list(&value,collection).into_iter().enumerate().rev() { {let vid=text(&version,"id");let label=if text(&version,"label").is_empty(){format!("{} {}",if collection=="notes"{"Notes"}else{"Transcript"},index+1)}else{text(&version,"label")};let date=readable_date(&text(&version,"createdAt"));let model=if collection=="notes"&&!is_demo(&value){format!("{} · {}",notes_source(&version),text(&version,"model"))}else{text(&version,"model")};let usage=if collection=="notes"{notes_usage(&version)}else{String::new()};let is_current=value[active_id]==version["id"];rsx!{div { class: "review-version", span { class: "review-version-dot" } div { strong {"{label}"} small {"{date}"} span { class: "review-version-model", "{model}" } if !usage.is_empty(){small {"{usage}"}} if collection=="transcripts" {small {{format!("{} used",count_label(list(&version,"vocabulary").len(),"vocabulary entry","vocabulary entries"))}}} else {small {if version["transcriptVersionId"]==value["activeTranscriptId"] {"Uses active transcript"} else {"Uses an earlier transcript"}}} } if is_current {span { class: "review-current-version", "Active" }} else {ActionButton { kind:ButtonKind::Ghost, disabled: locked, onclick: move |_| {js("document.getElementById('review-audio')?.pause()".into());let path=format!("/meetings/{}",text(&meeting(),"id"));let body=json!({active_id:vid});busy.set(true);spawn(async move{save("PATCH",path,body,meeting,on_change,notify,"Version activated.").await;busy.set(false);});}, "Restore" }} }}} } } }
+    rsx! {
+        section { class: "review-details", aria_label: "Meeting details",
+            SectionHeading { class: "review-section-heading", title: "Meeting details" }
+            div { class: "review-details-grid",
+                section { class: "review-detail-card",
+                    h3 {
+                        Icon { name: "help", size: 17 }
+                        "Recording information"
+                    }
+                    dl {
+                        div {
+                            dt { "Created" }
+                            dd { "{date}" }
+                        }
+                        div {
+                            dt { "Duration" }
+                            dd { "{duration}" }
+                        }
+                        div {
+                            dt { "Recording mode" }
+                            dd { "{mode}" }
+                        }
+                        div {
+                            dt { "Participant consent" }
+                            dd {
+                                if has_consent {
+                                    "Acknowledged"
+                                } else {
+                                    "Not recorded"
+                                }
+                            }
+                        }
+                        div {
+                            dt { "Audio stored" }
+                            dd { "{api::bytes(bytes)}" }
+                        }
+                    }
+                }
+                section { class: "review-detail-card",
+                    h3 {
+                        Icon { name: "volume", size: 17 }
+                        "Original audio"
+                    }
+                    if tracks.is_empty() {
+                        p { class: "review-muted", "No original audio is available for this meeting." }
+                    } else if continuous {
+                        div { class: "review-track-list",
+                            div {
+                                span { class: "review-file-icon",
+                                    Icon { name: "volume", size: 18 }
+                                }
+                                span {
+                                    strong { "Meeting recording" }
+                                    small { "{api::bytes(bytes)} · WAV" }
+                                }
+                                a {
+                                    class: "icon-button",
+                                    href: "{download_url}",
+                                    download: true,
+                                    aria_label: "Download meeting recording",
+                                    Icon { name: "download", size: 16 }
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "review-track-list",
+                            for track in tracks {
+                                {
+                                    let label = text(&track, "label");
+                                    let size = api::bytes(num(&track, "bytes"));
+                                    let mime = text(&track, "mimeType");
+                                    let url = text(&track, "url");
+                                    rsx! {
+                                        div {
+                                            span { class: "review-file-icon",
+                                                Icon { name: "volume", size: 18 }
+                                            }
+                                            span {
+                                                strong { "{label}" }
+                                                small { "{size} · {mime}" }
+                                            }
+                                            if !is_demo(&value) {
+                                                a {
+                                                    class: "icon-button",
+                                                    href: "{url}",
+                                                    download: true,
+                                                    aria_label: "Download {label}",
+                                                    Icon { name: "download", size: 16 }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    p { class: "review-detail-help",
+                        "Speaker labels do not represent separate audio files."
+                    }
+                }
+                section { class: "review-detail-card review-processing-card",
+                    h3 {
+                        Icon { name: "sparkles", size: 17 }
+                        "Processing choices"
+                    }
+                    form {
+                        onsubmit: move |event| {
+                            event.prevent_default();
+                            let path = format!("/meetings/{}", text(&meeting(), "id"));
+                            let body = json!({ "speechModel" : speech(), "notesModel" : notes().trim() });
+                            busy.set(true);
+                            spawn(async move {
+                                save(
+                                        "PATCH",
+                                        path,
+                                        body,
+                                        meeting,
+                                        on_change,
+                                        notify,
+                                        "Processing choices saved for future runs.",
+                                    )
+                                    .await;
+                                busy.set(false);
+                            });
+                        },
+                        label {
+                            "Speech recognition"
+                            select {
+                                class: "input",
+                                value: "{speech}",
+                                disabled: locked,
+                                onchange: move |event| speech.set(event.value()),
+                                option {
+                                    value: "onnx-community/whisper-large-v3-turbo",
+                                    selected: speech() == "onnx-community/whisper-large-v3-turbo",
+                                    "Whisper Large V3 Turbo"
+                                }
+                                option {
+                                    value: "onnx-community/whisper-large-v3",
+                                    selected: speech() == "onnx-community/whisper-large-v3",
+                                    "Whisper Large V3"
+                                }
+                            }
+                        }
+                        label {
+                            "Local notes model"
+                            input {
+                                class: "input",
+                                value: "{notes}",
+                                maxlength: "100",
+                                disabled: locked,
+                                placeholder: "qwen2.5:3b",
+                                oninput: move |event| notes.set(event.value()),
+                            }
+                        }
+                        ActionButton {
+                            button_type: "submit",
+                            kind: ButtonKind::Secondary,
+                            disabled: locked || notes().trim().is_empty()
+                                || (speech() == saved_speech_model && notes() == text(&value, "notesModel")),
+                            "Save choices"
+                        }
+                    }
+                    p { class: "review-detail-help",
+                        "Applies to future runs. Download models in Models."
+                    }
+                }
+                for (collection, active_id, title, icon) in [
+                    ("transcripts", "activeTranscriptId", "Transcript history", "refresh"),
+                    ("notes", "activeNotesId", "Notes history", "file"),
+                ]
+                {
+                    section { class: "review-detail-card",
+                        h3 {
+                            Icon { name: icon, size: 17 }
+                            "{title}"
+                            span { class: "review-note-count", "{list(&value,collection).len()}" }
+                        }
+                        if list(&value, collection).is_empty() {
+                            p { class: "review-muted", "No versions yet." }
+                        } else {
+                            div { class: "review-version-list",
+                                for (index, version) in list(&value, collection).into_iter().enumerate().rev() {
+                                    {
+                                        let vid = text(&version, "id");
+                                        let label = if text(&version, "label").is_empty() {
+                                            format!(
+                                                "{} {}",
+                                                if collection == "notes" { "Notes" } else { "Transcript" },
+                                                index + 1,
+                                            )
+                                        } else {
+                                            text(&version, "label")
+                                        };
+                                        let date = readable_date(&text(&version, "createdAt"));
+                                        let model = if collection == "notes" && !is_demo(&value) {
+                                            format!("{} · {}", notes_source(&version), text(&version, "model"))
+                                        } else {
+                                            text(&version, "model")
+                                        };
+                                        let usage = if collection == "notes" {
+                                            notes_usage(&version)
+                                        } else {
+                                            String::new()
+                                        };
+                                        let is_current = value[active_id] == version["id"];
+                                        rsx! {
+                                            div { class: "review-version",
+                                                span { class: "review-version-dot" }
+                                                div {
+                                                    strong { "{label}" }
+                                                    small { "{date}" }
+                                                    span { class: "review-version-model", "{model}" }
+                                                    if !usage.is_empty() {
+                                                        small { "{usage}" }
+                                                    }
+                                                    if collection == "transcripts" {
+                                                        small {
+                                                            {
+                                                                format!(
+                                                                    "{} used",
+                                                                    count_label(
+                                                                        list(&version, "vocabulary").len(),
+                                                                        "vocabulary entry",
+                                                                        "vocabulary entries",
+                                                                    ),
+                                                                )
+                                                            }
+                                                        }
+                                                    } else {
+                                                        small {
+                                                            if version["transcriptVersionId"] == value["activeTranscriptId"] {
+                                                                "Uses active transcript"
+                                                            } else {
+                                                                "Uses an earlier transcript"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if is_current {
+                                                    span { class: "review-current-version", "Active" }
+                                                } else {
+                                                    ActionButton {
+                                                        kind: ButtonKind::Ghost,
+                                                        disabled: locked,
+                                                        onclick: move |_| {
+                                                            js("document.getElementById('review-audio')?.pause()".into());
+                                                            let path = format!("/meetings/{}", text(&meeting(), "id"));
+                                                            let body = json!({ active_id : vid });
+                                                            busy.set(true);
+                                                            spawn(async move {
+                                                                save("PATCH", path, body, meeting, on_change, notify, "Version activated.")
+                                                                    .await;
+                                                                busy.set(false);
+                                                            });
+                                                        },
+                                                        "Restore"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                section { class: "review-detail-card",
+                    h3 {
+                        Icon { name: "shield", size: 17 }
+                        "Recording integrity"
+                    }
+                    if gaps.is_empty() {
+                        p { class: "review-muted", "No recording interruptions were reported." }
+                    } else {
+                        ul { class: "review-gap-list",
+                            for gap in gaps {
+                                {
+                                    let start = num(&gap, "start");
+                                    let end = num(&gap, "end");
+                                    let reason = text(&gap, "reason");
+                                    rsx! {
+                                        li {
+                                            button { class: "review-timestamp", onclick: move |_| seek(start, None),
+                                                "{api::time(start)}–{api::time(end)}"
+                                            }
+                                            span { "{reason}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    p { class: "review-detail-help",
+                        "Pauses or disconnected inputs can cause gaps. Review overlapping or unclear speech."
+                    }
                 }
             }
-            section { class: "review-detail-card", h3 {Icon { name: "shield", size: 17 } "Recording integrity"} if gaps.is_empty() {p { class: "review-muted", "No recording interruptions were reported." }} else {ul { class: "review-gap-list", for gap in gaps { {let start=num(&gap,"start");let end=num(&gap,"end");let reason=text(&gap,"reason");rsx!{li {button { class: "review-timestamp", onclick: move |_|seek(start,None), "{api::time(start)}–{api::time(end)}"} span {"{reason}"}}}} } }} p { class: "review-detail-help", "Pauses or disconnected inputs can cause gaps. Review overlapping or unclear speech." } }
+            div { class: "review-danger-zone",
+                div {
+                    h3 { "Delete this meeting" }
+                    p {
+                        "Removes managed audio, transcripts, notes, and saved moments. Independent exports and backups remain."
+                    }
+                }
+                button {
+                    id: "review-delete-trigger",
+                    class: "button review-delete-button",
+                    disabled: locked,
+                    onclick: move |_| js(
+                        "document.getElementById('review-delete-dialog').showModal();document.getElementById('review-keep-meeting').focus()"
+                            .into(),
+                    ),
+                    Icon { name: "trash", size: 15 }
+                    "Delete meeting"
+                }
+            }
         }
-        div { class: "review-danger-zone", div {h3 {"Delete this meeting"} p {"Removes managed audio, transcripts, notes, and saved moments. Independent exports and backups remain."}} button {id:"review-delete-trigger",class:"button review-delete-button",disabled:locked,onclick:move |_|js("document.getElementById('review-delete-dialog').showModal();document.getElementById('review-keep-meeting').focus()".into()),Icon { name: "trash", size: 15 } "Delete meeting"} }
-    }}
+    }
 }
 
 /// Create a bookmark at the current playback position and update meeting state.
@@ -640,13 +2156,119 @@ fn AudioPlayer(
         text(&track, "label")
     };
     let locked = is_demo(&value) || is_active(&value) || busy();
-    rsx! { footer { class: "review-player review-native-player",
-        div { class: "review-player-top", div { class: "review-player-source", span { class: "review-player-icon", Icon { name: "volume", size: 16 } } div { strong { "Original recording" } if tracks.len()>1 && !continuous {select {aria_label:"Audio track",value:"{track_id}",onchange:move |event|{track_id.set(event.value());failed.set(false);},for item in tracks {option {value:text(&item,"id"),selected:track_id()==text(&item,"id"),{text(&item,"label")}}} }} else {small {"{label}"}} } }
-            div { class: "review-player-controls", button {class:"icon-button review-jump",aria_label:"Back five seconds",disabled:failed(),onclick:move |_|js("const a=document.getElementById('review-audio');if(a)a.currentTime=Math.max(0,a.currentTime-5)".into()),Icon {name:"refresh",size:20} span {"5"}} button {class:"icon-button review-jump",aria_label:"Forward five seconds",disabled:failed(),onclick:move |_|js("const a=document.getElementById('review-audio');if(a)a.currentTime=Math.min(a.duration||0,a.currentTime+5)".into()),Icon {name:"refresh",size:20} span {"5"}} }
-            div { class: "review-player-right", label {span {class:"review-visually-hidden","Playback speed"} select {aria_label:"Playback speed",value:"{speed}",onchange:move |event|{let next=event.value();if let Ok(rate)=next.parse::<f64>(){js(format!("const a=document.getElementById('review-audio');if(a)a.playbackRate={rate}"));}speed.set(next);},for rate in ["0.75","1","1.25","1.5","2"] {option {value:rate,selected:speed()==rate,"{rate}×"}} }} button {class:"icon-button",aria_label:"Bookmark current playback time",disabled:locked,onclick:move |_|{busy.set(true);spawn(async move{bookmark(meeting,on_change,notify).await;busy.set(false);});},Icon {name:"bookmark",size:17}} }
+    rsx! {
+        footer { class: "review-player review-native-player",
+            div { class: "review-player-top",
+                div { class: "review-player-source",
+                    span { class: "review-player-icon",
+                        Icon { name: "volume", size: 16 }
+                    }
+                    div {
+                        strong { "Original recording" }
+                        if tracks.len() > 1 && !continuous {
+                            select {
+                                aria_label: "Audio track",
+                                value: "{track_id}",
+                                onchange: move |event| {
+                                    track_id.set(event.value());
+                                    failed.set(false);
+                                },
+                                for item in tracks {
+                                    option {
+                                        value: text(&item, "id"),
+                                        selected: track_id() == text(&item, "id"),
+                                        {text(&item, "label")}
+                                    }
+                                }
+                            }
+                        } else {
+                            small { "{label}" }
+                        }
+                    }
+                }
+                div { class: "review-player-controls",
+                    button {
+                        class: "icon-button review-jump",
+                        aria_label: "Back five seconds",
+                        disabled: failed(),
+                        onclick: move |_| js(
+                            "const a=document.getElementById('review-audio');if(a)a.currentTime=Math.max(0,a.currentTime-5)"
+                                .into(),
+                        ),
+                        Icon { name: "refresh", size: 20 }
+                        span { "5" }
+                    }
+                    button {
+                        class: "icon-button review-jump",
+                        aria_label: "Forward five seconds",
+                        disabled: failed(),
+                        onclick: move |_| js(
+                            "const a=document.getElementById('review-audio');if(a)a.currentTime=Math.min(a.duration||0,a.currentTime+5)"
+                                .into(),
+                        ),
+                        Icon { name: "refresh", size: 20 }
+                        span { "5" }
+                    }
+                }
+                div { class: "review-player-right",
+                    label {
+                        span { class: "review-visually-hidden", "Playback speed" }
+                        select {
+                            aria_label: "Playback speed",
+                            value: "{speed}",
+                            onchange: move |event| {
+                                let next = event.value();
+                                if let Ok(rate) = next.parse::<f64>() {
+                                    js(
+                                        format!(
+                                            "const a=document.getElementById('review-audio');if(a)a.playbackRate={rate}",
+                                        ),
+                                    );
+                                }
+                                speed.set(next);
+                            },
+                            for rate in ["0.75", "1", "1.25", "1.5", "2"] {
+                                option { value: rate, selected: speed() == rate, "{rate}×" }
+                            }
+                        }
+                    }
+                    button {
+                        class: "icon-button",
+                        aria_label: "Bookmark current playback time",
+                        disabled: locked,
+                        onclick: move |_| {
+                            busy.set(true);
+                            spawn(async move {
+                                bookmark(meeting, on_change, notify).await;
+                                busy.set(false);
+                            });
+                        },
+                        Icon { name: "bookmark", size: 17 }
+                    }
+                }
+            }
+            audio {
+                id: "review-audio",
+                src: "{url}",
+                preload: "metadata",
+                controls: true,
+                onerror: move |_| failed.set(true),
+                onloadedmetadata: move |_| {
+                    js(
+                        format!(
+                            "const a=document.getElementById('review-audio');if(a){{a.playbackRate={};a.ontimeupdate=()=>{{document.querySelectorAll('.review-passage').forEach(p=>{{const active=a.currentTime>=Number(p.dataset.start)&&a.currentTime<Number(p.dataset.end);const changed=active&&!p.classList.contains('review-passage-playing');p.classList.toggle('review-passage-playing',active);if(changed&&window.echoReviewFollow)p.scrollIntoView({{behavior:'smooth',block:'center'}});}});}};}}",
+                            speed(),
+                        ),
+                    );
+                },
+            }
+            if failed() {
+                p { class: "review-player-error", role: "status",
+                    "This audio could not be played. "
+                    a { href: "{url}", download: true, "Download the original" }
+                    " to try another player."
+                }
+            }
         }
-        audio {id:"review-audio",src:"{url}",preload:"metadata",controls:true,onerror:move |_|failed.set(true),onloadedmetadata:move |_|{js(format!("const a=document.getElementById('review-audio');if(a){{a.playbackRate={};a.ontimeupdate=()=>{{document.querySelectorAll('.review-passage').forEach(p=>{{const active=a.currentTime>=Number(p.dataset.start)&&a.currentTime<Number(p.dataset.end);const changed=active&&!p.classList.contains('review-passage-playing');p.classList.toggle('review-passage-playing',active);if(changed&&window.echoReviewFollow)p.scrollIntoView({{behavior:'smooth',block:'center'}});}});}};}}",speed()));}
-        }
-        if failed() {p {class:"review-player-error",role:"status","This audio could not be played. " a {href:"{url}",download:true,"Download the original"} " to try another player."}}
-    }}
+    }
 }

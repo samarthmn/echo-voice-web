@@ -141,8 +141,10 @@ try {
     await expect(guide.getByRole('button', { name: 'Check again' })).toBeEnabled();
   }
   await recheck();
-  await expect(guide.getByText('Ready to record', { exact: true })).toBeVisible();
-  await expect(guide.getByText('Speech model needed', { exact: true })).toBeVisible();
+  await expect(
+    guide.getByText('Microphone ready for in-person recording.', { exact: true }),
+  ).toBeVisible();
+  await expect(guide.getByText(/Speech model needed\./)).toBeVisible();
   await expect(guide.getByText(/~1.2 GB download and model storage/)).toBeVisible();
   await expect(guide.getByText(/Notes and Calendar are optional/)).toBeVisible();
   await expect(page.getByRole('button', { name: /Record in person/ })).toBeEnabled();
@@ -155,7 +157,7 @@ try {
     window.__onboarding.installed = ['onnx-community/whisper-large-v3'];
   });
   await recheck();
-  await expect(guide.getByText('Speech model needed', { exact: true })).toBeVisible();
+  await expect(guide.getByText(/Speech model needed\./)).toBeVisible();
   for (const [status, message] of [
     ['cancelled', /download was cancelled/],
     ['failed', /download failed/],
@@ -206,20 +208,20 @@ try {
       }),
     );
   });
-  await expect(guide.getByText('Ready to transcribe', { exact: true })).toBeVisible();
+  await expect(guide.getByText('Speech model ready.', { exact: true })).toBeVisible();
   await expect(guide.getByText(/Record or upload audio, then open/)).toBeVisible();
   await page.evaluate(() => {
     window.__onboarding.modelError = true;
   });
   await recheck();
-  await expect(guide.getByText('Model check unavailable', { exact: true })).toBeVisible();
-  await expect(guide.getByText('Ready to transcribe', { exact: true })).toHaveCount(0);
+  await expect(guide.getByText(/Could not check the speech model/)).toBeVisible();
+  await expect(guide.getByText('Speech model ready.', { exact: true })).toHaveCount(0);
   await page.evaluate(() => {
     window.__onboarding.modelError = false;
     window.__onboarding.microphone = 'denied';
   });
   await recheck();
-  await expect(guide.getByText('Microphone setup needed', { exact: true })).toBeVisible();
+  await expect(guide.getByText(/Microphone access needed\./)).toBeVisible();
   await expect(guide.getByText(/You can still upload audio/)).toBeVisible();
   await expect(page.getByLabel('Upload a recording')).toBeEnabled();
 

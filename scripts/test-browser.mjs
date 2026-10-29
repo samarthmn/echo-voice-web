@@ -130,6 +130,7 @@ try {
     'tests/review-chatgpt.e2e.mjs',
     'tests/chatgpt-connection.e2e.mjs',
     'tests/calendar-connection.e2e.mjs',
+    'tests/extension-connect.e2e.mjs',
     'tests/onboarding.e2e.mjs',
   ])
     await run(script);

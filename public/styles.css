@@ -263,12 +263,6 @@ button:hover:not(:disabled) {
   background: var(--purple-soft);
   color: var(--accent-text);
 }
-.nav-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--purple-soft);
-}
 .sidebar-bottom {
   margin-top: auto;
   padding-top: 48px;
@@ -3125,4 +3119,30 @@ button:hover:not(:disabled) {
   .recovery-confirm-fields {
     grid-template-columns: 1fr;
   }
+}
+
+.extension-approval-dialog {
+  width: min(480px, calc(100% - 32px));
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.extension-approval-dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+.extension-approval-dialog p {
+  margin: 14px 0;
+  overflow-wrap: anywhere;
+}
+.extension-approval-dialog .connection-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.extension-install-steps {
+  padding-left: 22px;
+  line-height: 1.7;
 }

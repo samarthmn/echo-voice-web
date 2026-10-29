@@ -230,7 +230,7 @@ export function createRecorderController({ request = localRequest } = {}) {
     if (!meeting.consent) throw new Error('Confirm participant consent before recording.');
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       const error = new Error(
-        'Microphone recording requires localhost or a secure HTTPS page. Open Echo Voice on localhost.',
+        'Microphone recording requires localhost or a secure HTTPS page. Open Echo on localhost.',
       );
       update({ status: 'error', error: error.message });
       throw error;

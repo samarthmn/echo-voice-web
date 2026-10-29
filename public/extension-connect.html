@@ -17,35 +17,18 @@
       >
       <section class="connection-card">
         <p class="eyebrow">BROWSER CONNECTION</p>
-        <h1>Connect this browser to Echo?</h1>
-        <p>
-          This lets the Echo extension transfer recordings you choose to this local library. You can
-          disconnect this browser in Echo Settings at any time.
-        </p>
-        <p>Continue only if you just chose <strong>Connect to Echo</strong> in the extension.</p>
-        <div id="error" role="alert" hidden></div>
+        <h1 id="connection-heading">Allow this browser to send recordings to Echo?</h1>
+        <p id="browser-name"></p>
+        <p id="browser-origin"></p>
         <p id="status" role="status">Checking this connection request…</p>
+        <p id="error" role="alert" hidden></p>
         <div id="approval-actions" class="connection-actions" hidden>
-          <button id="approve" class="button button-primary">Connect</button
-          ><button id="reject" class="button button-secondary">Cancel</button>
+          <button id="approve" class="button button-primary">Allow</button>
+          <button id="reject" class="button button-secondary">Don't allow</button>
         </div>
         <button id="retry" class="button button-secondary" hidden>Try again</button>
-        <details>
-          <summary>Connection details</summary>
-          <dl>
-            <dt>Browser name · unverified</dt>
-            <dd id="installation-name">—</dd>
-            <dt>Extension ID</dt>
-            <dd id="extension-id">—</dd>
-            <dt>Local Echo address</dt>
-            <dd id="echo-address">—</dd>
-          </dl>
-          <p>The name is supplied by the requesting extension. It does not verify its publisher.</p>
-        </details>
+        <a id="back-to-echo" class="connection-back" href="/" hidden>Back to Echo</a>
       </section>
-      <p class="connection-footer">
-        Recording still requires participant consent and a click on Start in your meeting tab.
-      </p>
     </main>
   </body>
 </html>

@@ -215,7 +215,10 @@ test(
             'ollama',
           );
           await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveValue(originalOllamaModel);
-          await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
+          // The save bar appears only for unsaved changes or briefly after a save, not on load.
+          await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toHaveCount(
+            0,
+          );
           await page.unroute('**/api/settings');
           page.off('request', trackRequests);
         },

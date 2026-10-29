@@ -99,3 +99,11 @@
     overflow-wrap: anywhere;
   }
 }
+
+.connection-back {
+  display: inline-block;
+  margin-top: 20px;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

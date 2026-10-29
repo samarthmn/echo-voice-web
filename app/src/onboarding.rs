@@ -1,8 +1,7 @@
 //! First-use guidance derived from current capabilities, never a saved setup flag.
 use crate::{
     api::{evaluate, text},
-    ui::{ActionButton, BadgeTone, ButtonKind, SectionHeading, SetupReadiness, StatusBadge},
-    Icon,
+    ui::{ActionButton, ButtonKind, SetupReadiness},
 };
 use dioxus::prelude::*;
 use serde_json::Value;
@@ -50,9 +49,11 @@ pub fn FirstTranscript(
     download: Signal<Value>,
     meetings: Signal<Vec<Value>>,
     on_models: EventHandler<()>,
+    on_record: EventHandler<()>,
     on_open: EventHandler<Value>,
 ) -> Element {
     let mut refresh = use_signal(|| 0_u32);
+    let mut mic_error = use_signal(String::new);
     let selected_model = use_memo(move || {
         next_recording(&meetings())
             .map(|meeting| text(&meeting, "speechModel"))
@@ -124,50 +125,144 @@ pub fn FirstTranscript(
         .as_f64()
         .unwrap_or(0.)
         .clamp(0., 100.);
-
+    let model_ready = state.selected_speech_model_ready == Some(true);
+    let model_unknown = !checking && state.selected_speech_model_ready.is_none();
     rsx! {
-        section {class:"panel",id:"first-transcript",aria_label:"First transcript setup",style:"padding:20px;margin:24px 0;min-width:0",
-            SectionHeading {title:"First transcript"}
-            div {style:"display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px",role:"status",
-                StatusBadge {tone:if state.recording_ready==Some(true){BadgeTone::Success}else{BadgeTone::Neutral},
-                    if state.recording_ready==Some(true){"Ready to record"}
-                    else if state.recording_ready==Some(false){"Microphone setup needed"}
-                    else if checking{"Checking recording…"}
-                    else{"Recording check unavailable"}
-                }
-                StatusBadge {tone:if state.selected_speech_model_ready==Some(true){BadgeTone::Success}else{BadgeTone::Neutral},
-                    if state.selected_speech_model_ready==Some(true){"Ready to transcribe"}
-                    else if checking{"Checking speech model…"}
-                    else if state.selected_speech_model_ready.is_none(){"Model check unavailable"}
-                    else if downloading && this_download{"Model downloading"}
-                    else{"Speech model needed"}
+        section {
+            class: "panel first-transcript",
+            id: "first-transcript",
+            aria_label: "First transcript setup",
+            h2 { "Create your first transcript" }
+            p {
+                if model_ready && pending.is_some() {
+                    "Open “{pending_title}” and choose Create transcript."
+                } else if model_ready {
+                    "Record or upload audio, then open the saved meeting to create its transcript."
+                } else {
+                    "Record a meeting or upload audio, then transcribe it on this device."
                 }
             }
-            if state.recording_ready==Some(false){p{class:"small-muted",style:"margin-bottom:8px",
-                if value["microphonePermission"]=="denied"{"Allow microphone access in your browser’s site settings to record in person. You can still upload audio."}
-                else{"This browser cannot record a microphone here. Open Echo in Brave or Chrome, or upload audio."}
-            }}
-            p {style:"font-size:13px;overflow-wrap:anywhere",
-                if downloading && this_download{"Downloading {model_name}. You can record while it downloads."}
-                else if download_failed{"The model download failed. Open Models to retry; your recordings are saved."}
-                else if download_cancelled{"The model download was cancelled. Open Models to resume setup when you’re ready."}
-                else if state.selected_speech_model_ready==Some(true) && pending.is_some(){"Open “{pending_title}” and choose Create transcript."}
-                else if state.selected_speech_model_ready==Some(true){"Record or upload audio, then open the saved meeting to create its transcript."}
-                else if checking{"Checking the selected model on this device…"}
-                else if state.selected_speech_model_ready.is_none(){"Could not check the speech model. Check again, or open Models. Recording and uploads remain available."}
-                else if !model_name.is_empty(){"Record or upload audio now. Download {model_name} to create a transcript."}
-                else{"Record or upload audio now. Choose a supported speech model in Models to create a transcript."}
+            ul { class: "first-transcript-checklist",
+                li {
+                    if checking {
+                        "Checking microphone access…"
+                    } else if state.recording_ready == Some(true) {
+                        "Microphone ready for in-person recording."
+                    } else if state.recording_ready.is_none() {
+                        "Microphone check unavailable. You can still upload audio."
+                    } else if value["microphonePermission"] == "denied" {
+                        "Microphone access needed. Allow it in your browser’s site settings, then check again. You can still upload audio."
+                    } else if value["microphonePermission"] == "unknown" {
+                        "This browser cannot record a microphone here. Open Echo in Brave or Chrome, or upload audio."
+                    } else {
+                        span { "Microphone access needed for in-person recording. " }
+                        button {
+                            r#type: "button",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    match evaluate(
+                                            "const stream = await navigator.mediaDevices.getUserMedia({audio:true}); stream.getTracks().forEach(track => track.stop()); return true;",
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => {
+                                            mic_error.set(String::new());
+                                            refresh += 1;
+                                        }
+                                        Err(_) => {
+                                            mic_error
+                                                .set(
+                                                    "Allow microphone access in your browser's site settings, then check again."
+                                                        .into(),
+                                                )
+                                        }
+                                    }
+                                });
+                            },
+                            "Allow microphone"
+                        }
+                    }
+                }
+                li {
+                    if checking {
+                        "Checking speech model…"
+                    } else if model_ready {
+                        "Speech model ready."
+                    } else if model_unknown {
+                        "Could not check the speech model. Recording and uploads remain available."
+                    } else if downloading && this_download {
+                        "Downloading {model_name}. You can record while it downloads. "
+                        button {
+                            r#type: "button",
+                            onclick: move |_| on_models.call(()),
+                            "View download"
+                        }
+                    } else if download_failed {
+                        "The model download failed. Your recordings are saved. "
+                        button {
+                            r#type: "button",
+                            onclick: move |_| on_models.call(()),
+                            "Retry in Models"
+                        }
+                    } else if download_cancelled {
+                        "The model download was cancelled. "
+                        button {
+                            r#type: "button",
+                            onclick: move |_| on_models.call(()),
+                            "Resume in Models"
+                        }
+                    } else {
+                        span { "Speech model needed. " }
+                        if !model_size.is_empty() {
+                            span {
+                                "{model_size} download and model storage; keep extra space for recordings. "
+                            }
+                        }
+                        button {
+                            r#type: "button",
+                            onclick: move |_| on_models.call(()),
+                            "Set up speech model"
+                        }
+                    }
+                }
             }
-            if state.selected_speech_model_ready==Some(false) && !model_size.is_empty(){p{class:"small-muted",style:"margin-top:6px","{model_size} download and model storage; keep extra space for recordings."}}
-            if downloading && this_download{div{class:"download-status",style:"margin-top:12px",progress{value:progress.to_string(),max:"100",aria_label:"Speech model download progress"}}}
-            div {style:"display:flex;flex-wrap:wrap;gap:8px;margin-top:12px",
-                if state.selected_speech_model_ready==Some(true) && pending.is_some(){ActionButton{kind:ButtonKind::Primary,compact:true,onclick:move |_|{if let Some(meeting)=pending.clone(){on_open.call(meeting);}},Icon{name:"arrow-right",size:16}"Open recording"}}
-                else if !checking && state.selected_speech_model_ready!=Some(true){ActionButton{kind:ButtonKind::Primary,compact:true,onclick:move |_|on_models.call(()),Icon{name:"cpu",size:16},if downloading{"View download"}else if download_failed{"Retry in Models"}else{"Set up transcription"}}}
-                ActionButton{kind:ButtonKind::Ghost,compact:true,disabled:checking,onclick:move |_|refresh+=1,Icon{name:"refresh",size:16}"Check again"}
+            if !mic_error().is_empty() {
+                p { class: "inline-error", role: "alert", "{mic_error}" }
             }
-            p {class:"small-muted",style:"margin-top:12px",
-                if state.optional_notes_ready==Some(true){"Notes model ready. Generate notes after your transcript."}
-                else{"Notes and Calendar are optional. Set up notes in Models after your first transcript."}
+            if downloading && this_download {
+                progress {
+                    value: progress.to_string(),
+                    max: "100",
+                    aria_label: "Speech model download progress",
+                }
+            }
+            div { class: "first-transcript-actions",
+                if let Some(meeting) = pending.filter(|_| model_ready) {
+                    ActionButton {
+                        kind: ButtonKind::Primary,
+                        onclick: move |_| on_open.call(meeting.clone()),
+                        "Open recording"
+                    }
+                } else {
+                    ActionButton {
+                        kind: ButtonKind::Primary,
+                        onclick: move |_| on_record.call(()),
+                        "Record a meeting"
+                    }
+                }
+                ActionButton {
+                    kind: ButtonKind::Ghost,
+                    disabled: checking,
+                    onclick: move |_| refresh += 1,
+                    "Check again"
+                }
+            }
+            p { class: "small-muted",
+                if state.optional_notes_ready == Some(true) {
+                    "Notes model ready. Generate notes after your transcript."
+                } else {
+                    "Notes and Calendar are optional. Set up notes in Models after your first transcript."
+                }
             }
         }
     }

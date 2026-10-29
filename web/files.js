@@ -37,7 +37,7 @@ export function chooseJsonFile() {
         finish({
           error:
             error instanceof SyntaxError
-              ? 'This file is not valid JSON. Choose an Echo Voice export.'
+              ? 'This file is not valid JSON. Choose an Echo export.'
               : error.message,
         });
       }

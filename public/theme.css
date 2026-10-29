@@ -462,16 +462,31 @@ select {
     padding: 28px 20px;
   }
 }
-@media (max-width: 380px) {
+@media (max-width: 420px) {
+  .topbar-left {
+    min-width: 0;
+  }
   .topbar-left strong {
-    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .topbar-right .button svg {
-    display: none;
-  }
+  /* Icon-only on phones; the label stays available to assistive technology. */
   .topbar-right .button {
-    padding: 10px 8px;
+    width: 44px;
+    padding: 0;
+    justify-content: center;
   }
+  .topbar-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+@media (max-width: 380px) {
   .stats-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 0;
@@ -565,4 +580,161 @@ select {
   .extension-pair-code code {
     font-size: 13px;
   }
+}
+
+/* Readable supporting copy across cards and compact layouts. */
+.app-shell p,
+.app-shell small,
+.app-shell .small-muted,
+.app-shell .quick-action strong,
+.app-shell .quick-action small,
+.app-shell .review-meta,
+.app-shell .review-breadcrumb,
+.app-shell .settings-field span,
+.app-shell .settings-save-row > span {
+  font-size: 13px !important;
+}
+.page-content {
+  animation: none;
+  padding-bottom: 72px;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.quick-action > svg:last-child {
+  display: block;
+}
+.quick-action strong,
+.quick-action small {
+  white-space: normal;
+}
+.calendar-extension-link {
+  margin: 18px 0;
+}
+.calendar-extension-link button,
+.first-transcript-checklist button,
+.extension-copy {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 4px;
+  font: inherit;
+}
+.first-transcript {
+  padding: 20px;
+  margin: 24px 0;
+  min-width: 0;
+}
+.first-transcript > p {
+  margin-top: 8px;
+}
+.first-transcript-checklist {
+  margin: 12px 0;
+  padding-left: 22px;
+  line-height: 1.7;
+}
+.first-transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.extension-install-steps {
+  margin: 8px 0 18px;
+  padding-left: 22px;
+}
+.extension-install-steps li {
+  margin: 8px 0;
+}
+.extension-folder {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.extension-folder code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.extension-install-steps small {
+  display: block;
+}
+.settings-form.has-unsaved {
+  padding-bottom: 120px;
+}
+@media (max-width: 700px) {
+  .page-content {
+    padding-bottom: 72px;
+  }
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
+  .settings-form.has-unsaved {
+    padding-bottom: 160px;
+  }
+}
+
+/* App chrome minimums. */
+.nav-count,
+.breadcrumb-home,
+.topbar-left strong,
+.topbar-right .button span,
+.text-button {
+  font-size: 13px !important;
+}
+.global-search kbd {
+  font-size: 12px;
+}
+
+/* No interface text below 13px: controls, badges, labels and code. */
+.app-shell .button,
+.app-shell .badge,
+.app-shell .settings-soft-badge,
+.app-shell .count-label,
+.app-shell .model-status,
+.app-shell summary,
+.app-shell h3,
+.app-shell option,
+.app-shell code,
+.app-shell .settings-text-button,
+.app-shell .settings-field > span,
+.app-shell .settings-field small {
+  font-size: 13px !important;
+}
+.app-shell .settings-tabs button span,
+.app-shell .global-search span,
+.app-shell .settings-page span,
+.app-shell .models-page span,
+.app-shell .model-card span {
+  font-size: 13px !important;
+}
+.extension-panel {
+  gap: 12px;
+}
+.extension-panel p {
+  margin: 0;
+}
+.extension-panel .extension-install-steps {
+  margin: 0;
+  padding-left: 22px;
+}
+.extension-panel .extension-install-steps li {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+.extension-panel .extension-install-steps li:last-child {
+  margin-bottom: 0;
+}
+.extension-folder {
+  margin-top: 6px;
+}
+.check-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.calendar-extension-link + * {
+  margin-top: 0;
 }

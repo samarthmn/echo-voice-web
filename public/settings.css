@@ -1384,7 +1384,10 @@
   }
   .settings-page .settings-tabs {
     gap: 15px;
-    overflow: visible;
+    /* Four tabs exceed a phone's width; scroll the strip, not the page. */
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 0 2px;
   }
   .settings-page .settings-tabs button {
     font-size: 11px;
