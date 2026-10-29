@@ -55,10 +55,10 @@ struct RequestRow {
 fn row(db: &Connection, id: &str) -> Result<Option<RequestRow>> {
     Ok(db.query_row("SELECT installation_id,name,origin,code_hash,expires,state FROM extension_pairing WHERE request_id=?", [id], |r| Ok(RequestRow { installation:r.get(0)?, name:r.get(1)?, origin:r.get(2)?, digest:r.get(3)?, expires:r.get(4)?, state:r.get(5)? })).optional()?)
 }
-/// An approval given in time stays claimable until cleanup, so a lost claim response can be retried.
+/// Only claimed requests retain their receipt after the approval deadline.
 fn status(row: &RequestRow, now: i64) -> &str {
     match row.state.as_str() {
-        "approved" | "claimed" => "approved",
+        "claimed" => "approved",
         _ if row.expires <= now => "expired",
         "cancelled" => "rejected",
         state => state,
@@ -96,12 +96,16 @@ pub(super) async fn intent() -> Result<Json<Value>> {
 }
 /// Unauthenticated discovery probe; reads only the library identifier.
 pub(super) async fn hello() -> Result<Json<Value>> {
-    store::run(|db| {
-        Ok(Json(
-            json!({"service":"echo-voice","protocolVersion":2,"libraryId":library(db)?}),
-        ))
-    })
-    .await
+    let id = LIBRARY_ID
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let id = id
+        .as_ref()
+        .ok_or_else(|| ApiError::new(503, "The local database is unavailable."))?;
+    Ok(Json(
+        json!({"service":"echo-voice","protocolVersion":2,"libraryId":id}),
+    ))
 }
 pub(super) async fn pair(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
     fields(&v, &["installationId", "name", "claimSecret", "intent"])?;
@@ -221,6 +225,15 @@ pub(super) async fn claim(headers: HeaderMap, Json(v): Json<Value>) -> Result<Re
                 "UPDATE extension_pairing SET state='claimed' WHERE request_id=?",
                 [&id],
             )?;
+        } else {
+            let current: Option<(String, String)> = tx.query_row(
+                "SELECT credential_hash,origin FROM extension_connections WHERE installation_id=?",
+                [&installation], |r| Ok((r.get(0)?, r.get(1)?)),
+            ).optional()?;
+            if !current.is_some_and(|(digest, current_origin)| equal(&digest, &hash(&credential)) && current_origin == origin) {
+                tx.commit()?;
+                return Ok(refused("rejected"));
+            }
         }
         tx.commit()?;
         Ok(Json(json!({"status":"approved","credential":credential,"libraryId":lib})).into_response())
@@ -302,7 +315,7 @@ pub(super) fn revoke_connection(db: &mut Connection, installation: &str) -> Resu
         "DELETE FROM extension_connections WHERE installation_id=?",
         [installation],
     )?;
-    tx.execute("UPDATE extension_pairing SET state='cancelled' WHERE installation_id=? AND state IN ('pending','approved','claimed')", [installation])?;
+    tx.execute("UPDATE extension_pairing SET state='cancelled' WHERE installation_id=? AND state IN ('pending','approved')", [installation])?;
     cleanup(&tx, seconds())?;
     tx.commit()?;
     Ok(())

@@ -1814,3 +1814,203 @@ async fn pairing_v2_discovery_decisions_intents_and_vault_migration() {
     store::reset_for_tests();
     std::env::remove_var("ECHO_DATA_DIR");
 }
+
+#[tokio::test]
+async fn approved_unclaimed_request_expires_but_claimed_receipt_survives_expiry() {
+    let _guard = store::TEST_LIBRARY_LOCK.lock().await;
+    let directory = store::test_directory();
+    store::reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", directory.path());
+    store::test_key();
+    store::init().unwrap();
+    let app = app();
+    let installation = Uuid::new_v4().to_string();
+    let (credential, secret, id) = pair(&app, &installation).await;
+    store::with_db(|db| {
+        db.execute(
+            "UPDATE extension_pairing SET expires=? WHERE request_id=?",
+            params![seconds() - 1, id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let (_, retry) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        json!({"requestId":id,"installationId":installation,"claimSecret":secret}),
+    )
+    .await;
+    assert_eq!(retry["credential"], credential);
+    let secret = hash("unclaimed expiry");
+    let (_, request) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair",
+        ORIGIN,
+        None,
+        json!({"installationId":installation,"name":"Browser","claimSecret":secret}),
+    )
+    .await;
+    let id = request["requestId"].as_str().unwrap();
+    json_request(
+        &app,
+        "POST",
+        &format!("/api/extensions/requests/{id}/approve"),
+        "http://localhost:3000",
+        None,
+        json!({}),
+    )
+    .await;
+    store::with_db(|db| {
+        db.execute(
+            "UPDATE extension_pairing SET expires=? WHERE request_id=?",
+            params![seconds() - 1, id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let (status, result) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        json!({"requestId":id,"installationId":installation,"claimSecret":secret}),
+    )
+    .await;
+    assert_eq!(
+        (status, result["status"].as_str()),
+        (StatusCode::FORBIDDEN, Some("expired"))
+    );
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/extension/v1/connection",
+        ORIGIN,
+        Some(&credential),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn superseded_claim_receipts_are_rejected() {
+    let _guard = store::TEST_LIBRARY_LOCK.lock().await;
+    let directory = store::test_directory();
+    store::reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", directory.path());
+    store::test_key();
+    store::init().unwrap();
+    let app = app();
+    let installation = Uuid::new_v4().to_string();
+    let (_, secret, id) = pair(&app, &installation).await;
+    let (_, second_secret, second_id) = pair(&app, &installation).await;
+    let (status, result) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        json!({"requestId":id,"installationId":installation,"claimSecret":secret}),
+    )
+    .await;
+    assert_eq!(
+        (status, result["status"].as_str()),
+        (StatusCode::FORBIDDEN, Some("rejected"))
+    );
+    store::with_db(|db| {
+        db.execute(
+            "UPDATE extension_connections SET origin=? WHERE installation_id=?",
+            params![
+                "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                installation
+            ],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let claim =
+        json!({"requestId":second_id,"installationId":installation,"claimSecret":second_secret});
+    let (status, result) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        claim.clone(),
+    )
+    .await;
+    assert_eq!(
+        (status, result["status"].as_str()),
+        (StatusCode::FORBIDDEN, Some("rejected"))
+    );
+    store::with_db(|db| {
+        db.execute(
+            "UPDATE extension_pairing SET expires=? WHERE request_id=?",
+            params![seconds() - 1, second_id],
+        )?;
+        pairing::revoke_connection(db, &installation)?;
+        Ok(())
+    })
+    .unwrap();
+    let (status, result) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        claim,
+    )
+    .await;
+    assert_eq!(
+        (status, result["status"].as_str()),
+        (StatusCode::FORBIDDEN, Some("rejected"))
+    );
+}
+
+#[tokio::test]
+async fn discovery_responds_while_database_is_locked_and_tracks_reopened_library() {
+    let _guard = store::TEST_LIBRARY_LOCK.lock().await;
+    let directory = store::test_directory();
+    store::reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", directory.path());
+    store::test_key();
+    store::init().unwrap();
+    let app = app();
+    let expected = store::with_db(|db| library(db)).unwrap();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        store::with_db(|_| {
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(())
+        })
+        .unwrap()
+    });
+    ready_rx.recv().unwrap();
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        json_request(&app, "GET", "/extension/v1/hello", ORIGIN, None, json!({})),
+    )
+    .await;
+    release_tx.send(()).unwrap();
+    holder.join().unwrap();
+    let (status, hello) = response.expect("discovery blocked by database lock");
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(hello["libraryId"], expected);
+    let other = store::test_directory();
+    store::reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", other.path());
+    store::test_key();
+    store::init().unwrap();
+    let expected_other = store::with_db(|db| library(db)).unwrap();
+    let (_, hello) =
+        json_request(&app, "GET", "/extension/v1/hello", ORIGIN, None, json!({})).await;
+    assert_ne!(expected, expected_other);
+    assert_eq!(hello["libraryId"], expected_other);
+}

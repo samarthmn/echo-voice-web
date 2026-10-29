@@ -13,6 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::sync::{OnceLock, RwLock};
 use std::{fs, path::PathBuf};
 use uuid::Uuid;
 mod pairing;
@@ -23,6 +24,16 @@ type Result<T> = std::result::Result<T, ApiError>;
 const RATE: u64 = 16000;
 const MAX_FRAMES: u64 = RATE * 8 * 3600;
 const PART_FRAMES: u64 = RATE * 30 * 60;
+static LIBRARY_ID: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+
+pub(crate) fn cache_library_id(db: &Connection) -> Result<()> {
+    let id = library(db)?;
+    *LIBRARY_ID
+        .get_or_init(Default::default)
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(id);
+    Ok(())
+}
 fn seconds() -> i64 {
     chrono::Utc::now().timestamp()
 }

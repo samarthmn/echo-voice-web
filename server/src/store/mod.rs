@@ -368,6 +368,7 @@ pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result
                 .take();
             return Err(error);
         }
+        crate::extensions::cache_library_id(&db)?;
         *guard = Some(db);
         *WORKSPACE_LOCK
             .get_or_init(|| Mutex::new(None))
