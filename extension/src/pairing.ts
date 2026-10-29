@@ -1,5 +1,5 @@
 // Pairing v2: one POST /pair, one approval click in Echo, then a deterministic claim.
-import { unixSecondsToMilliseconds } from './core';
+import { pageOrigin, unixSecondsToMilliseconds } from './core';
 import { readLink, saveLink, settings, Link } from './settings';
 import { discover, hello } from './discovery';
 import { connectionAction, forgetRemote } from './connection';
@@ -44,11 +44,11 @@ async function end(message: string): Promise<PairingView> {
   return view({ state: 'none' });
 }
 function approvalURL(link: Waiting): string {
-  return `${link.endpoint}/extension-connect.html#request=${encodeURIComponent(link.requestId)}`;
+  return `${pageOrigin(link.endpoint)}/extension-connect.html#request=${encodeURIComponent(link.requestId)}`;
 }
 async function showApprovalTab(link: Waiting): Promise<void> {
   const url = approvalURL(link);
-  const existing = (await chrome.tabs.query({ url: `${link.endpoint}/*` })).find(
+  const existing = (await chrome.tabs.query({ url: `${pageOrigin(link.endpoint)}/*` })).find(
     (tab) => tab.url === url,
   );
   if (existing?.id !== undefined) {

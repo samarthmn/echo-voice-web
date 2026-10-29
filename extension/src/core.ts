@@ -104,6 +104,15 @@ export function endpointURL(raw: string): string {
   }
   return url.origin;
 }
+/**
+ * Where Echo's pages live for an endpoint. Echo redirects loopback-IP page requests to
+ * localhost (one origin keeps one model cache), so tabs are opened and matched there.
+ */
+export function pageOrigin(endpoint: string): string {
+  const url = new URL(endpointURL(endpoint));
+  if (url.hostname === '127.0.0.1' || url.hostname === '[::1]') url.hostname = 'localhost';
+  return url.origin;
+}
 export function unixSecondsToMilliseconds(value: unknown): number {
   if (
     typeof value !== 'number' ||
@@ -116,7 +125,8 @@ export function unixSecondsToMilliseconds(value: unknown): number {
 }
 type Meeting = { provider: Provider; identity: string; originPattern: string };
 type MeetingPage = Meeting & { joinable: boolean };
-const MEET_CODE = /^\/([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/i;
+// Meet serves calls at /<code>, and at /meet/<code> or /_meet/<code> for some accounts and apps.
+const MEET_CODE = /^\/(?:_?meet\/)?([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/i;
 const ZOOM_MEETING = /^\/wc\/(?:join\/)?(\d+)(?:\/(?:join|start))?\/?$/;
 const TEAMS_HOSTS = ['teams.microsoft.com', 'teams.live.com', 'teams.cloud.microsoft'];
 function teamsPage(url: URL): MeetingPage | null {

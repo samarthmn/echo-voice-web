@@ -150,7 +150,13 @@ test('meeting identity ignores hash and volatile query parameters for every serv
     'https://meet.google.com/abc-defg-hij/',
     'https://meet.google.com/abc-defg-hij?authuser=1&hs=122',
     'https://meet.google.com/ABC-DEFG-HIJ?pli=1#details',
+    // Seen in Brave for a second signed-in account.
+    'https://meet.google.com/meet/abc-defg-hij?pli=1&authuser=1',
+    'https://meet.google.com/_meet/abc-defg-hij?hs=193',
   ]);
+  assert.ok(core.meetingFor('https://meet.google.com/meet/abc-defg-hij?pli=1&authuser=1'));
+  assert.equal(core.meetingFor('https://meet.google.com/meet/landing'), null);
+  assert.equal(core.meetingFor('https://meet.google.com/other/abc-defg-hij'), null);
   same([
     'https://us02web.zoom.us/wc/123456789/join?pwd=secret&fromPWA=1',
     'https://us02web.zoom.us/wc/123456789/start',

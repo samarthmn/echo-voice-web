@@ -358,14 +358,19 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     const approvalOpened = context.waitForEvent('page');
     await page.locator('#connect').click();
     const approval = await approvalOpened;
-    await approval.waitForURL(`${base}/extension-connect.html#request=*`);
+    // Echo serves its pages on localhost; the extension opens the approval page there.
+    const pages = base.replace('127.0.0.1', 'localhost');
+    await approval.waitForURL(`${pages}/extension-connect.html#request=*`);
     await approval.locator('#approve').waitFor();
     await worker.evaluate(privateHarness);
     const reservation = await worker.evaluate(() => readTestLink());
     assert.equal(reservation.state, 'waiting');
     assert.equal(typeof reservation.expiresAt, 'number');
     assert.match(reservation.claimSecret, /^[0-9a-f]{64}$/);
-    assert.equal(approval.url(), `${base}/extension-connect.html#request=${reservation.requestId}`);
+    assert.equal(
+      approval.url(),
+      `${pages}/extension-connect.html#request=${reservation.requestId}`,
+    );
     assert.equal(
       (await api(`/api/extensions/requests/${reservation.requestId}`)).status,
       'pending',

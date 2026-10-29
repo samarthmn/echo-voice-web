@@ -9,6 +9,7 @@ import {
   reply,
 } from './extension-test-helpers.mjs';
 const requestId = '11111111-1111-4111-8111-111111111111';
+const pageOrigin = endpoint.replace('127.0.0.1', 'localhost');
 async function harness() {
   const h = fixture();
   h.api = await bundle(h, pairingBundle);
@@ -74,7 +75,8 @@ test('pair → sealed waiting → approved claim → connected; owned approval t
   await h.api.beginPairing(endpoint);
   assert.equal((await h.api.readLink()).state, 'waiting');
   assert.ok(!JSON.stringify(h.local).includes((await h.api.readLink()).claimSecret));
-  assert.equal(h.tabs[0].url, `${endpoint}/extension-connect.html#request=${requestId}`);
+  // Echo serves pages on localhost, so the approval tab opens there even for a 127.0.0.1 endpoint.
+  assert.equal(h.tabs[0].url, `${pageOrigin}/extension-connect.html#request=${requestId}`);
   h.approved = true;
   assert.equal((await h.api.resumePairing()).phase, 'connected');
   assert.deepEqual(h.removed, [1]);
@@ -82,7 +84,7 @@ test('pair → sealed waiting → approved claim → connected; owned approval t
 });
 test('lost claim reply retries identical body; existing approval tab remains open', async () => {
   const h = await harness();
-  h.tabs.push({ id: 20, url: `${endpoint}/extension-connect.html#request=${requestId}` });
+  h.tabs.push({ id: 20, url: `${pageOrigin}/extension-connect.html#request=${requestId}` });
   await h.api.beginPairing(endpoint);
   h.approved = true;
   h.loseClaim = true;

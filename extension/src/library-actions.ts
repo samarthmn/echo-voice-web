@@ -1,4 +1,4 @@
-import { endpointURL, Pair, Recording } from './core';
+import { pageOrigin, Pair, Recording } from './core';
 import { connectedPair } from './settings';
 import { deleteRecording, recording } from './storage';
 import { withRecordingLock } from './recording-lock';
@@ -12,7 +12,7 @@ export function echoURL(pair: Pair | undefined, row?: Recording): string {
     throw new Error(
       'This recording belongs to a different Echo library. Reconnect that library to open it.',
     );
-  const url = new URL(endpointURL(pair.endpoint));
+  const url = new URL(pageOrigin(pair.endpoint));
   url.searchParams.set('library', libraryId);
   if (row?.receipt) {
     if (row.libraryId !== libraryId || !uuid.test(row.receipt.meetingId))

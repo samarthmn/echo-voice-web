@@ -118,6 +118,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ),
         )
         .layer(axum::middleware::from_fn(security::browser_isolation))
+        .layer(axum::middleware::from_fn(security::canonical_host))
         // Fixed asset URLs must revalidate after a local rebuild or packaged update.
         // API responses already specify no-store in the local-access middleware.
         .layer(SetResponseHeaderLayer::if_not_present(
