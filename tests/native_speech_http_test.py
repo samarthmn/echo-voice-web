@@ -135,8 +135,8 @@ class NativeSpeechHTTP(unittest.TestCase):
         cls.addClassCleanup(cls.server.close)
         if not cls.server.request("GET", "/api/speech")[1]["available"]:
             if BINARY_OVERRIDE is not None:
-                raise RuntimeError("Configured native HTTP integration tests require npm ci and Node.js 22+.")
-            raise unittest.SkipTest("Native dependencies require npm ci and Node.js 22+")
+                raise RuntimeError("Configured native HTTP integration tests require pnpm install --frozen-lockfile and Node.js 22+.")
+            raise unittest.SkipTest("Native dependencies require pnpm install --frozen-lockfile and Node.js 22+")
         cls.server.seed_protocol_fixture()
 
     def wait_job(self, job_id, predicate):

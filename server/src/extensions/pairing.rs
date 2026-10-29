@@ -1,492 +1,331 @@
-//! Explicit approval, staged credentials, and retry receipts for extension pairing.
+//! One-approval browser pairing (protocol v2) and single-use Echo-initiated intents.
+//! Only SHA-256 digests of claim secrets, credentials, and intents are stored.
 use super::*;
+use rand::{rngs::OsRng, RngCore};
+use std::sync::{Mutex, OnceLock};
 
-pub(super) fn migrate(db: &Connection) -> Result<()> {
-    let columns = db
-        .prepare("PRAGMA table_info(extension_pairing)")?
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    for (name, definition) in [
-        ("kind", "TEXT NOT NULL DEFAULT 'manual'"),
-        ("activation_required", "INTEGER NOT NULL DEFAULT 0"),
-        // A hash is enough to retain a committed receipt only while it is authorized.
-        ("credential_hash", "TEXT"),
-    ] {
-        if !columns.iter().any(|column| column == name) {
-            db.execute_batch(&format!(
-                "ALTER TABLE extension_pairing ADD COLUMN {name} {definition}"
-            ))?;
-        }
-    }
-    Ok(())
-}
+/// A request stays decidable for this long; decided rows are kept as long again for claim retries.
+const REQUEST_SECONDS: i64 = 600;
+const INTENT_SECONDS: i64 = 120;
+const MAX_INTENTS: usize = 32;
+static INTENTS: OnceLock<Mutex<Vec<(String, i64)>>> = OnceLock::new();
 
-struct Reservation {
-    request: Option<String>,
-    installation: Option<String>,
-    name: Option<String>,
-    origin: Option<String>,
-    code_hash: String,
-    expires: i64,
-    state: String,
-    kind: String,
-    staged: bool,
-    credential_hash: Option<String>,
-}
-fn reservation(db: &Connection, column: &str, value: &str) -> Result<Option<Reservation>> {
-    debug_assert!(matches!(column, "request_id" | "code_hash"));
-    Ok(db.query_row(
-        &format!("SELECT request_id,installation_id,name,origin,code_hash,expires,state,kind,activation_required,credential_hash FROM extension_pairing WHERE {column}=?"),
-        [value],
-        |row| Ok(Reservation {
-            request: row.get(0)?, installation: row.get(1)?, name: row.get(2)?,
-            origin: row.get(3)?, code_hash: row.get(4)?, expires: row.get(5)?,
-            state: row.get(6)?, kind: row.get(7)?, staged: row.get(8)?, credential_hash: row.get(9)?,
-        }),
-    ).optional()?)
-}
-fn current_receipt(db: &Connection, row: &Reservation) -> Result<bool> {
-    Ok(row.state == "claimed" && db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM extension_connections WHERE installation_id=? AND origin=? AND credential_hash=?)",
-        params![row.installation, row.origin, row.credential_hash], |r| r.get::<_, bool>(0),
-    )?)
-}
-fn cleanup(db: &Connection, now: i64) -> Result<()> {
-    db.execute("DELETE FROM extension_pairing WHERE expires<=? AND NOT (activation_required=1 AND state='claimed' AND EXISTS(SELECT 1 FROM extension_connections c WHERE c.installation_id=extension_pairing.installation_id AND c.origin=extension_pairing.origin AND c.credential_hash=extension_pairing.credential_hash))", [now])?;
-    Ok(())
-}
-fn reserve_capacity(db: &Connection, origin: Option<&str>, now: i64) -> Result<()> {
-    cleanup(db, now)?;
-    let count: i64 = db.query_row(
-        "SELECT COUNT(*) FROM extension_pairing WHERE expires>?",
-        [now],
-        |r| r.get(0),
-    )?;
-    if count >= 20 {
-        return Err(ApiError::new(
-            429,
-            "Too many active pairing requests. Try again in five minutes.",
-        ));
-    }
-    if let Some(origin) = origin {
-        let (browser, from_origin): (i64, i64) = db.query_row(
-            "SELECT COUNT(*),COALESCE(SUM(origin=?),0) FROM extension_pairing WHERE kind='browser' AND expires>?",
-            params![origin, now], |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        if browser >= 16 || from_origin >= 4 {
-            return Err(ApiError::new(
-                429,
-                "Too many browser connection attempts. Try again in five minutes.",
-            ));
-        }
-    }
-    Ok(())
-}
-fn public_status(row: &Reservation, lib: &str) -> Value {
-    json!({"requestId":row.request,"installationId":row.installation,"libraryId":lib,"status":row.state,"expiresAt":row.expires,"activationRequired":row.staged && row.state != "claimed"})
-}
-fn require_live(row: &Reservation, now: i64) -> Result<()> {
-    if row.expires <= now {
-        return Err(ApiError::new(403, "Pairing request is invalid or expired."));
-    }
-    Ok(())
-}
-fn bound_request(
-    db: &Connection,
-    request: &str,
-    installation: &str,
-    secret: &str,
-    origin: &str,
-) -> Result<Reservation> {
-    let row = reservation(db, "request_id", request)?
-        .ok_or_else(|| ApiError::new(403, "Pairing request is invalid or expired."))?;
-    if row.installation.as_deref() != Some(installation)
-        || row.origin.as_deref() != Some(origin)
-        || row.code_hash != hash(secret)
-    {
-        return Err(ApiError::new(403, "Pairing request is invalid or expired."));
-    }
-    Ok(row)
-}
-fn identifying_fields<'a>(v: &'a Value, secret_key: &str) -> Result<(&'a str, &'a str, &'a str)> {
-    let request = text(v, "requestId", 36)?;
-    let installation = text(v, "installationId", 36)?;
-    uid(request)?;
-    uid(installation)?;
-    Ok((request, installation, text(v, secret_key, 64)?))
-}
-fn credential(secret: &str, request: &str, installation: &str, lib: &str) -> String {
-    hash(format!(
-        "echo-extension-v1\0{secret}\0{request}\0{installation}\0{lib}"
-    ))
-}
-fn receipt(row: &Reservation, lib: &str, credential: &str) -> Json<Value> {
-    let mut value = public_status(row, lib);
-    value["credential"] = json!(credential);
-    if !row.staged {
-        value["status"] = json!("approved");
-    }
-    reply(value)
-}
-fn require_current(db: &Connection, row: &Reservation, credential: &str) -> Result<()> {
-    // A committed retry verifies authorization; it never inserts a connection.
-    let present: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM extension_connections WHERE installation_id=? AND origin=? AND credential_hash=?)",
-        params![row.installation, row.origin, hash(credential)], |r| r.get(0),
-    )?;
-    if !present || (row.staged && row.credential_hash.as_deref() != Some(hash(credential).as_str()))
-    {
-        return Err(ApiError::new(
-            403,
-            "Connection was revoked or replaced; start a new connection request.",
-        ));
-    }
-    Ok(())
-}
-fn commit_connection(db: &Connection, row: &Reservation, credential: &str) -> Result<()> {
-    db.execute("INSERT INTO extension_connections VALUES(?,?,?,?,?) ON CONFLICT(installation_id) DO UPDATE SET name=excluded.name,origin=excluded.origin,credential_hash=excluded.credential_hash,created_at=excluded.created_at", params![row.installation,row.name,row.origin,hash(credential),store::now()])?;
-    db.execute(
-        "UPDATE extension_pairing SET state='claimed',credential_hash=? WHERE request_id=?",
-        params![hash(credential), row.request],
-    )?;
-    Ok(())
-}
-
-pub(super) async fn pair_begin(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(&v, &["requestId", "installationId", "name", "claimSecret"])?;
-    let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
-    if secret.len() != 64
-        || !secret
+fn hex_secret<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
+    let s = text(v, key, 64)?;
+    if s.len() != 64
+        || !s
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     {
-        return Err(ApiError::bad(
-            "Use a 64-character lowercase hexadecimal claim secret.",
-        ));
+        return Err(ApiError::bad(format!(
+            "Use a 64-character lowercase hexadecimal {key}."
+        )));
     }
-    let name = text(&v, "name", 100)?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let now = seconds();
-        let lib = library(&tx)?;
-        if let Some(row) = reservation(&tx, "request_id", request)? {
-            if row.kind != "browser"
-                || row.installation.as_deref() != Some(installation)
-                || row.name.as_deref() != Some(name)
-                || row.origin.as_deref() != Some(&origin)
-                || row.code_hash != hash(secret)
-            {
-                return Err(ApiError::new(
-                    409,
-                    "The request identifier belongs to a different connection attempt.",
-                ));
-            }
-            if row.state == "claimed" {
-                require_current(&tx, &row, &credential(secret, request, installation, &lib))?;
-            } else {
-                require_live(&row, now)?;
-            }
-            return Ok(reply(public_status(&row, &lib)));
-        }
-        if reservation(&tx, "code_hash", &hash(secret))?.is_some() {
-            return Err(ApiError::new(
-                409,
-                "Use a new secret for this connection attempt.",
-            ));
-        }
-        reserve_capacity(&tx, Some(&origin), now)?;
-        let expires = now + 300;
-        tx.execute("INSERT INTO extension_pairing(code_hash,expires,request_id,installation_id,name,origin,state,kind,activation_required) VALUES(?,?,?,?,?,?,'pending','browser',1)", params![hash(secret),expires,request,installation,name,origin])?;
-        tx.commit()?;
-        Ok(reply(
-            json!({"requestId":request,"installationId":installation,"libraryId":lib,"status":"pending","expiresAt":expires,"activationRequired":true}),
-        ))
-    })
+    Ok(s)
 }
-
-pub(super) async fn pair_code() -> Result<Json<Value>> {
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let now = seconds();
-        reserve_capacity(&tx, None, now)?;
-        let code = Uuid::new_v4().simple().to_string();
-        let expires = now + 300;
-        tx.execute(
-            "INSERT INTO extension_pairing(code_hash,expires,state) VALUES(?,?,'available')",
-            params![hash(&code), expires],
-        )?;
-        let lib = library(&tx)?;
-        tx.commit()?;
-        Ok(reply(
-            json!({"code":code,"expiresAt":expires,"libraryId":lib}),
-        ))
-    })
+/// Compare digests without an early exit on the first differing byte.
+fn equal(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |v, (x, y)| v | (x ^ y)) == 0
 }
-
-pub(super) async fn pair_request(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(
-        &v,
-        &["code", "installationId", "name", "deferredActivation"],
+fn cleanup(db: &Connection, now: i64) -> Result<()> {
+    db.execute(
+        "DELETE FROM extension_pairing WHERE expires<=?",
+        [now - REQUEST_SECONDS],
     )?;
-    let code = text(&v, "code", 64)?;
-    let installation = text(&v, "installationId", 36)?;
-    uid(installation)?;
-    let name = text(&v, "name", 100)?;
-    let staged = match v.get("deferredActivation") {
-        None => false,
-        Some(Value::Bool(value)) => *value,
-        _ => return Err(ApiError::bad("deferredActivation must be a boolean.")),
+    Ok(())
+}
+/// Delete pairing rows that outlived their retry window even when no extension calls again.
+pub(crate) async fn cleanup_loop() {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    loop {
+        interval.tick().await;
+        if let Err(error) = store::run(|db| cleanup(db, seconds())).await {
+            tracing::warn!(%error, "Could not clean up expired extension pairing requests");
+        }
+    }
+}
+struct RequestRow {
+    installation: String,
+    name: String,
+    origin: String,
+    digest: String,
+    expires: i64,
+    state: String,
+}
+fn row(db: &Connection, id: &str) -> Result<Option<RequestRow>> {
+    Ok(db.query_row("SELECT installation_id,name,origin,code_hash,expires,state FROM extension_pairing WHERE request_id=?", [id], |r| Ok(RequestRow { installation:r.get(0)?, name:r.get(1)?, origin:r.get(2)?, digest:r.get(3)?, expires:r.get(4)?, state:r.get(5)? })).optional()?)
+}
+/// Only claimed requests retain their receipt after the approval deadline.
+fn status(row: &RequestRow, now: i64) -> &str {
+    match row.state.as_str() {
+        "claimed" => "approved",
+        _ if row.expires <= now => "expired",
+        "cancelled" => "rejected",
+        state => state,
+    }
+}
+fn intents() -> Result<std::sync::MutexGuard<'static, Vec<(String, i64)>>> {
+    INTENTS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| ApiError::new(500, "Echo hit an internal error; retry."))
+}
+fn consume_intent(value: &str, now: i64) -> Result<bool> {
+    let mut intents = intents()?;
+    intents.retain(|(_, expires)| *expires > now);
+    let digest = hash(value);
+    let found = intents
+        .iter()
+        .position(|(stored, _)| equal(stored, &digest));
+    Ok(found.map(|index| intents.swap_remove(index)).is_some())
+}
+/// Issue a single-use, two-minute token that pre-approves one Echo-initiated pairing.
+pub(super) async fn intent() -> Result<Json<Value>> {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let value = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let now = seconds();
+    let expires = now + INTENT_SECONDS;
+    let mut intents = intents()?;
+    intents.retain(|(_, expiry)| *expiry > now);
+    if intents.len() >= MAX_INTENTS {
+        intents.remove(0);
+    }
+    intents.push((hash(&value), expires));
+    Ok(Json(json!({"intent":value,"expiresAt":expires})))
+}
+/// Unauthenticated discovery probe; reads only the library identifier.
+pub(super) async fn hello() -> Result<Json<Value>> {
+    let id = LIBRARY_ID
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let id = id
+        .as_ref()
+        .ok_or_else(|| ApiError::new(503, "The local database is unavailable."))?;
+    Ok(Json(
+        json!({"service":"echo-voice","protocolVersion":2,"libraryId":id}),
+    ))
+}
+pub(super) async fn pair(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
+    fields(&v, &["installationId", "name", "claimSecret", "intent"])?;
+    let installation = text(&v, "installationId", 36)?.to_owned();
+    uid(&installation)?;
+    let name = text(&v, "name", 100)?.to_owned();
+    let digest = hash(hex_secret(&v, "claimSecret")?);
+    let intent = match v.get("intent") {
+        Some(_) => Some(hex_secret(&v, "intent")?.to_owned()),
+        None => None,
     };
     let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
+    store::run(move |db| {
         let tx = db.transaction()?;
-        let mut row = reservation(&tx, "code_hash", &hash(code))?
-            .filter(|r| r.kind == "manual")
-            .ok_or_else(|| ApiError::new(403, "Pairing code is invalid or expired."))?;
-        require_live(&row, seconds())?;
-        if row.request.is_some() {
-            if row.installation.as_deref() != Some(installation)
-                || row.origin.as_deref() != Some(&origin)
-                || row.name.as_deref() != Some(name)
-                || row.staged != staged
+        let now = seconds();
+        cleanup(&tx, now)?;
+        let lib = library(&tx)?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT request_id FROM extension_pairing WHERE code_hash=?",
+                [&digest],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            // Idempotent retry: the same installation, origin, and secret get the same live request.
+            let item = row(&tx, &id)?.ok_or_else(ApiError::not_found)?;
+            let state = status(&item, now);
+            if item.installation != installation
+                || item.origin != origin
+                || item.expires <= now
+                || state == "rejected"
             {
-                return Err(ApiError::new(
-                    409,
-                    "This code already belongs to another pairing request.",
-                ));
+                return Err(ApiError::new(409, "Use a new claim secret."));
             }
-        } else {
-            let request = Uuid::new_v4().to_string();
-            tx.execute("UPDATE extension_pairing SET request_id=?,installation_id=?,name=?,origin=?,state='pending',activation_required=? WHERE code_hash=?", params![request,installation,name,origin,staged,hash(code)])?;
-            row.request = Some(request);
-            row.installation = Some(installation.into());
-            row.state = "pending".into();
-            row.staged = staged;
+            return Ok(Json(
+                json!({"requestId":id,"status":state,"expiresAt":item.expires,"libraryId":lib}),
+            ));
         }
-        let result = reply(public_status(&row, &library(&tx)?));
-        tx.commit()?;
-        Ok(result)
-    })
-}
-
-pub(super) async fn request_metadata(Path(id): Path<String>) -> Result<Json<Value>> {
-    uid(&id)?;
-    store::with_db(|db| {
-        let row = reservation(db, "request_id", &id)?.ok_or_else(ApiError::not_found)?;
-        let status = if row.expires <= seconds() && !current_receipt(db, &row)? {
-            "expired"
-        } else {
-            &row.state
+        let (total, from_origin): (i64, i64) = tx.query_row(
+            "SELECT COUNT(*),COALESCE(SUM(origin=?),0) FROM extension_pairing WHERE expires>?",
+            params![origin, now],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if total >= 16 || from_origin >= 4 {
+            return Err(ApiError::new(
+                429,
+                "Too many browser connection attempts. Try again in ten minutes.",
+            ));
+        }
+        let approved = match intent {
+            Some(ref value) => consume_intent(value, now)?,
+            None => false,
         };
-        Ok(reply(
-            json!({"requestId":row.request,"installationId":row.installation,"libraryId":library(db)?,"name":row.name,"origin":row.origin,"kind":row.kind,"status":status,"expiresAt":row.expires}),
+        tx.execute(
+            "UPDATE extension_pairing SET state='cancelled' WHERE installation_id=? AND state='pending'",
+            [&installation],
+        )?;
+        let id = Uuid::new_v4().to_string();
+        let expires = now + REQUEST_SECONDS;
+        let state = if approved { "approved" } else { "pending" };
+        tx.execute(
+            "INSERT INTO extension_pairing(code_hash,expires,request_id,installation_id,name,origin,state) VALUES(?,?,?,?,?,?,?)",
+            params![digest, expires, id, installation, name, origin, state],
+        )?;
+        tx.commit()?;
+        Ok(Json(
+            json!({"requestId":id,"status":state,"expiresAt":expires,"libraryId":lib}),
         ))
     })
+    .await
+}
+fn refused(state: &str) -> Response {
+    (StatusCode::FORBIDDEN, Json(json!({"status":state}))).into_response()
+}
+pub(super) async fn claim(headers: HeaderMap, Json(v): Json<Value>) -> Result<Response> {
+    fields(&v, &["requestId", "installationId", "claimSecret"])?;
+    let id = text(&v, "requestId", 36)?.to_owned();
+    uid(&id)?;
+    let installation = text(&v, "installationId", 36)?.to_owned();
+    uid(&installation)?;
+    let secret = hex_secret(&v, "claimSecret")?.to_owned();
+    let origin = extension_origin(&headers)?;
+    store::run(move |db| {
+        let tx = db.transaction()?;
+        let now = seconds();
+        cleanup(&tx, now)?;
+        let digest = hash(&secret);
+        let Some(item) = row(&tx, &id)?.filter(|r| {
+            r.installation == installation && r.origin == origin && equal(&r.digest, &digest)
+        }) else {
+            tx.commit()?;
+            return Ok(refused("unknown"));
+        };
+        match status(&item, now) {
+            "approved" => {}
+            "pending" => {
+                tx.commit()?;
+                return Ok(Json(json!({"status":"pending"})).into_response());
+            }
+            state => {
+                let response = refused(state);
+                tx.commit()?;
+                return Ok(response);
+            }
+        }
+        let lib = library(&tx)?;
+        let credential = hash(format!(
+            "echo-extension-v2\0{secret}\0{id}\0{installation}\0{lib}"
+        ));
+        if item.state == "approved" {
+            tx.execute(
+                "INSERT INTO extension_connections(installation_id,name,origin,credential_hash,created_at) VALUES(?,?,?,?,?) ON CONFLICT(installation_id) DO UPDATE SET name=excluded.name,origin=excluded.origin,credential_hash=excluded.credential_hash,created_at=excluded.created_at",
+                params![installation, item.name, origin, hash(&credential), store::now()],
+            )?;
+            tx.execute(
+                "UPDATE extension_pairing SET state='claimed' WHERE request_id=?",
+                [&id],
+            )?;
+        } else {
+            let current: Option<(String, String)> = tx.query_row(
+                "SELECT credential_hash,origin FROM extension_connections WHERE installation_id=?",
+                [&installation], |r| Ok((r.get(0)?, r.get(1)?)),
+            ).optional()?;
+            if !current.is_some_and(|(digest, current_origin)| equal(&digest, &hash(&credential)) && current_origin == origin) {
+                tx.commit()?;
+                return Ok(refused("rejected"));
+            }
+        }
+        tx.commit()?;
+        Ok(Json(json!({"status":"approved","credential":credential,"libraryId":lib})).into_response())
+    })
+    .await
+}
+/// Cancel an undecided or unclaimed request; unknown or mismatched requests are ignored.
+pub(super) async fn cancel(
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(v): Json<Value>,
+) -> Result<StatusCode> {
+    fields(&v, &["installationId", "claimSecret"])?;
+    let installation = text(&v, "installationId", 36)?.to_owned();
+    uid(&installation)?;
+    uid(&id)?;
+    let digest = hash(hex_secret(&v, "claimSecret")?);
+    let origin = extension_origin(&headers)?;
+    store::run(move |db| {
+        if let Some(item) = row(db, &id)? {
+            if item.installation == installation
+                && item.origin == origin
+                && equal(&item.digest, &digest)
+                && item.state != "claimed"
+            {
+                db.execute(
+                    "UPDATE extension_pairing SET state='cancelled' WHERE request_id=?",
+                    [&id],
+                )?;
+            }
+        }
+        cleanup(db, seconds())?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
+}
+pub(super) async fn request_metadata(Path(id): Path<String>) -> Result<Json<Value>> {
+    uid(&id)?;
+    store::run(move |db| {
+        let item = row(db,&id)?.ok_or_else(ApiError::not_found)?;
+        Ok(reply(json!({"requestId":id,"installationId":item.installation,"libraryId":library(db)?,"name":item.name,"origin":item.origin,"status":status(&item,seconds()),"expiresAt":item.expires})))
+    }).await
 }
 pub(super) async fn approve(Path(id): Path<String>) -> Result<Json<Value>> {
-    decision(&id, true)
+    decision(id, true).await
 }
 pub(super) async fn reject(Path(id): Path<String>) -> Result<Json<Value>> {
-    decision(&id, false)
+    decision(id, false).await
 }
-fn decision(id: &str, approved: bool) -> Result<Json<Value>> {
-    uid(id)?;
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let mut row = reservation(&tx, "request_id", id)?.ok_or_else(ApiError::not_found)?;
-        require_live(&row, seconds())?;
+async fn decision(id: String, approved: bool) -> Result<Json<Value>> {
+    uid(&id)?;
+    store::run(move |db| {
+        let item = row(db, &id)?.ok_or_else(ApiError::not_found)?;
+        if item.expires <= seconds() {
+            return Err(ApiError::new(403, "Pairing request expired."));
+        }
         let target = if approved { "approved" } else { "rejected" };
-        if row.state == "pending"
-            || (!approved && matches!(row.state.as_str(), "approved" | "prepared"))
-        {
-            tx.execute(
+        let repeated = item.state == target || (approved && item.state == "claimed");
+        if item.state == "pending" || (!approved && item.state == "approved") {
+            db.execute(
                 "UPDATE extension_pairing SET state=? WHERE request_id=?",
                 params![target, id],
             )?;
-            row.state = target.into();
-        } else if !(row.state == target
-            || (approved && matches!(row.state.as_str(), "prepared" | "claimed")))
-        {
+        } else if !repeated {
             return Err(ApiError::new(
                 409,
                 "Pairing request is no longer available.",
             ));
         }
-        let response = reply(public_status(&row, &library(&tx)?));
-        tx.commit()?;
-        Ok(response)
+        Ok(reply(
+            json!({"requestId":id,"status":target,"libraryId":library(db)?,"expiresAt":item.expires}),
+        ))
     })
+    .await
 }
-
-pub(super) async fn pair_claim(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(&v, &["requestId", "installationId", "code"])?;
-    let (request, installation, secret) = identifying_fields(&v, "code")?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let mut row = bound_request(&tx, request, installation, secret, &origin)?;
-        if row.state != "claimed" || !row.staged {
-            require_live(&row, seconds())?;
-        }
-        let lib = library(&tx)?;
-        let credential = credential(secret, request, installation, &lib);
-        match row.state.as_str() {
-            "pending" | "rejected" | "cancelled" => return Ok(reply(public_status(&row, &lib))),
-            "claimed" => require_current(&tx, &row, &credential)?,
-            "approved" if row.staged => {
-                tx.execute("UPDATE extension_pairing SET state='prepared',credential_hash=? WHERE request_id=?", params![hash(&credential),request])?;
-                row.state = "prepared".into();
-            }
-            "approved" => {
-                commit_connection(&tx, &row, &credential)?;
-                row.state = "claimed".into();
-            }
-            "prepared" if row.staged => {}
-            _ => return Err(ApiError::new(403, "Pairing request is unavailable.")),
-        }
-        tx.commit()?;
-        Ok(receipt(&row, &lib, &credential))
-    })
-}
-
-pub(super) async fn pair_activate(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(
-        &v,
-        &["requestId", "installationId", "claimSecret", "libraryId"],
-    )?;
-    let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
-    let requested_library = text(&v, "libraryId", 36)?;
-    uid(requested_library)?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let mut row = bound_request(&tx, request, installation, secret, &origin)?;
-        let lib = library(&tx)?;
-        if lib != requested_library {
-            return Err(ApiError::new(
-                409,
-                "Confirm this Echo library before connecting.",
-            ));
-        }
-        let credential = credential(secret, request, installation, &lib);
-        if row.state == "claimed" {
-            if !row.staged {
-                require_live(&row, seconds())?;
-            }
-            require_current(&tx, &row, &credential)?;
-        } else {
-            require_live(&row, seconds())?;
-            if !row.staged
-                || row.state != "prepared"
-                || row.credential_hash.as_deref() != Some(hash(&credential).as_str())
-            {
-                return Err(ApiError::new(
-                    409,
-                    "Approve and prepare this connection before activating it.",
-                ));
-            }
-            commit_connection(&tx, &row, &credential)?;
-            row.state = "claimed".into();
-        }
-        tx.commit()?;
-        Ok(receipt(&row, &lib, &credential))
-    })
-}
-
-pub(super) async fn pair_cancel(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(
-        &v,
-        &["requestId", "installationId", "claimSecret", "libraryId"],
-    )?;
-    let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
-        let tx = db.transaction()?;
-        let mut row = bound_request(&tx, request, installation, secret, &origin)?;
-        let lib = library(&tx)?;
-        if let Some(requested) = v.get("libraryId") {
-            if requested.as_str() != Some(&lib) {
-                return Err(ApiError::new(
-                    409,
-                    "This request belongs to another Echo library.",
-                ));
-            }
-        }
-        if row.state == "claimed" {
-            let credential = credential(secret, request, installation, &lib);
-            require_current(&tx, &row, &credential)?;
-            // The client must save this committed receipt and use normal disconnect.
-            return Ok(receipt(&row, &lib, &credential));
-        }
-        if !matches!(row.state.as_str(), "cancelled" | "rejected") {
-            tx.execute(
-                "UPDATE extension_pairing SET state='cancelled' WHERE request_id=?",
-                [request],
-            )?;
-            row.state = "cancelled".into();
-        }
-        tx.commit()?;
-        Ok(reply(public_status(&row, &lib)))
-    })
-}
-
 pub(super) fn revoke_connection(db: &mut Connection, installation: &str) -> Result<()> {
     let tx = db.transaction()?;
     tx.execute(
         "DELETE FROM extension_connections WHERE installation_id=?",
         [installation],
     )?;
-    // Explicit revocation also fences credentials prepared before the user's action.
-    tx.execute("UPDATE extension_pairing SET state='cancelled' WHERE installation_id=? AND state IN ('pending','approved','prepared')", [installation])?;
+    tx.execute("UPDATE extension_pairing SET state='cancelled' WHERE installation_id=? AND state IN ('pending','approved')", [installation])?;
     cleanup(&tx, seconds())?;
     tx.commit()?;
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn migration_preserves_legacy_approval_state() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE extension_pairing(code_hash TEXT PRIMARY KEY,expires INTEGER NOT NULL,request_id TEXT UNIQUE,installation_id TEXT,name TEXT,origin TEXT,state TEXT NOT NULL);
-            INSERT INTO extension_pairing VALUES('hashed-code',12345,'request','installation','Browser','origin','approved');").unwrap();
-        init_schema(&db).unwrap();
-        init_schema(&db).unwrap();
-        let row = reservation(&db, "request_id", "request").unwrap().unwrap();
-        assert_eq!(row.state, "approved");
-        assert_eq!(row.kind, "manual");
-        assert!(!row.staged);
-        assert_eq!(row.credential_hash, None);
-        assert_eq!(row.code_hash, "hashed-code");
-    }
-
-    #[test]
-    fn expiry_boundary_releases_abandoned_slots_but_keeps_current_receipts() {
-        let db = Connection::open_in_memory().unwrap();
-        init_schema(&db).unwrap();
-        db.execute("INSERT INTO extension_pairing(code_hash,expires,request_id,installation_id,name,origin,state,kind,activation_required,credential_hash) VALUES('secret-hash',300,'committed','installation','Browser','origin','claimed','browser',1,'credential-hash')", []).unwrap();
-        db.execute("INSERT INTO extension_connections VALUES('installation','Browser','origin','credential-hash','created')", []).unwrap();
-        db.execute("INSERT INTO extension_pairing(code_hash,expires,state) VALUES('abandoned',300,'cancelled')", []).unwrap();
-        let live = reservation(&db, "request_id", "committed")
-            .unwrap()
-            .unwrap();
-        assert!(require_live(&live, 299).is_ok());
-        assert!(require_live(&live, 300).is_err());
-        cleanup(&db, 300).unwrap();
-        assert!(reservation(&db, "code_hash", "abandoned")
-            .unwrap()
-            .is_none());
-        assert!(current_receipt(&db, &live).unwrap());
-        assert!(reservation(&db, "request_id", "committed")
-            .unwrap()
-            .is_some());
-        db.execute("DELETE FROM extension_connections", []).unwrap();
-        cleanup(&db, 300).unwrap();
-        assert!(reservation(&db, "request_id", "committed")
-            .unwrap()
-            .is_none());
+pub(super) fn expire_intents_for_test() {
+    if let Ok(mut intents) = intents() {
+        for (_, expiry) in intents.iter_mut() {
+            *expiry = 0;
+        }
     }
 }

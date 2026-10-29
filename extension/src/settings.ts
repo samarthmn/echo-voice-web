@@ -1,38 +1,176 @@
-import {Settings, endpointURL} from './core';
-import {sealSecret,openSecret} from './device-secrets';
-declare const chrome: any;
-// All callers run in the service worker. Serialize initialization and writes so
-// concurrent setup actions cannot replace one another's preferences.
+import { Settings, Pair, endpointURL } from './core';
+import { sealSecret, openSecret } from './device-secrets';
+import type { Ciphertext } from './encryption';
+export type Link =
+  | { state: 'none' }
+  | {
+      state: 'waiting';
+      endpoint: string;
+      requestId: string;
+      claimSecret: string;
+      expiresAt: number;
+    }
+  | ({ state: 'connected' } & Pair);
+type StoredSettings = Partial<Settings> & {
+  // Pairing v1 fields, read once during migration.
+  encryptedPairs?: Ciphertext;
+  pairs?: Record<string, Pair>;
+  activeLibraryId?: string | null;
+};
+const SETTINGS_KEYS = [
+  'installationId',
+  'enabledProviders',
+  'micGranted',
+  'micDeviceId',
+  'rememberedConsent',
+  'liveTranscription',
+];
+const OBSOLETE_KEYS = ['pairingAttempt', 'pairingCancellation'];
+// Only the service worker and trusted extension pages reach chrome.storage. Serialize
+// initialization and writes so concurrent setup actions cannot replace one another.
 let pending: Promise<unknown> = Promise.resolve();
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
   const result = pending.then(operation);
   pending = result.catch(() => undefined);
   return result;
 }
-async function readSettings(): Promise<Settings> {
-  await chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
-  const stored = (await chrome.storage.local.get('settings')).settings;
-  if(stored) {
-    if(stored.encryptedPairs) return {...stored,pairs:await openSecret(stored.encryptedPairs,'settings-pairs')};
-    // Encrypt existing credentials before discarding their committed plaintext.
-    if(Object.keys(stored.pairs ?? {}).length) await persist(stored);
-    return stored;
+// Decrypted settings and link stay in memory; a write here replaces them, and a write from
+// another extension context arrives through storage.onChanged and drops them.
+let cachedSettings: Promise<Settings> | undefined;
+let cachedLink: Promise<Link> | undefined;
+// Storage modules also load in contexts without extension APIs (export pages, tests).
+if (typeof chrome !== 'undefined')
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if ('settings' in changes) cachedSettings = undefined;
+    if ('link' in changes) cachedLink = undefined;
+  });
+function remembered<T>(
+  read: () => Promise<T> | undefined,
+  write: (value: Promise<T> | undefined) => void,
+  load: () => Promise<T>,
+): Promise<T> {
+  const current = read();
+  if (current) return current;
+  const loading = load();
+  write(loading);
+  // A failed read is retried next time rather than cached.
+  loading.catch(() => {
+    if (read() === loading) write(undefined);
+  });
+  return loading;
+}
+async function legacyLink(old: StoredSettings): Promise<Link> {
+  try {
+    const pairs = old.encryptedPairs
+      ? await openSecret<Record<string, Pair>>(old.encryptedPairs, 'settings-pairs')
+      : old.pairs;
+    const pair = old.activeLibraryId ? pairs?.[old.activeLibraryId] : undefined;
+    if (!pair) return { state: 'none' };
+    return { state: 'connected', ...pair, endpoint: endpointURL(pair.endpoint) };
+  } catch (error) {
+    console.error('Echo: the previous connection could not be migrated. Connect again.', error);
+    return { state: 'none' };
   }
-  const initial: Settings = {installationId:crypto.randomUUID(),endpoint:'http://localhost:3000',activeLibraryId:null,pairs:{},enabledProviders:[],micGranted:false,micDeviceId:'default'};
-  await chrome.storage.local.set({settings:initial}); return initial;
 }
-async function persist(value:Settings):Promise<void> {
-  const {pairs,...publicSettings}=value;
-  const encryptedPairs=await sealSecret(pairs,'settings-pairs');
-  await chrome.storage.local.set({settings:{...publicSettings,encryptedPairs}});
+async function readSettings(): Promise<Settings> {
+  await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+  const saved = await chrome.storage.local.get(['settings', 'link']);
+  const old = (saved.settings ?? {}) as StoredSettings;
+  const prefs: Settings = {
+    installationId: old.installationId ?? crypto.randomUUID(),
+    enabledProviders: old.enabledProviders ?? [],
+    micGranted: old.micGranted ?? false,
+    micDeviceId: old.micDeviceId ?? 'default',
+    rememberedConsent: old.rememberedConsent ?? [],
+    liveTranscription: old.liveTranscription ?? false,
+  };
+  if (
+    saved.link &&
+    old.installationId &&
+    Object.keys(old).every((key) => SETTINGS_KEYS.includes(key))
+  )
+    return prefs;
+  if (!saved.link)
+    await chrome.storage.local.set({ link: await sealSecret(await legacyLink(old), 'link') });
+  // Rewrite, rather than spread, so pairing v1 credentials and journals vanish.
+  await chrome.storage.local.set({ settings: prefs });
+  await chrome.storage.local.remove(OBSOLETE_KEYS);
+  return prefs;
 }
-export function settings(): Promise<Settings> {return serialized(readSettings);}
-export function saveSettings(update: Partial<Settings> | ((current: Settings) => Partial<Settings>)): Promise<Settings> {
+export function settings(): Promise<Settings> {
+  return remembered(
+    () => cachedSettings,
+    (value) => (cachedSettings = value),
+    () => serialized(readSettings),
+  );
+}
+export function saveSettings(
+  update: Partial<Settings> | ((current: Settings) => Partial<Settings>),
+): Promise<Settings> {
   return serialized(async () => {
     const current = await readSettings();
-    const patch = typeof update === 'function' ? update(current) : update;
-    const next = {...current,...patch};
-    if(patch.endpoint) next.endpoint = endpointURL(patch.endpoint);
-    await persist(next); return next;
+    const next = { ...current, ...(typeof update === 'function' ? update(current) : update) };
+    await chrome.storage.local.set({ settings: next });
+    cachedSettings = Promise.resolve(next);
+    return next;
   });
+}
+// The offscreen document has no chrome.storage; it asks the service worker.
+async function trusted<T>(message: { type: string } & Record<string, unknown>): Promise<T> {
+  const reply = await chrome.runtime.sendMessage(message);
+  if (!reply?.ok) throw new Error(reply?.error ?? 'The Echo connection is unavailable.');
+  return reply.value;
+}
+export function readLink(): Promise<Link> {
+  if (!chrome.storage?.local) return trusted<Link>({ type: 'TRUSTED_LINK' });
+  return remembered(
+    () => cachedLink,
+    (value) => (cachedLink = value),
+    () =>
+      serialized(async () => {
+        await readSettings();
+        return openSecret<Link>(
+          (await chrome.storage.local.get('link')).link as Ciphertext,
+          'link',
+        );
+      }),
+  );
+}
+export function saveLink(link: Link): Promise<void> {
+  return serialized(async () => {
+    if (link.state !== 'none') endpointURL(link.endpoint);
+    await chrome.storage.local.set({ link: await sealSecret(link, 'link'), revoked: false });
+    cachedLink = Promise.resolve(link);
+  });
+}
+/** Echo answered 401 for this credential: forget it, keep every recording. */
+export function revokeCredential(credential: string, endpoint: string): Promise<void> {
+  if (!chrome.storage?.local)
+    return trusted<void>({ type: 'TRUSTED_REVOKE', credential, endpoint });
+  return serialized(async () => {
+    const saved = (await chrome.storage.local.get('link')).link as Ciphertext | undefined;
+    if (!saved) return;
+    const link = await openSecret<Link>(saved, 'link');
+    if (
+      link.state === 'connected' &&
+      link.credential === credential &&
+      link.endpoint === endpoint
+    ) {
+      await chrome.storage.local.set({
+        link: await sealSecret({ state: 'none' }, 'link'),
+        revoked: true,
+      });
+      cachedLink = Promise.resolve({ state: 'none' });
+    }
+  });
+}
+export async function wasRevoked(): Promise<boolean> {
+  return (await chrome.storage.local.get('revoked')).revoked === true;
+}
+export async function connectedPair(): Promise<Pair | undefined> {
+  const link = await readLink();
+  return link.state === 'connected'
+    ? { endpoint: link.endpoint, libraryId: link.libraryId, credential: link.credential }
+    : undefined;
 }

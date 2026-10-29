@@ -96,6 +96,42 @@ pub async fn browser_isolation(request: Request, next: Next) -> Response {
     response
 }
 
+/// Serves workspace pages from one origin. Browsers keep downloaded speech models and
+/// other storage per origin, so 127.0.0.1 and localhost would otherwise split them.
+/// API and extension routes are left alone; only page navigations are redirected.
+pub async fn canonical_host(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let page = matches!(request.method().as_str(), "GET" | "HEAD")
+        && !path.starts_with("/api/")
+        && !path.starts_with("/extension/");
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let port = ["127.0.0.1", "[::1]"]
+        .iter()
+        .find_map(|loopback| host.strip_prefix(loopback))
+        .filter(|rest| rest.is_empty() || rest.starts_with(':'));
+    match port {
+        Some(port) if page => {
+            let target = request
+                .uri()
+                .path_and_query()
+                .map_or("/", |value| value.as_str());
+            match header::HeaderValue::from_str(&format!("http://localhost{port}{target}")) {
+                Ok(location) => (
+                    StatusCode::PERMANENT_REDIRECT,
+                    [(header::LOCATION, location)],
+                )
+                    .into_response(),
+                Err(_) => next.run(request).await,
+            }
+        }
+        _ => next.run(request).await,
+    }
+}
+
 /// Protects reads from DNS rebinding and changes from hostile browser origins.
 /// The listener is loopback-only; these checks additionally protect browser requests.
 pub async fn local_access(request: Request, next: Next) -> Response {
@@ -161,6 +197,46 @@ mod tests {
     use super::*;
     use axum::{body::Body, routing::get, Router};
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn loopback_page_requests_redirect_to_localhost_but_api_requests_do_not() {
+        let app = Router::new()
+            .route("/extension-connect.html", get(|| async { "page" }))
+            .route("/api/health", get(|| async { "api" }))
+            .route("/extension/v1/hello", get(|| async { "hello" }))
+            .layer(axum::middleware::from_fn(canonical_host));
+        let send = |host: &'static str, uri: &'static str| {
+            app.clone().oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+        };
+        let page = send("127.0.0.1:3000", "/extension-connect.html?x=1")
+            .await
+            .unwrap();
+        assert_eq!(page.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            page.headers()[header::LOCATION],
+            "http://localhost:3000/extension-connect.html?x=1"
+        );
+        let ipv6 = send("[::1]:3100", "/").await.unwrap();
+        assert_eq!(ipv6.headers()[header::LOCATION], "http://localhost:3100/");
+        for (host, uri) in [
+            ("127.0.0.1:3000", "/api/health"),
+            ("127.0.0.1:3000", "/extension/v1/hello"),
+            ("localhost:3000", "/extension-connect.html"),
+            ("127.0.0.10:3000", "/extension-connect.html"),
+        ] {
+            let response = send(host, uri).await.unwrap();
+            assert_ne!(
+                response.status(),
+                StatusCode::PERMANENT_REDIRECT,
+                "{host}{uri}"
+            );
+        }
+    }
     #[tokio::test]
     async fn documents_workers_and_wasm_receive_isolation_without_changing_content_types() {
         let app = Router::new()

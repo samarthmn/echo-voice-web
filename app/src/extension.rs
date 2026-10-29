@@ -6,6 +6,24 @@ use crate::{
 use dioxus::prelude::*;
 use serde_json::{json, Value};
 
+fn canonical_origin(origin: &str) -> String {
+    let Some((scheme, authority)) = origin.trim_end_matches('/').split_once("://") else {
+        return origin.to_string();
+    };
+    let authority = authority.to_ascii_lowercase();
+    let host = if authority == "127.0.0.1" || authority == "[::1]" {
+        "localhost".to_string()
+    } else if let Some(port) = authority
+        .strip_prefix("127.0.0.1:")
+        .or_else(|| authority.strip_prefix("[::1]:"))
+    {
+        format!("localhost:{port}")
+    } else {
+        authority
+    };
+    format!("{}://{host}", scheme.to_ascii_lowercase())
+}
+
 fn acknowledged_action(before_poll: &Value, pending: &Value, snapshot: &Value) -> Option<String> {
     if pending.is_null()
         || before_poll != pending
@@ -55,7 +73,8 @@ mod tests {
 #[component]
 pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
     let mut connections = use_signal(|| Value::Null);
-    let mut code = use_signal(String::new);
+    let mut presence = use_signal(|| None::<Value>);
+    let mut extension_path = use_signal(String::new);
     let mut busy = use_signal(|| false);
     let mut error = use_signal(String::new);
     let mut refresh = use_signal(|| 0u32);
@@ -64,63 +83,274 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
         async move {
             match get("/extensions/connections").await {
                 Ok(v) => {
+                    extension_path.set(text(&v, "extensionPath"));
                     connections.set(v);
-                    error.set(String::new());
                 }
                 Err(e) => error.set(e),
             }
+            let result = crate::api::evaluate("return await window.echoExtensionMessage({type:'ECHO_PRESENT',origin:location.origin});").await;
+            presence.set(Some(result.unwrap_or(Value::Null)));
         }
     });
-    use_future(move || async move {
-        loop {
-            let _ = document::eval("await new Promise(r=>setTimeout(r,5000));return true;").await;
-            refresh += 1;
-        }
+    crate::ui::use_poll_every(5000, move || {
+        refresh += 1;
     });
-    let installed = connections()["connections"]
+    let browsers = connections()["connections"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let requests = connections()["requests"]
-        .as_array()
-        .cloned()
+    let browser = presence();
+    let status = browser
+        .as_ref()
+        .map(|v| text(v, "status"))
         .unwrap_or_default();
-    rsx! {section {class:"panel extension-panel", "aria-label":"Browser extension connection",
-        div {class:"section-heading", h2 { Icon {name:"video",size:18} "Browser extension" }
-            StatusBadge {tone:if installed.is_empty(){BadgeTone::Neutral}else{BadgeTone::Success}, if installed.is_empty(){"Not connected"}else{"Connected"}}
+    let endpoint = browser
+        .as_ref()
+        .map(|v| text(v, "endpoint"))
+        .unwrap_or_default();
+    let origin = web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .unwrap_or_default();
+    let paired_library = browser
+        .as_ref()
+        .map(|v| text(v, "libraryId"))
+        .unwrap_or_default();
+    let current_library = text(&connections(), "libraryId");
+    let different_endpoint = matches!(status.as_str(), "connected" | "echo-offline")
+        && ((!endpoint.is_empty()
+            && !origin.is_empty()
+            && canonical_origin(&endpoint) != canonical_origin(&origin))
+            || (!paired_library.is_empty()
+                && !current_library.is_empty()
+                && paired_library != current_library));
+    let endpoint_host = endpoint.strip_prefix("http://").unwrap_or(&endpoint);
+    rsx! {
+        section {
+            class: "panel extension-panel",
+            "aria-label": "Browser extension connection",
+            div { class: "section-heading",
+                h2 {
+                    Icon { name: "video", size: 18 }
+                    "Browser extension"
+                }
+                StatusBadge { tone: if status == "connected" { BadgeTone::Success } else { BadgeTone::Neutral },
+                    match status.as_str() {
+                        "connected" => "Connected",
+                        "echo-offline" => "Echo offline",
+                        "waiting" => "Waiting for approval",
+                        _ if browser.is_none() => "Checking…",
+                        _ => "Not connected",
+                    }
+                }
+            }
+            p { class: "small-muted", "Record meetings in Brave or Chrome and send them to Echo." }
+            if !endpoint.is_empty() {
+                p { class: "small-muted", "This browser: {endpoint}" }
+            }
+            if browser.as_ref().is_some_and(|v| v["installed"] != true) {
+                p { "Install the browser extension:" }
+                ol { class: "extension-install-steps",
+                    li {
+                        "Open "
+                        code { "brave://extensions" }
+                        " or "
+                        code { "chrome://extensions" }
+                        ". "
+                        button {
+                            class: "extension-copy",
+                            r#type: "button",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    match crate::api::evaluate(
+                                            "await navigator.clipboard.writeText('brave://extensions'); return true;",
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => notify.call("Brave extensions address copied.".into()),
+                                        Err(_) => {
+                                            error
+                                                .set(
+                                                    "Could not copy. Select and copy brave://extensions manually."
+                                                        .into(),
+                                                )
+                                        }
+                                    }
+                                });
+                            },
+                            "Copy Brave address"
+                        }
+                    }
+                    li { "Turn on Developer mode." }
+                    li {
+                        "Select Load unpacked and choose this folder:"
+                        div { class: "extension-folder",
+                            code {
+                                if extension_path().is_empty() {
+                                    "extension/dist"
+                                } else {
+                                    "{extension_path}"
+                                }
+                            }
+                            button {
+                                class: "extension-copy",
+                                r#type: "button",
+                                onclick: move |_| {
+                                    spawn(async move {
+                                        let path = if extension_path().is_empty() {
+                                            "extension/dist".to_string()
+                                        } else {
+                                            extension_path()
+                                        };
+                                        let script = format!(
+                                            "await navigator.clipboard.writeText({}); return true;",
+                                            json!(path),
+                                        );
+                                        match crate::api::evaluate(&script).await {
+                                            Ok(_) => notify.call("Extension folder copied.".into()),
+                                            Err(_) => {
+                                                error
+                                                    .set(
+                                                        "Could not copy the folder. Select and copy the path manually."
+                                                            .into(),
+                                                    )
+                                            }
+                                        }
+                                    });
+                                },
+                                "Copy folder"
+                            }
+                        }
+                        if extension_path().is_empty() {
+                            small { "Relative to your Echo project folder." }
+                        }
+                    }
+                }
+                ActionButton {
+                    kind: ButtonKind::Secondary,
+                    disabled: busy(),
+                    onclick: move |_| refresh += 1,
+                    "Check again"
+                }
+            } else if browser.as_ref().is_some_and(|v| v["installed"] == true)
+                && (matches!(status.as_str(), "none" | "revoked") || different_endpoint)
+            {
+                if different_endpoint {
+                    p {
+                        "This browser is connected to Echo at {endpoint_host}. Connect it to this Echo instead?"
+                    }
+                }
+                ActionButton {
+                    kind: ButtonKind::Primary,
+                    disabled: busy(),
+                    onclick: move |_| {
+                        spawn(async move {
+                            busy.set(true);
+                            error.set(String::new());
+                            match post("/extensions/intent", json!({})).await {
+                                Ok(v) => {
+                                    let script = format!(
+                                        "return await window.echoExtensionMessage({});",
+                                        json!({ "type" : "ECHO_CONNECT", "intent" : v["intent"] }),
+                                    );
+                                    match crate::api::evaluate(&script).await {
+                                        Ok(reply) if reply["status"] == "confirm-in-extension" => {
+                                            refresh += 1;
+                                            notify
+                                                .call(
+                                                    "Confirm in the Echo extension window that opens.".into(),
+                                                );
+                                        }
+                                        Ok(reply) if reply["ok"] == true => {
+                                            refresh += 1;
+                                            notify.call("Browser connected to Echo.".into());
+                                        }
+                                        Ok(_) => {
+                                            error
+                                                .set(
+                                                    "Could not connect. Open the extension and try again."
+                                                        .into(),
+                                                )
+                                        }
+                                        Err(e) => {
+                                            error
+                                                .set(
+                                                    format!(
+                                                        "Could not reach the extension: {e}. Open it and try again.",
+                                                    ),
+                                                )
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error
+                                        .set(
+                                            if e.contains("404") {
+                                                "Update Echo to connect your browser extension.".into()
+                                            } else {
+                                                e
+                                            },
+                                        )
+                                }
+                            }
+                            busy.set(false);
+                        });
+                    },
+                    if busy() {
+                        "Connecting…"
+                    } else {
+                        "Connect browser extension"
+                    }
+                }
+            }
+            for connection in browsers {
+                {
+                    let id = text(&connection, "installationId");
+                    let name = text(&connection, "name");
+                    let since = text(&connection, "createdAt");
+                    rsx! {
+                        div { class: "extension-connection-row",
+                            span {
+                                strong { "{name}" }
+                                small { "Connected since {since}" }
+                            }
+                            ActionButton {
+                                kind: ButtonKind::Ghost,
+                                compact: true,
+                                disabled: busy(),
+                                onclick: move |_| {
+                                    let id = id.clone();
+                                    spawn(async move {
+                                        busy.set(true);
+                                        match delete(&format!("/extensions/connections/{id}")).await {
+                                            Ok(_) => {
+                                                refresh += 1;
+                                                notify.call("Browser disconnected.".into());
+                                            }
+                                            Err(e) => error.set(e),
+                                        }
+                                        busy.set(false);
+                                    });
+                                },
+                                "Disconnect"
+                            }
+                        }
+                    }
+                }
+            }
+            if !error().is_empty() {
+                p { class: "inline-error", role: "alert", "{error}" }
+            }
         }
-        p {class:"small-muted","Record the meeting you attend in Brave or Chrome. " a {href:"/extension-guide.html",target:"_blank",rel:"noopener noreferrer","Installation guide"}}
-        if !code().is_empty() {div {class:"extension-pair-code",label {"Enter this code in the extension"} code {"{code}"} small {"Expires in five minutes. Approve the connection below after entering it."}}}
-        ActionButton {kind:ButtonKind::Secondary,disabled:busy(),onclick:move |_|{spawn(async move {
-            busy.set(true); error.set(String::new());
-            match post("/extensions/pairing",json!({})).await {Ok(v)=>code.set(text(&v,"code")),Err(e)=>error.set(e)}
-            busy.set(false);
-        });},Icon {name:"plus",size:16} "Connect an extension"}
-        for request in requests { {let id=text(&request,"requestId");let name=text(&request,"name");rsx!{
-            div {class:"extension-connection-row",span {strong {"{name}"}small {"Requests access to transfer recordings into this library."}}
-                ActionButton {kind:ButtonKind::Primary,compact:true,disabled:busy(),onclick:move |_|{let id=id.clone();spawn(async move {
-                    busy.set(true); match post(&format!("/extensions/requests/{id}/approve"),json!({})).await {Ok(_)=>{refresh+=1;code.set(String::new());notify.call("Extension connection approved.".into());},Err(e)=>error.set(e)}busy.set(false);
-                });},"Approve connection"}
-            }
-        }}}
-        for connection in installed { {let id=text(&connection,"installationId");let name=text(&connection,"name");rsx!{
-            div {class:"extension-connection-row",span {strong {"{name}"}small {"This library"}}
-                ActionButton {kind:ButtonKind::Ghost,compact:true,disabled:busy(),onclick:move |_|{let id=id.clone();spawn(async move {
-                    busy.set(true);match delete(&format!("/extensions/connections/{id}")).await{Ok(_)=>{refresh+=1;notify.call("Extension disconnected. Pending recordings remain in its browser.".into());},Err(e)=>error.set(e)}busy.set(false);
-                });},"Disconnect"}
-            }
-        }}}
-        if !error().is_empty(){p {class:"inline-error",role:"alert","{error}"}}
-    }}
+    }
 }
 
 #[component]
 pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<String>) -> Element {
+    let _ = notify;
     let mut recording = use_signal(|| Value::Null);
     let mut error = use_signal(String::new);
     let mut busy = use_signal(|| false);
     let mut live = use_signal(|| Value::Null);
-    let mut legacy = use_signal(|| Value::Null);
     let mut pending_control = use_signal(|| Value::Null);
     let mut acknowledgement = use_signal(|| Value::Null);
     let listener_id = use_hook(|| format!("extension-live-{}", js_sys::Math::random()));
@@ -143,20 +373,13 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
             }
         }
     });
-    use_resource(move || async move {
-        let id = text(&meeting(), "id");
-        if let Ok(v) = get("/extensions/legacy-recordings").await {
-            legacy.set(
-                v["recordings"]
-                    .as_array()
-                    .and_then(|items| items.iter().find(|r| r["meetingId"] == id))
-                    .cloned()
-                    .unwrap_or(Value::Null),
-            );
-        }
+    let mut recording_refresh = use_signal(|| 0u32);
+    crate::ui::use_poll_every(3000, move || {
+        recording_refresh += 1;
     });
-    use_future(move || async move {
-        loop {
+    use_resource(move || {
+        let _ = recording_refresh();
+        async move {
             let id = text(&meeting(), "id");
             let pending_before_poll = pending_control();
             match get("/extensions/recordings").await {
@@ -181,11 +404,9 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
                 }
                 Err(e) => error.set(e),
             }
-            let _ = document::eval("await new Promise(r=>setTimeout(r,3000));return true;").await;
         }
     });
     if recording().is_null()
-        && legacy()["ready"] != true
         && meeting()["tracks"]
             .as_array()
             .is_some_and(|tracks| !tracks.is_empty())
@@ -213,24 +434,100 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
                 .join(" ")
         })
         .unwrap_or_default();
-    rsx! {section {class:"panel extension-panel", "aria-label":"Extension recording status",
-        h2 {"Browser recording"}
-        if value.is_null(){p {class:"small-muted","Start a recording from the Echo extension in your meeting tab. Older runner audio can be recovered with the migration guide."}}
-        if legacy()["ready"]==true{ActionButton {kind:ButtonKind::Secondary,disabled:busy(),onclick:move |_|{spawn(async move{
-            busy.set(true);let id=text(&meeting(),"id");match post(&format!("/extensions/legacy-recordings/{id}/recover"),json!({})).await{Ok(v)=>{notify.call("Old recording recovered. Reopen this meeting to review it.".into());let _=document::eval(&format!("window.dispatchEvent(new CustomEvent('echo-recording-saved',{{detail:{}}}));window.dispatchEvent(new Event('echo-library-changed'));",v["meeting"]));},Err(e)=>error.set(e)}busy.set(false);
-        });},"Recover old recording"}}
-        if !live().is_null(){p {role:"status",{text(&live(),"message")}}}
-        if !value.is_null() {p {class:"small-muted",if receiving {"Recording saved in the browser; transfer is in progress."}else{"Recording saved in Echo."}}
-            if receiving{div {class:"extension-controls",for action in ["pause","resume","stop"]{{let id=id.clone();rsx!{ActionButton {kind:if action=="stop"{ButtonKind::Primary}else{ButtonKind::Secondary},compact:true,disabled:busy()||pending_here||!commands.is_empty(),onclick:move |_|{
-                if busy() || pending_control()["recordingId"]==id || recording()["controls"].as_array().is_some_and(|items|!items.is_empty()) { return; }
-                busy.set(true);let id=id.clone();spawn(async move{
-                error.set(String::new());acknowledgement.set(Value::Null);
-                match crate::api::evaluate("return crypto.randomUUID();").await{Ok(command)=>{match post(&format!("/extensions/recordings/{id}/controls"),json!({"commandId":command,"action":action})).await{Ok(_)=>pending_control.set(json!({"recordingId":id,"commandId":command,"action":action})),Err(e)=>error.set(e)}},Err(e)=>error.set(e)}busy.set(false);
-            });},{match action{"pause"=>"Pause","resume"=>"Resume",_=>"Stop"}}}}}}}}
-            if pending_here||!commands.is_empty(){p {role:"status","Control pending — waiting for the extension."}}
-            else if acknowledged_here {p {role:"status",{text(&acknowledgement(),"message")}}}
-            if !draft.is_empty(){p {class:"extension-live-preview",role:"status","Draft transcript: {draft}"}}
+    rsx! {
+        section {
+            class: "panel extension-panel",
+            "aria-label": "Extension recording status",
+            h2 { "Browser recording" }
+            if value.is_null() {
+                p { class: "small-muted",
+                    "Start a recording from the Echo extension in your meeting tab."
+                }
+            }
+            if !live().is_null() {
+                p { role: "status", {text(&live(), "message")} }
+            }
+            if !value.is_null() {
+                p { class: "small-muted",
+                    if receiving {
+                        "Recording saved in the browser; transfer is in progress."
+                    } else {
+                        "Recording saved in Echo."
+                    }
+                }
+                if receiving {
+                    div { class: "extension-controls",
+                        for action in ["pause", "resume", "stop"] {
+                            {
+                                let id = id.clone();
+                                rsx! {
+                                    ActionButton {
+                                        kind: if action == "stop" { ButtonKind::Primary } else { ButtonKind::Secondary },
+                                        compact: true,
+                                        disabled: busy() || pending_here || !commands.is_empty(),
+                                        onclick: move |_| {
+                                            if busy() || pending_control()["recordingId"] == id
+                                                || recording()["controls"].as_array().is_some_and(|items| !items.is_empty())
+                                            {
+                                                return;
+                                            }
+                                            busy.set(true);
+                                            let id = id.clone();
+                                            spawn(async move {
+                                                error.set(String::new());
+                                                acknowledgement.set(Value::Null);
+                                                match crate::api::evaluate("return crypto.randomUUID();").await {
+                                                    Ok(command) => {
+                                                        match post(
+                                                                &format!("/extensions/recordings/{id}/controls"),
+                                                                json!({ "commandId" : command, "action" : action }),
+                                                            )
+                                                            .await
+                                                        {
+                                                            Ok(_) => {
+                                                                pending_control
+                                                                    .set(
+                                                                        json!(
+                                                                            { "recordingId" : id, "commandId" : command, "action" :
+                                                                            action }
+                                                                        ),
+                                                                    )
+                                                            }
+                                                            Err(e) => error.set(e),
+                                                        }
+                                                    }
+                                                    Err(e) => error.set(e),
+                                                }
+                                                busy.set(false);
+                                            });
+                                        },
+                                        {
+                                            match action {
+                                                "pause" => "Pause",
+                                                "resume" => "Resume",
+                                                _ => "Stop",
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if pending_here || !commands.is_empty() {
+                    p { role: "status", "Control pending — waiting for the extension." }
+                } else if acknowledged_here {
+                    p { role: "status", {text(&acknowledgement(), "message")} }
+                }
+                if !draft.is_empty() {
+                    p { class: "extension-live-preview", role: "status",
+                        "Draft transcript: {draft}"
+                    }
+                }
+            }
+            if !error().is_empty() {
+                p { class: "inline-error", role: "alert", "{error}" }
+            }
         }
-        if !error().is_empty(){p {class:"inline-error",role:"alert","{error}"}}
-    }}
+    }
 }

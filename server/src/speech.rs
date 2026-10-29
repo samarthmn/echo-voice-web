@@ -70,10 +70,10 @@ fn manager() -> Arc<Manager> {
     MANAGER.get_or_init(|| Arc::new(Manager::default())).clone()
 }
 fn root() -> Result<PathBuf> {
-    Ok(crate::paths::get().resource_root)
+    Ok(crate::paths::get()?.resource_root)
 }
-fn cache_dir() -> PathBuf {
-    crate::paths::get().cache_dir.join("native-large-v3")
+fn cache_dir() -> Result<PathBuf> {
+    Ok(crate::paths::get()?.cache_dir.join("native-large-v3"))
 }
 fn valid_id(id: &str) -> Result<String> {
     uuid::Uuid::parse_str(id)
@@ -113,7 +113,7 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
             "node_modules/@huggingface/transformers/package.json",
             "node_modules/onnxruntime-node/package.json",
         ] {
-            if !root.join(file).is_file() {
+            if !tokio::fs::metadata(root.join(file)).await.is_ok_and(|metadata| metadata.is_file()) {
                 return None;
             }
         }
@@ -125,15 +125,15 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
     }
     .await
     .is_some();
-    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run npm ci in the Echo Voice folder, then retry." }.to_owned();
+    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run pnpm install in the Echo Voice folder, then retry." }.to_owned();
     *cached = Some((Instant::now(), available, detail.clone()));
     (available, detail)
 }
 
 /// Private native model files never enter browser backup exports or accept client paths.
 fn safe_cache(create: bool) -> Result<PathBuf> {
-    let parent = crate::paths::get().cache_dir;
-    let path = cache_dir();
+    let parent = crate::paths::get()?.cache_dir;
+    let path = cache_dir()?;
     for folder in [&parent, &path] {
         if std::fs::symlink_metadata(folder).is_ok_and(|metadata| metadata.file_type().is_symlink())
         {
@@ -230,7 +230,9 @@ async fn status() -> Result<Json<Value>> {
         .as_ref()
         .and_then(|id| state.jobs.get(id))
         .is_some_and(|job| job.operation.as_deref() == Some("download"));
-    let ready = available && !qualifying && safe_cache(false).is_ok_and(|path| qualified(&path));
+    let ready = available
+        && !qualifying
+        && store::blocking(|| Ok(safe_cache(false).is_ok_and(|path| qualified(&path)))).await?;
     let active = state
         .active
         .as_ref()
@@ -296,7 +298,9 @@ async fn finish(owner: &Manager, id: &str, outcome: Result<Value>) {
     if let Some(job) = state.jobs.get_mut(id) {
         if *job.cancel.borrow() {
             job.public["state"] = json!("cancelled");
-            job.public.as_object_mut().unwrap().remove("result");
+            if let Some(public) = job.public.as_object_mut() {
+                public.remove("result");
+            }
         } else {
             match outcome {
                 Ok(result) => {
@@ -400,7 +404,7 @@ fn clean_namespace(project: &FsPath, data: &FsPath) -> Result<()> {
 }
 /// Recover only this library's abandoned PCM spools after store::init holds its exclusive lock.
 pub fn recover_spools() -> Result<()> {
-    clean_namespace(&root()?, &store::data_dir())
+    clean_namespace(&root()?, &store::data_dir()?)
 }
 async fn remove_spool(path: &FsPath) {
     let _ = tokio::fs::remove_dir_all(path).await;
@@ -410,7 +414,7 @@ async fn remove_spool(path: &FsPath) {
     }
 }
 fn spool(id: &str) -> Result<PathBuf> {
-    let namespace = spool_namespace(&root()?, &store::data_dir())?;
+    let namespace = spool_namespace(&root()?, &store::data_dir()?)?;
     std::fs::create_dir_all(&namespace)?;
     #[cfg(unix)]
     {
@@ -488,7 +492,8 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
     }
     let owner = manager();
     let mut cancellation = reserve(&owner, &id, &input.operation).await?;
-    let spool = match spool(&id) {
+    let spool_id = id.clone();
+    let spool = match store::blocking(move || spool(&spool_id)).await {
         Ok(path) => path,
         Err(error) => {
             finish(
@@ -510,8 +515,8 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
         let (available, detail) = runtime_available(&owner).await;
         if !available { return Err(ApiError::new(503, detail)); }
         if is_cancelled(&cancellation) { return Err(cancelled_error()); }
-        let cache = safe_cache(true)?;
-        if input.operation == "transcribe" && !qualified(&cache) { return Err(ApiError::new(409,"Download and qualify Large V3 in Models before transcribing.")); }
+        let transcribe = input.operation == "transcribe";
+        let cache = store::blocking(move || { let cache = safe_cache(true)?; if transcribe && !qualified(&cache) { return Err(ApiError::new(409,"Download and qualify Large V3 in Models before transcribing.")); } Ok(cache) }).await?;
         let audio = spool.join("audio.enc");
         let mut audio_secret = None;
         if input.operation == "transcribe" {
@@ -533,7 +538,7 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
             if !body.is_empty() { return Err(ApiError::bad("A model download does not accept an audio body.")); }
         }
         if is_cancelled(&cancellation) { return Err(cancelled_error()); }
-        let cache = std::fs::canonicalize(cache)?;
+        let cache = store::blocking(move || Ok(std::fs::canonicalize(cache)?)).await?;
         let mut value = json!({"operation":input.operation,"cacheDir":cache,"language":language});
         if let Some((key, bytes)) = audio_secret {
             value["audioPath"] = json!(audio);
@@ -664,7 +669,7 @@ async fn run(
         .arg(project.join("scripts/native-speech.mjs"))
         .arg("--stdin-request")
         .current_dir(&project)
-        .env("TMPDIR", crate::paths::get().runtime_dir);
+        .env("TMPDIR", crate::paths::get()?.runtime_dir);
     supervise_request(
         owner,
         id,
@@ -754,7 +759,7 @@ async fn supervise_request(
                     // The fixed helper flushes its terminal result and holds the lease;
                     // terminate and reap that owned process before publishing completion.
                     let _ = child.kill().await; let _ = child.wait().await;
-                    if operation == "download" && !safe_cache(false).is_ok_and(|path|qualified(&path)) { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
+                    if operation == "download" && !store::blocking(|| Ok(safe_cache(false).is_ok_and(|path|qualified(&path)))).await? { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
                     return Ok(completed);
                 },
                 Some("error") => return Err(ApiError::new(502,message["error"].as_str().filter(|s|s.len()<=4096).unwrap_or("Native speech failed. Saved audio is unchanged."))),
@@ -763,7 +768,7 @@ async fn supervise_request(
         }
         let status=tokio::select! { _=cancellation.changed()=>return Err(cancelled_error()), status=child.wait()=>status? };
         if !status.success() { return Err(ApiError::new(502,format!("Native speech stopped unexpectedly ({status}). Saved audio and earlier results are unchanged."))); }
-        if operation=="download" && !safe_cache(false).is_ok_and(|path|qualified(&path)) { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
+        if operation=="download" && !store::blocking(|| Ok(safe_cache(false).is_ok_and(|path|qualified(&path)))).await? { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
         Err(ApiError::new(502,"Native speech stopped without a result. Retry the saved audio."))
     }).await.unwrap_or_else(|_|Err(ApiError::new(504,"Native speech exceeded its execution time limit. Saved audio is unchanged.")));
     if outcome.is_err() {
@@ -787,7 +792,7 @@ async fn supervise_request(
         }
         if operation == "download" {
             // An encoder probe followed by a teardown crash is not a qualified download.
-            if let Ok(cache) = safe_cache(false) {
+            if let Ok(cache) = store::blocking(|| safe_cache(false)).await {
                 let _ = tokio::fs::remove_file(cache.join("ready.json")).await;
             }
         }
@@ -820,7 +825,9 @@ async fn cancel(Path(id): Path<String>) -> Result<Json<Value>> {
         ) {
             let _ = job.cancel.send(true);
             job.public["state"] = json!("cancelled");
-            job.public.as_object_mut().unwrap().remove("result");
+            if let Some(public) = job.public.as_object_mut() {
+                public.remove("result");
+            }
         }
     }
     state
@@ -841,9 +848,11 @@ async fn remove_model() -> Result<Json<Value>> {
             "Finish or cancel native speech before removing its model.",
         ));
     }
-    let cache = safe_cache(false)?;
-    if cache.exists() {
-        tokio::fs::remove_dir_all(cache).await?;
+    let cache = store::blocking(|| safe_cache(false)).await?;
+    match tokio::fs::remove_dir_all(cache).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     drop(state);
     Ok(Json(json!({"ok":true})))

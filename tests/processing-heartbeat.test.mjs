@@ -3,21 +3,35 @@ import assert from 'node:assert/strict';
 import { createProcessingHeartbeat } from '../web/processing-heartbeat.js';
 
 const timers = () => {
-  const callbacks = new Map(); let counter = 0;
+  const callbacks = new Map();
+  let counter = 0;
   return {
     callbacks,
-    schedule(callback, milliseconds) { assert.equal(milliseconds, 10000); callbacks.set(++counter, callback); return counter; },
-    unschedule(id) { callbacks.delete(id); },
+    schedule(callback, milliseconds) {
+      assert.equal(milliseconds, 10000);
+      callbacks.set(++counter, callback);
+      return counter;
+    },
+    unschedule(id) {
+      callbacks.delete(id);
+    },
   };
 };
 
 test('server restart reconciliation claims only pending browser jobs and stops after terminal jobs', async () => {
-  const clock = timers(), requests = [], restored = [];
-  const heartbeat = createProcessingHeartbeat({ ...clock,
-    async request(ids) { requests.push(ids); return { restored: [...ids, 'abandoned-server-job'] }; },
-    onRestore: ids => restored.push(ids),
+  const clock = timers(),
+    requests = [],
+    restored = [];
+  const heartbeat = createProcessingHeartbeat({
+    ...clock,
+    async request(ids) {
+      requests.push(ids);
+      return { restored: [...ids, 'abandoned-server-job'] };
+    },
+    onRestore: (ids) => restored.push(ids),
   });
-  heartbeat.start('active'); heartbeat.start('queued');
+  heartbeat.start('active');
+  heartbeat.start('queued');
   assert.equal(clock.callbacks.size, 1);
   await heartbeat.pulse();
   assert.deepEqual(requests, [['active', 'queued']]);
@@ -32,11 +46,16 @@ test('server restart reconciliation claims only pending browser jobs and stops a
 });
 
 test('temporary server loss preserves pending workers and retries without overlapping requests', async () => {
-  const clock = timers(); let calls = 0, release;
-  const heartbeat = createProcessingHeartbeat({ ...clock,
+  const clock = timers();
+  let calls = 0,
+    release;
+  const heartbeat = createProcessingHeartbeat({
+    ...clock,
     async request() {
       if (++calls === 1) throw new TypeError('Failed to fetch');
-      return await new Promise(resolve => { release = resolve; });
+      return await new Promise((resolve) => {
+        release = resolve;
+      });
     },
   });
   heartbeat.start('active');
@@ -51,10 +70,18 @@ test('temporary server loss preserves pending workers and retries without overla
 });
 
 test('cancel all aborts the heartbeat and a late response cannot announce restored jobs', async () => {
-  const clock = timers(); let release, signal; const restored = [];
-  const heartbeat = createProcessingHeartbeat({ ...clock,
-    request(ids, current) { signal = current; return new Promise(resolve => { release = resolve; }); },
-    onRestore: ids => restored.push(ids),
+  const clock = timers();
+  let release, signal;
+  const restored = [];
+  const heartbeat = createProcessingHeartbeat({
+    ...clock,
+    request(ids, current) {
+      signal = current;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+    onRestore: (ids) => restored.push(ids),
   });
   heartbeat.start('active');
   const pending = heartbeat.pulse();
@@ -67,13 +94,23 @@ test('cancel all aborts the heartbeat and a late response cannot announce restor
 });
 
 test('large pending sets use bounded batches and rotate through every meeting', async () => {
-  const clock = timers(), batches = [];
-  const heartbeat = createProcessingHeartbeat({ ...clock,
-    async request(ids) { batches.push(ids); return { restored: [] }; },
+  const clock = timers(),
+    batches = [];
+  const heartbeat = createProcessingHeartbeat({
+    ...clock,
+    async request(ids) {
+      batches.push(ids);
+      return { restored: [] };
+    },
   });
   for (let i = 0; i < 205; i++) heartbeat.start(String(i));
-  await heartbeat.pulse(); await heartbeat.pulse(); await heartbeat.pulse();
-  assert.deepEqual(batches.map(ids => ids.length), [100, 100, 5]);
+  await heartbeat.pulse();
+  await heartbeat.pulse();
+  await heartbeat.pulse();
+  assert.deepEqual(
+    batches.map((ids) => ids.length),
+    [100, 100, 5],
+  );
   assert.equal(new Set(batches.flat()).size, 205);
   heartbeat.clear();
 });

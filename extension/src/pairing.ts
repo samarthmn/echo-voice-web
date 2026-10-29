@@ -1,193 +1,296 @@
-import {sealSecret,openSecret} from './device-secrets';
-import {endpointURL, unixSecondsToMilliseconds} from './core';
-import {settings, saveSettings} from './settings';
-import {allRecordings} from './storage';
-import {connectionAction, disconnectLocked} from './connection';
-import {jsonRequest, ProtocolError} from './protocol';
-declare const chrome: any;
-export type PairingPhase = 'idle' | 'beginning' | 'pending' | 'prepared' | 'confirm-library' | 'activation-sent' | 'connected' | 'cancelled' | 'rejected' | 'expired';
-export type PairingError = 'old-server' | 'unavailable' | 'rate-limited' | 'tab-open-failed' | 'invalid-response' | 'denied';
-export type PairingView = {requestId?: string; phase: PairingPhase; expiresAtMs?: number; endpoint?: string; pendingCount: number; error?: PairingError; legacy?: boolean};
-export type PairingAttempt = {requestId: string; installationId: string; endpoint: string; name: string; claimSecret: string; createdAtMs: number; expiresAtMs: number; libraryId?: string; phase: PairingPhase; stagedCredential?: string; pendingCount: number; confirmedLibrary?: boolean; cancelRequested?: boolean; activationConfirmed?: boolean; mode: 'browser' | 'manual'; legacy?: boolean; error?: PairingError};
-const key = 'pairingAttempt';
-const cancellationKey = 'pairingCancellation';
-let cancellationWrite: Promise<void> = Promise.resolve();
-// Cancellation intent has a separate durable key, so it can arrive while a
-// serialized claim is waiting on the network without racing attempt snapshots.
-function recordCancellation(): Promise<void> {
-  const writeIntent = async () => {const attempt = await read(); if(attempt) await chrome.storage.local.set({[cancellationKey]:attempt.requestId});};
-  cancellationWrite = cancellationWrite.catch(() => {}).then(writeIntent);
-  return cancellationWrite;
-}
-async function cancellationRequested(attempt: PairingAttempt): Promise<boolean> {
-  for(;;) {const pending = cancellationWrite; await pending; const id = (await chrome.storage.local.get(cancellationKey))[cancellationKey]; if(pending === cancellationWrite) return id === attempt.requestId;}
-}
+// Pairing v2: one POST /pair, one approval click in Echo, then a deterministic claim.
+import { pageOrigin, unixSecondsToMilliseconds } from './core';
+import { readLink, saveLink, settings, Link } from './settings';
+import { discover, hello } from './discovery';
+import { connectionAction, forgetRemote } from './connection';
+import { jsonRequest, ProtocolError } from './protocol';
+type Waiting = Extract<Link, { state: 'waiting' }>;
+type ApprovalTab = { requestId: string; id: number; url: string };
+export type PairingView = {
+  phase: Link['state'];
+  endpoint?: string;
+  requestId?: string;
+  notice?: string;
+};
+const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15_000;
+const EXPIRED = 'The connection request expired. Choose Connect to Echo to try again.';
+const BROWSER_NAME = 'Echo browser recorder';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const terminal = new Set<PairingPhase>(['connected','cancelled','rejected','expired']);
-async function read(): Promise<PairingAttempt | undefined> {await chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'}); const stored=(await chrome.storage.local.get(key))[key]; if(!stored) return undefined; if(stored.encrypted) return openSecret<PairingAttempt>(stored.encrypted,'pairing-attempt'); await write(stored); return stored;}
-async function current(attempt: PairingAttempt) {return (await read())?.requestId === attempt.requestId;}
-async function write(attempt: PairingAttempt) {await chrome.storage.local.set({[key]:{encrypted:await sealSecret(attempt,'pairing-attempt')}});}
-async function save(attempt: PairingAttempt) {if(!(await current(attempt))) throw new Error('Connection attempt changed.'); await write(attempt);}
-function view(attempt?: PairingAttempt): PairingView {
-  return attempt ? {requestId:attempt.requestId,phase:attempt.phase,expiresAtMs:attempt.expiresAtMs,endpoint:attempt.endpoint,pendingCount:attempt.pendingCount,error:attempt.error,legacy:attempt.legacy} : {phase:'idle',pendingCount:0};
+let notice: string | undefined;
+// The pair/claim request in flight. Cancel aborts it instead of waiting behind it.
+let inFlight: AbortController | undefined;
+function requestSignal(): AbortSignal {
+  inFlight = new AbortController();
+  return AbortSignal.any([inFlight.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
 }
-export async function pairingView(): Promise<PairingView> {return view(await read());}
-function failure(error: unknown): PairingError {return error instanceof ProtocolError ? error.status === 429 ? 'rate-limited' : error.status === 401 || error.status === 403 ? 'denied' : 'unavailable' : 'invalid-response';}
-async function request(attempt: PairingAttempt,path: string,body: object) {
-  const result = await jsonRequest(attempt.endpoint,path,{method:'POST',body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});
-  if(!(await current(attempt))) throw new Error('Connection attempt changed.');
-  return result;
+const expired = (link: Waiting) => Date.now() >= link.expiresAt;
+let onConnected: () => void = () => {};
+/** Register the action that runs right after a claim succeeds (upload pending audio). */
+export function whenConnected(callback: () => void): void {
+  onConnected = callback;
 }
-function validateIdentity(body: any,attempt: PairingAttempt,required = true) {
-  if((required || body.requestId !== undefined) && body.requestId !== attempt.requestId || (required || body.installationId !== undefined) && body.installationId !== attempt.installationId || body.libraryId !== attempt.libraryId) throw new Error('Invalid pairing identity.');
+function view(link: Link): PairingView {
+  return {
+    phase: link.state,
+    endpoint: link.state === 'none' ? undefined : link.endpoint,
+    requestId: link.state === 'waiting' ? link.requestId : undefined,
+    notice,
+  };
 }
-async function manualReservation(attempt: PairingAttempt): Promise<any> {
-  const body = {installationId:attempt.installationId,name:attempt.name,code:attempt.claimSecret,...(attempt.legacy ? {}:{deferredActivation:true})};
-  try {return await request(attempt,'/pairing/request',body);}
-  catch(error) {
-    if(attempt.legacy || !(error instanceof ProtocolError) || error.status !== 400) throw error;
-    // Old servers reject unknown fields. A failed request alone is insufficient
-    // evidence: only a missing begin route permits the legacy wire contract.
-    let oldServer = false;
-    try {await request(attempt,'/pairing/begin',{});} catch(probe) {oldServer = probe instanceof ProtocolError && [404,405].includes(probe.status);}
-    if(!oldServer) throw error;
-    attempt.legacy = true; await save(attempt);
-    return request(attempt,'/pairing/request',{installationId:attempt.installationId,name:attempt.name,code:attempt.claimSecret});
+async function end(message: string): Promise<PairingView> {
+  await saveLink({ state: 'none' });
+  notice = message;
+  return view({ state: 'none' });
+}
+function approvalURL(link: Waiting): string {
+  return `${pageOrigin(link.endpoint)}/extension-connect.html#request=${encodeURIComponent(link.requestId)}`;
+}
+async function showApprovalTab(link: Waiting): Promise<void> {
+  const url = approvalURL(link);
+  const existing = (await chrome.tabs.query({ url: `${pageOrigin(link.endpoint)}/*` })).find(
+    (tab) => tab.url === url,
+  );
+  if (existing?.id !== undefined) {
+    await chrome.tabs.update(existing.id, { active: true });
+    if (existing.windowId !== undefined)
+      await chrome.windows.update(existing.windowId, { focused: true });
+    return;
   }
+  const tab = await chrome.tabs.create({ url });
+  // Session storage survives worker suspension. Only a tab this extension opened is closed.
+  if (tab.id !== undefined)
+    await chrome.storage.session.set({
+      approvalTab: { requestId: link.requestId, id: tab.id, url } satisfies ApprovalTab,
+    });
 }
-async function reserve(attempt: PairingAttempt): Promise<void> {
-  const body = attempt.mode === 'browser'
-    ? await request(attempt,'/pairing/begin',{requestId:attempt.requestId,installationId:attempt.installationId,name:attempt.name,claimSecret:attempt.claimSecret})
-    : await manualReservation(attempt);
-  if(!uuid.test(body.requestId) || !uuid.test(body.libraryId) || attempt.mode === 'browser' && body.requestId !== attempt.requestId) throw new Error('Invalid pairing request.');
-  const expiresAtMs = unixSecondsToMilliseconds(body.expiresAt);
-  if(expiresAtMs > Date.now() + 301000 || expiresAtMs < attempt.createdAtMs - 1000) throw new Error('Invalid pairing expiry.');
-  // A manual reservation is identified by its code on the server; exact retries return the same public UUID.
-  if(attempt.mode === 'manual') {if(!(await current(attempt))) throw new Error('Connection attempt changed.'); attempt.requestId = body.requestId;}
-  attempt.libraryId = body.libraryId; attempt.expiresAtMs = expiresAtMs; attempt.phase = 'pending'; attempt.error = undefined;
-  attempt.legacy = attempt.mode === 'manual' && body.activationRequired !== true;
-  await write(attempt);
+async function closeApprovalTab(requestId: string): Promise<void> {
+  const tab = (await chrome.storage.session.get('approvalTab')).approvalTab as
+    | ApprovalTab
+    | undefined;
+  if (tab?.requestId !== requestId) return;
+  await chrome.storage.session.remove('approvalTab');
+  const current = await chrome.tabs.get(tab.id).catch(() => undefined); // Closed by the user.
+  if (current?.url === tab.url) await chrome.tabs.remove(tab.id);
 }
-async function openApproval(attempt: PairingAttempt): Promise<void> {
-  try {await chrome.tabs.create({url:`${endpointURL(attempt.endpoint)}/extension-connect.html#request=${encodeURIComponent(attempt.requestId)}`}); if(!(await current(attempt))) return; attempt.error = undefined;}
-  catch {attempt.error = 'tab-open-failed';}
-  await save(attempt);
+async function reserve(link: Waiting, intent?: string): Promise<Waiting> {
+  const { installationId } = await settings();
+  const body = await jsonRequest(link.endpoint, '/pair', {
+    method: 'POST',
+    body: JSON.stringify({
+      installationId,
+      name: BROWSER_NAME,
+      claimSecret: link.claimSecret,
+      ...(intent ? { intent } : {}),
+    }),
+    signal: requestSignal(),
+  });
+  if (!uuid.test(body.requestId) || !['pending', 'approved'].includes(body.status))
+    throw new Error('Echo returned an invalid connection request.');
+  const next: Waiting = {
+    ...link,
+    requestId: body.requestId,
+    expiresAt: unixSecondsToMilliseconds(body.expiresAt),
+  };
+  await saveLink(next);
+  return next;
 }
-export function openPairingApproval(requestId: string): Promise<PairingView> {return connectionAction(async () => {const attempt = await read(); if(!attempt || attempt.requestId !== requestId || attempt.mode !== 'browser' || attempt.phase !== 'pending') throw new Error('This approval is no longer pending.'); await openApproval(attempt); return view(attempt);});}
-async function begin(endpoint: string,name: string,manualCode?: string): Promise<PairingView> {
-  endpoint = endpointURL(endpoint); const existing = await read();
-  if(existing && !terminal.has(existing.phase)) {
-    const resumed = await resumeLocked();
-    if(!terminal.has(resumed.phase) && existing.error !== 'old-server') return resumed;
+/**
+ * Reserve a request whose POST /pair reply never arrived. Expired or refused reservations end
+ * the waiting state, so the next Connect starts with a fresh secret instead of a dead request.
+ */
+async function reserved(link: Waiting, intent?: string): Promise<Waiting | undefined> {
+  if (link.requestId) return link;
+  if (expired(link)) {
+    await end(EXPIRED);
+    return undefined;
   }
-  const prefs = await settings(); const createdAtMs = Date.now();
-  const attempt: PairingAttempt = {requestId:crypto.randomUUID(),installationId:prefs.installationId,endpoint,name:String(name || 'Echo browser extension').slice(0,100),claimSecret:manualCode ?? Array.from(crypto.getRandomValues(new Uint8Array(32)),byte => byte.toString(16).padStart(2,'0')).join(''),createdAtMs,expiresAtMs:createdAtMs + 300000,phase:'beginning',pendingCount:0,mode:manualCode === undefined ? 'browser':'manual',legacy:manualCode !== undefined && existing?.endpoint === endpoint && existing.error === 'old-server'};
-  await write(attempt);
-  try {await reserve(attempt); if(attempt.mode === 'browser') await openApproval(attempt);}
-  catch(error) {attempt.error = error instanceof ProtocolError && [404,405].includes(error.status) && attempt.mode === 'browser' ? 'old-server':failure(error); await save(attempt);}
-  return view(attempt);
-}
-export function beginPairing(endpoint: string,name: string): Promise<PairingView> {return connectionAction(() => begin(endpoint,name));}
-export function requestManualPairing(endpoint: string,name: string,code: string): Promise<PairingView> {
-  code = String(code ?? '').trim(); if(!code || code.length > 128) return Promise.reject(new Error('Enter the pairing code shown in Echo settings.'));
-  return connectionAction(() => begin(endpoint,name,code));
-}
-async function finish(attempt: PairingAttempt) {
-  if(await cancellationRequested(attempt)) {attempt.cancelRequested = true; await save(attempt);}
-  if(!(await current(attempt)) || !attempt.libraryId || !attempt.stagedCredential) throw new Error('Invalid connection receipt.');
-  const pair = {endpoint:attempt.endpoint,libraryId:attempt.libraryId,credential:attempt.stagedCredential};
-  await saveSettings(prefs => ({activeLibraryId:pair.libraryId,endpoint:pair.endpoint,pairs:{...prefs.pairs,[pair.libraryId]:pair}}));
-  if(!(await current(attempt))) return;
-  if(attempt.cancelRequested) {
-    // Keep activation-sent until revocation is durable, so a restart retries it.
-    await disconnectLocked(true); attempt.phase = 'cancelled';
-  } else attempt.phase = 'connected';
-  attempt.error = undefined; await save(attempt);
-}
-async function pendingLibrary(attempt: PairingAttempt): Promise<boolean> {
-  const pending = (await allRecordings()).filter(row => !row.receipt && (row.chunkCount || ['recording','paused'].includes(row.captureState)));
-  if(!(await current(attempt))) throw new Error('Connection attempt changed.');
-  attempt.pendingCount = pending.length;
-  return !attempt.confirmedLibrary && pending.some(row => !row.libraryId || row.libraryId !== attempt.libraryId);
-}
-async function activate(attempt: PairingAttempt): Promise<void> {
-  const alreadySent = attempt.phase === 'activation-sent';
-  if(!alreadySent && await cancellationRequested(attempt)) {await cancelBeforeActivation(attempt); return;}
-  // This durable boundary must precede the request, including its first attempt.
-  attempt.phase = 'activation-sent'; attempt.error = undefined; await save(attempt);
-  // During this first send we can still prove no activation was dispatched. A
-  // restarted worker has no such proof and must reconcile the saved receipt.
-  if(!alreadySent && await cancellationRequested(attempt)) {await cancelBeforeActivation(attempt); return;}
-  const body = await request(attempt,'/pairing/activate',{requestId:attempt.requestId,installationId:attempt.installationId,claimSecret:attempt.claimSecret,libraryId:attempt.libraryId});
-  validateIdentity(body,attempt);
-  if(body.status !== 'claimed' || body.activationRequired !== false || body.credential !== undefined && body.credential !== attempt.stagedCredential) throw new Error('Invalid activation receipt.');
-  attempt.activationConfirmed = true; await save(attempt);
-  await finish(attempt);
-}
-async function resumeLocked(): Promise<PairingView> {
-  const attempt = await read(); if(!attempt || terminal.has(attempt.phase)) return view(attempt);
   try {
-    if(await cancellationRequested(attempt)) {
-      attempt.cancelRequested = true;
-      if(attempt.phase !== 'activation-sent' && !attempt.legacy) {await cancelBeforeActivation(attempt); return view(attempt);}
-      await save(attempt);
-    }
-    if(attempt.phase === 'activation-sent') {if(attempt.activationConfirmed) await finish(attempt); else await activate(attempt); return view(attempt);}
-    if(Date.now() >= attempt.expiresAtMs) {attempt.phase = 'expired'; attempt.error = undefined; await save(attempt); return view(attempt);}
-    if(attempt.phase === 'beginning') {
-      if(attempt.error === 'old-server') return view(attempt);
-      await reserve(attempt); if(attempt.mode === 'browser') await openApproval(attempt);
-    }
-    if(attempt.phase === 'confirm-library') return view(attempt);
-    if(attempt.phase === 'pending') {
-      const body = await request(attempt,'/pairing/claim',{requestId:attempt.requestId,installationId:attempt.installationId,code:attempt.claimSecret});
-      if(body.status === 'pending') {attempt.error = attempt.error === 'tab-open-failed' ? attempt.error:undefined; await save(attempt); return view(attempt);}
-      if(['cancelled','rejected'].includes(body.status)) {attempt.phase = body.status; attempt.error = undefined; await save(attempt); return view(attempt);}
-      validateIdentity(body,attempt,!attempt.legacy);
-      if(typeof body.credential !== 'string' || !body.credential || body.credential.length > 2048 || !['prepared','claimed','approved'].includes(body.status)) throw new Error('Invalid pairing receipt.');
-      attempt.stagedCredential = body.credential; attempt.legacy = body.activationRequired !== true && body.status === 'approved'; attempt.phase = 'prepared'; attempt.error = undefined; await save(attempt);
-      if(body.status === 'claimed') {await finish(attempt); return view(attempt);}
-    }
-    if(await pendingLibrary(attempt)) {attempt.phase = 'confirm-library'; await save(attempt); return view(attempt);}
-    if(attempt.legacy) await finish(attempt); else await activate(attempt);
-  } catch(error) {
-    attempt.error = failure(error);
-    // Server denial means reconciliation cannot restore authorization. Preserve any
-    // old local connection, but permit a fresh user-initiated attempt.
-    if(error instanceof ProtocolError && [401,403,410].includes(error.status)) attempt.phase = Date.now() >= attempt.expiresAtMs ? 'expired':'rejected';
-    await save(attempt);
+    return await reserve(link, intent);
+  } catch (error) {
+    if (!(error instanceof ProtocolError) || error.status < 400 || error.status === 429)
+      throw error;
+    await end('Echo did not accept the connection request. Choose Connect to Echo to try again.');
+    return undefined;
   }
-  return view(attempt);
 }
-export function resumePairing(): Promise<PairingView> {return connectionAction(resumeLocked);}
-export function confirmPairingLibrary(requestId: string): Promise<PairingView> {return connectionAction(async () => {
-  const attempt = await read(); if(!attempt || attempt.requestId !== requestId || attempt.phase !== 'confirm-library') throw new Error('This library confirmation is no longer pending.');
-  attempt.confirmedLibrary = true; attempt.phase = 'prepared'; await save(attempt); return resumeLocked();
-});}
-async function cancelLocked(): Promise<PairingView> {
-  const attempt = await read(); if(!attempt || terminal.has(attempt.phase) && attempt.phase !== 'connected') return view(attempt);
-  if(attempt.phase === 'connected') {
-    const prefs = await settings();
-    if(prefs.activeLibraryId !== attempt.libraryId || prefs.pairs[attempt.libraryId ?? '']?.credential !== attempt.stagedCredential) return view(attempt);
-    attempt.activationConfirmed = true; attempt.phase = 'activation-sent';
+async function claim(link: Waiting): Promise<PairingView> {
+  if (expired(link)) return end(EXPIRED);
+  try {
+    const { installationId } = await settings();
+    const body = await jsonRequest(link.endpoint, '/pair/claim', {
+      method: 'POST',
+      body: JSON.stringify({
+        requestId: link.requestId,
+        installationId,
+        claimSecret: link.claimSecret,
+      }),
+      signal: requestSignal(),
+    });
+    if (body.status === 'pending') return view(link);
+    if (
+      body.status !== 'approved' ||
+      typeof body.credential !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(body.credential) ||
+      !uuid.test(body.libraryId)
+    )
+      throw new Error('Echo returned an invalid approval.');
+    const connected: Link = {
+      state: 'connected',
+      endpoint: link.endpoint,
+      libraryId: body.libraryId,
+      credential: body.credential,
+    };
+    await saveLink(connected);
+    await closeApprovalTab(link.requestId);
+    onConnected();
+    return view(connected);
+  } catch (error) {
+    if (error instanceof ProtocolError && error.status === 403) {
+      await closeApprovalTab(link.requestId);
+      return end(
+        'Echo declined or no longer has this request. Choose Connect to Echo to try again.',
+      );
+    }
+    // The secret stays saved: the credential is deterministic, so a retry after a lost reply is safe.
+    throw error;
   }
-  if(attempt.phase === 'activation-sent' || attempt.legacy && attempt.stagedCredential) {
-    attempt.cancelRequested = true; await save(attempt);
-    if(attempt.legacy) {await finish(attempt); return view(attempt);}
-    return resumeLocked();
-  }
-  await cancelBeforeActivation(attempt); return view(attempt);
 }
-async function cancelBeforeActivation(attempt: PairingAttempt) {
-  // Local cancellation is durable before the network call; no later claim may activate it.
-  attempt.phase = 'cancelled'; attempt.error = undefined; await save(attempt);
-  try {await request(attempt,'/pairing/cancel',{requestId:attempt.requestId,installationId:attempt.installationId,claimSecret:attempt.claimSecret,libraryId:attempt.libraryId});} catch { /* A prepared credential has no authority. */ }
+function newRequest(endpoint: string): Waiting {
+  const secret = crypto.getRandomValues(new Uint8Array(32));
+  return {
+    state: 'waiting',
+    endpoint,
+    requestId: '',
+    claimSecret: Array.from(secret, (byte) => byte.toString(16).padStart(2, '0')).join(''),
+    expiresAt: Date.now() + REQUEST_LIFETIME_MS,
+  };
 }
-export function cancelPairing(): Promise<PairingView> {return recordCancellation().then(() => connectionAction(cancelLocked));}
-export function disconnectPairing(confirmed: boolean): Promise<{status: 'disconnected'}> {
-  if(!confirmed) return Promise.reject(new Error('Confirm disconnect first. Pending local audio will remain on this device.'));
-  return recordCancellation().then(() => connectionAction(async () => {
-  const cancelled = await cancelLocked();
-  if(cancelled.phase === 'activation-sent') throw new Error('Finishing connection. Open Echo to confirm its status before disconnecting.');
-  return disconnectLocked(true);
-}));}
+/** True when the connected link is the Echo at `endpoint`, with the library that Echo serves now. */
+async function linkedTo(link: Extract<Link, { state: 'connected' }>, endpoint?: string) {
+  return (
+    !!endpoint &&
+    link.endpoint === endpoint &&
+    (await hello(endpoint))?.libraryId === link.libraryId
+  );
+}
+/**
+ * Connect to Echo. `endpoint` is a manual (Advanced) or verified Echo origin; `intent` is
+ * Echo's single-use approval for a connection Echo started, so no approval tab opens.
+ * An Echo-started connection replaces a link to a different Echo (moved port, other library).
+ */
+export function beginPairing(
+  endpoint?: string,
+  intent?: string,
+  replace = false,
+): Promise<PairingView> {
+  return connectionAction(async () => {
+    notice = undefined;
+    let link = await readLink();
+    const previous = link.state === 'connected' ? link : undefined;
+    if (previous && ((!intent && !replace) || (await linkedTo(previous, endpoint))))
+      return view(previous);
+    const reusable =
+      link.state === 'waiting' &&
+      !expired(link) &&
+      !intent &&
+      (!endpoint || link.endpoint === endpoint);
+    const selectedEndpoint = async () => {
+      if (replace && endpoint) {
+        if (!(await hello(endpoint)))
+          throw new Error('The requested Echo is unavailable. Try again.');
+        return endpoint;
+      }
+      return discover(endpoint);
+    };
+    if (!reusable) {
+      link = newRequest(await selectedEndpoint());
+      // Persist before POST so a lost reply retries with the same installation and secret.
+      await saveLink(link);
+    }
+    let waiting = await reserved(link as Waiting, intent);
+    // An expired or rejected intent requires a fresh extension-initiated approval.
+    if (!waiting && intent) {
+      link = newRequest(await selectedEndpoint());
+      await saveLink(link);
+      waiting = await reserved(link as Waiting);
+      intent = undefined;
+    }
+    if (!waiting) return view({ state: 'none' });
+    if (!intent) await showApprovalTab(waiting);
+    const result = await claim(waiting);
+    if (intent && result.phase === 'waiting') await showApprovalTab(waiting);
+    // Best effort: the replaced Echo stops listing this browser if it is still running.
+    if (previous && result.phase === 'connected') void forgetRemote(previous);
+    return result;
+  });
+}
+/** Claim a waiting request (1 s poll, alarm, or ECHO_APPROVED for `requestId`). */
+export function resumePairing(requestId?: string): Promise<PairingView> {
+  return connectionAction(async () => {
+    const link = await readLink();
+    if (link.state !== 'waiting' || (requestId && link.requestId !== requestId)) return view(link);
+    const waiting = await reserved(link);
+    return waiting ? claim(waiting) : view({ state: 'none' });
+  });
+}
+export function pairingView(): Promise<PairingView> {
+  return readLink().then(view);
+}
+export function showPairingApproval(): Promise<PairingView> {
+  return connectionAction(async () => {
+    const link = await readLink();
+    if (link.state === 'waiting' && link.requestId) await showApprovalTab(link);
+    return view(link);
+  });
+}
+/** Tell Echo the request is cancelled. Echo expires it anyway, so nobody waits for this. */
+async function withdraw(link: Waiting): Promise<void> {
+  const { installationId } = await settings();
+  await jsonRequest(link.endpoint, `/pair/${encodeURIComponent(link.requestId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ installationId, claimSecret: link.claimSecret }),
+    signal: AbortSignal.timeout(3_000),
+  });
+}
+export function cancelPairing(): Promise<PairingView> {
+  // A claim stuck on a hanging Echo would otherwise hold the queue for its whole timeout.
+  inFlight?.abort();
+  return connectionAction(async () => {
+    const link = await readLink();
+    if (link.state !== 'waiting') return view(link);
+    const cancelled = await end('Connection cancelled.');
+    if (link.requestId) {
+      await closeApprovalTab(link.requestId);
+      void withdraw(link).catch((error) =>
+        console.warn('Echo: could not cancel the request in Echo.', error),
+      );
+    }
+    return cancelled;
+  });
+}
+
+type ConnectRequest = { id: string; endpoint: string; intent: string; receivedAt: number };
+export async function pendingConnect() {
+  const pending = (await chrome.storage.session.get('connectRequest')).connectRequest as
+    | ConnectRequest
+    | undefined;
+  if (!pending) return undefined;
+  const link = await readLink();
+  return {
+    id: pending.id,
+    endpoint: pending.endpoint,
+    previous: link.state === 'connected' ? link.endpoint : undefined,
+  };
+}
+export async function confirmConnect(id: string, previous?: string) {
+  const pending = (await chrome.storage.session.get('connectRequest')).connectRequest as
+    | ConnectRequest
+    | undefined;
+  const view = await pendingConnect();
+  if (!pending || !view || pending.id !== id || view.previous !== previous)
+    throw new Error('The connection request changed. Review it and try again.');
+  await chrome.storage.session.remove('connectRequest');
+  const intent = Date.now() - pending.receivedAt < 120_000 ? pending.intent : undefined;
+  return beginPairing(pending.endpoint, intent, true);
+}

@@ -1,76 +1,50 @@
-# Storage, backup and recovery
+# Storage and recovery
 
-This guide describes the protected-storage development candidate. Independent security review and full release qualification are tracked in the [readiness record](production-readiness-status.md). Keep a backup of an older installation before opening it in this build.
+## Where data lives
 
-## Two places to protect
+Everything is under the data folder: `.echo-data` by default, resolved relative to the repo (`dataDir` in `echo.config.json`, or `ECHO_DATA_DIR`). **Settings → Storage** shows the actual path. The development server uses `.echo-dev-data`.
 
-| Place | What it holds | How it unlocks |
-|---|---|---|
-| Echo library | Imported audio, transcripts, notes, versions, settings and account state | The local app uses a key held by your operating system. The library recovery phrase can restore that key. |
-| Browser extension | Pending recordings, recording details and local transfer state | Authorized Echo unlocks it automatically. After a browser restart without Echo, use the separate extension recovery phrase for saved history and exports. |
+| Path (inside the data folder)             | Contents                                                                    |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `workspace.sqlite`                        | Library database (SQLCipher)                                                |
+| `audio/`, `extension-pcm/`                | Encrypted audio chunks                                                      |
+| `protection.json`                         | Pointer to the Keychain entry (no key material)                             |
+| `workspace.lock`                          | Held by the running server; never delete it to get around a running process |
+| `recovery.json`                           | Sealed data for the recovery phrase                                         |
+| `credentials/`                            | Encrypted Google Calendar tokens                                            |
+| `chatgpt/`, `chatgpt-runtime.sparseimage` | ChatGPT helper state                                                        |
+| `models/`                                 | Native Large V3 files (not backed up)                                       |
 
-The library phrase and extension phrase are different. Label them when saving them. Keep them outside the browser/application data they protect. Anyone with the relevant phrase and encrypted data can open that data. Echo cannot replace a lost phrase.
+Only one server may use a library at a time.
 
-Protection covers saved data. It cannot protect content from someone using an already-unlocked application or a compromised user account. Connection credentials use a browser device key; a stolen runnable browser profile is not an isolated hardware security boundary. Exported WAV, transcript, notes and timeline files are readable files.
+## Encryption
 
-## Save the library recovery phrase
+The database uses SQLCipher and audio files are authenticated-encrypted. The library key is held in the macOS Keychain; it is never written to disk and there is no plaintext fallback. If the key is missing or Keychain is locked, Echo refuses to open the library rather than creating a new key. Exported meeting files (JSON, text, SRT, Markdown, audio) are ordinary readable files.
 
-1. Open **Settings → Storage → Protect your library**.
-2. Choose **Save recovery phrase**.
-3. Save all 24 words in order, privately.
-4. Choose **I saved the phrase**, then enter the requested three words.
-5. Confirm that Echo shows **Recovery phrase saved**.
+## Recovery phrase
 
-A new phrase does not change old backups. Keep the phrase associated with each retained backup. Never send a phrase in a support request, screenshot or chat.
+In **Settings → Storage → Protect your library**, choose **Save recovery phrase**, write down the 24 words, choose **I saved the phrase**, enter the three requested words, and **Confirm recovery phrase**. Echo then shows "Recovery phrase saved". The phrase is shown once and is never stored. It restores the Keychain key and opens encrypted backups on another computer. Backups require it to be saved. A new phrase does not change what older backups need; keep the phrase that belongs to each backup.
 
-## Make and restore a backup
+## Backup and restore
 
-Finish saving and processing first. Choose **Settings → Storage → Export library** and save the file somewhere separate from the library. A successful export contains an encrypted archive of supported meeting data, audio, versions, settings and vocabulary. It excludes credentials, model downloads, executables and pending extension recordings.
+- **Export:** **Settings → Storage → Export library** downloads an encrypted archive (meetings, audio, versions, settings, vocabulary). The archive is limited to about 180 MB of audio; for a larger library, stop the server and copy the whole data folder.
+- **Restore:** only into an empty library and empty vocabulary. Choose **Choose library file** under **Restore library**, enter the **Library recovery phrase** (optional when restoring on the same unlocked library), then **Restore library**. Wrong phrases or damaged archives are rejected before anything is imported.
+- Restore does not merge with existing meetings.
+- To use a copied data folder instead, stop the server, copy the folder while it is stopped, point `dataDir` or `ECHO_DATA_DIR` at the copy, and start. Never copy a live database. Optionally validate it first with `./target/release/echo-server --check-library` (this can migrate an older library, so run it on the copy).
 
-Restore into an empty meeting library and vocabulary. Select the archive in Storage. Echo can unlock an archive from the same library automatically; another library/computer asks for the archive's recovery phrase. Wrong phrases or damaged encrypted archives are rejected before import. Reconnect optional accounts and the extension afterward.
+**Not in backups:** Google and ChatGPT credentials (reconnect afterwards), downloaded models, extension connections (re-pair), and recordings still pending in the browser extension.
 
-Legacy plaintext web-library backups can still be imported. They remain readable files; importing one does not encrypt or delete the original backup. The unrelated older desktop Echo backup format is not supported.
+## Recovering a library
 
-The portable backup is size-bounded. For a larger library, stop Echo and copy the entire library directory, including its protection and recovery files. Keep the library phrase with your private recovery records, separately from the copy. Do not copy a live database or delete a lock file to bypass an active process. [Developer storage details](development.md#storage-and-large-library-backups) explain the limits.
-
-## Recover a locked library
-
-An unavailable credential store is different from a lost key. First unlock your macOS login keychain or Ubuntu desktop keyring, then retry Echo. The app must not replace missing keys or fall back to saving plaintext.
-
-If the saved key was lost, stop the server and use the private recovery command described below with the library's 24-word phrase. It verifies the database before restoring its key to the OS credential store. Recovery currently requires local command-line assistance; there is no launcher recovery screen. Keep the original folder intact until it opens and its audio plays correctly.
-
-If you have neither a usable OS key nor the matching recovery phrase, the protected data cannot be recovered by support. An earlier backup and its phrase may still be usable. Do not repeatedly create replacement libraries over the existing directory.
-
-### Private local recovery command
-
-Run from the project root after stopping Echo. Confirm `echo.config.json` (or `ECHO_DATA_DIR`) points at the intended library first. The following Python 3 wrapper prompts without echoing the phrase and passes JSON through stdin, rather than command arguments, environment variables or a file:
+If Keychain is merely locked, unlock the login keychain, allow the prompt, and restart. If the Keychain key is truly gone, stop the server, make sure `echo.config.json` or `ECHO_DATA_DIR` points at the library, and run:
 
 ```bash
 python3 - <<'PYTHON'
-import getpass, json, subprocess, warnings
-warnings.simplefilter("error", getpass.GetPassWarning)
+import getpass, json, subprocess
 phrase = getpass.getpass("Library recovery phrase (hidden): ")
-subprocess.run(
-    ["./target/release/echo-server", "--recover-library"],
-    input=json.dumps({"phrase": phrase}), text=True, check=True,
-)
+subprocess.run(["./target/release/echo-server", "--recover-library"],
+               input=json.dumps({"phrase": phrase}), text=True, check=True)
 PYTHON
 ```
 
-Use a private local terminal, not a shared recording or support session. Never paste the real phrase into a command line, chat or log. Restart Echo after success. This command restores the library key; it does not recover the extension's separate browser vault or merge backups.
-
-## Recover extension recordings
-
-Extension Setup creates and confirms its own phrase before protected recording starts. After a browser restart, open the paired Echo app to unlock authorized history automatically. If Echo is unavailable, use **Unlock saved history** in Setup and enter the extension phrase. Initial setup must have completed, but new recording can then work offline without unlocking older recordings.
-
-An interrupted recording retains its committed audio; capture never restarts silently. Open **Local recordings & recovery** to retry transfer or export. Exports use ordered WAV parts of at most 30 minutes and a timeline file. Keep every part. WAV exports are unencrypted.
-
-**Saved in Echo** means the server has confirmed a complete durable import. Only then can the extension discard its redundant audio. If transfer fails or its final response is uncertain, the browser retains the local recording. Do not uninstall the extension, clear its data, delete its profile or switch extension IDs while unsynchronized audio remains.
-
-Deleting unsynchronized audio requires confirmation and cannot be undone. A recovery phrase unlocks data that still exists; it cannot recreate deleted files.
-
-## Moving from an older installation
-
-Back up the old library and stop its server and any retired recording helper. Copy the complete data directory into a separate location, then set `dataDir` or `ECHO_DATA_DIR` to that copy. Validate with `echo-server --check-library` before starting normal service. The command can migrate older data, so use the copy and preserve the original. Browser profiles and model caches have separate locations. Legacy runner files require the [runner recovery checks](extension-migration.md).
-
-The server migrates older plaintext library data to protected storage. Migration can require additional free disk space. If it fails, preserve the source and error details; never force startup by deleting protection files. Qualification must include interrupted migration, damaged audio and wrong keys before this workflow is advertised as a released capability.
+The phrase is read from stdin as JSON (`{"phrase": "..."}`). On success it prints "Library recovery completed. Reopen Echo." and restores the key to Keychain after verifying the database. Without the key or the phrase the data cannot be recovered; keep the original folder untouched.

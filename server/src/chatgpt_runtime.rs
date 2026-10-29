@@ -1,6 +1,5 @@
 //! A protected filesystem for the unmodified official helper's SQLite/logs.
-//! macOS uses a native encrypted image; Linux requires a private tmpfs runtime.
-//! Neither platform falls back to an ordinary plaintext directory.
+//! macOS uses a native encrypted image without a plaintext fallback.
 use crate::{security::ApiError, store};
 use serde_json::Value;
 use std::{
@@ -12,7 +11,7 @@ use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 use zeroize::Zeroizing;
 
 fn unavailable() -> ApiError {
-    ApiError::new(503, "ChatGPT needs protected temporary storage. On macOS, allow Echo to attach its encrypted helper disk image; on Linux, sign in to a desktop session with a private memory-backed XDG_RUNTIME_DIR. Retry the connection. Local recording and saved notes remain available.")
+    ApiError::new(503, "ChatGPT needs protected temporary storage. Allow Echo to attach its encrypted helper disk image, then retry the connection. Local recording and saved notes remain available.")
 }
 fn private(path: &Path) -> Result<(), ApiError> {
     crate::paths::private_directory(path).map_err(|_| unavailable())
@@ -33,7 +32,8 @@ impl ProtectedHome {
     pub async fn prepare(root: &Path) -> Result<Self, ApiError> {
         if fixture_runtime() {
             let home = root.join("chatgpt");
-            private(&home)?;
+            let private_home = home.clone();
+            store::blocking(move || private(&private_home)).await?;
             return Ok(Self {
                 home,
                 #[cfg(target_os = "macos")]
@@ -47,7 +47,8 @@ impl ProtectedHome {
             use sha2::Sha256;
             let image = root.join("chatgpt-runtime.sparseimage");
             let mounted = root.join("chatgpt-runtime");
-            private(&mounted)?;
+            let private_mount = mounted.clone();
+            store::blocking(move || private(&private_mount)).await?;
             let secret = store::with_key(|key| {
                 let mut bytes = Zeroizing::new([0; 32]);
                 Hkdf::<Sha256>::new(None, key.bytes())
@@ -66,11 +67,16 @@ impl ProtectedHome {
             // Recover only a mount that native image metadata maps to this exact
             // managed encrypted image. Device names alone are never authority.
             detach_owned(&image, &mounted).await?;
-            if std::fs::read_dir(&mounted)?.next().is_some() {
+            if tokio::fs::read_dir(&mounted)
+                .await?
+                .next_entry()
+                .await?
+                .is_some()
+            {
                 return Err(unavailable());
             }
-            if image.exists() {
-                let metadata = std::fs::symlink_metadata(&image)?;
+            if tokio::fs::try_exists(&image).await? {
+                let metadata = tokio::fs::symlink_metadata(&image).await?;
                 if !metadata.is_file() || metadata.file_type().is_symlink() {
                     return Err(unavailable());
                 }
@@ -105,18 +111,19 @@ impl ProtectedHome {
                 )
                 .await;
                 if created.is_err() {
-                    let _ = std::fs::remove_file(&pending);
+                    let _ = tokio::fs::remove_file(&pending).await;
                     return Err(unavailable());
                 }
                 if plist(&["isencrypted", "-plist", utf8(&pending)?], None).await?["encrypted"]
                     != true
                 {
-                    let _ = std::fs::remove_file(&pending);
+                    let _ = tokio::fs::remove_file(&pending).await;
                     return Err(unavailable());
                 }
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&pending, std::fs::Permissions::from_mode(0o600))?;
-                std::fs::rename(&pending, &image)?;
+                tokio::fs::set_permissions(&pending, std::fs::Permissions::from_mode(0o600))
+                    .await?;
+                tokio::fs::rename(&pending, &image).await?;
             }
             let attached = plist(
                 &[
@@ -135,70 +142,34 @@ impl ProtectedHome {
                 || owned_mount(&plist(&["info", "-plist"], None).await?, &image, &mounted)?
                     .is_none()
             {
-                let _ = detach_owned(&image, &mounted).await;
+                // Attachment may still be completing after a timeout; do not
+                // race it by detaching an uncertain mount.
                 return Err(unavailable());
             }
-            let result = (|| {
-                let home = mounted.join("codex");
-                // Threads are ephemeral. Discard previous runtime logs while the
-                // volume remains encrypted, bounding growth across launches.
+            // Recheck the exact image-to-mount ownership immediately before
+            // creating the helper home; no shutdown detach can race this start.
+            if owned_mount(&plist(&["info", "-plist"], None).await?, &image, &mounted)?.is_none() {
+                return Err(unavailable());
+            }
+            let private_image = image.clone();
+            let private_mounted = mounted.clone();
+            let result = store::blocking(move || {
+                let home = private_mounted.join("codex");
+                // Threads are ephemeral; remove only the managed encrypted runtime.
                 if home.exists() {
                     std::fs::remove_dir_all(&home)?;
                 }
                 private(&home)?;
                 Ok(Self {
                     home,
-                    image: Some(image.clone()),
-                    owned_root: Some(mounted.clone()),
+                    image: Some(private_image),
+                    owned_root: Some(private_mounted),
                 })
-            })();
-            if result.is_err() {
-                let _ = detach_owned(&image, &mounted).await;
-            }
+            })
+            .await;
             result
         }
-        #[cfg(target_os = "linux")]
-        {
-            use sha2::{Digest, Sha256};
-            use std::{
-                ffi::CString,
-                os::unix::{
-                    ffi::OsStrExt,
-                    fs::{MetadataExt, PermissionsExt},
-                },
-            };
-            let parent =
-                PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(unavailable)?);
-            let metadata = std::fs::symlink_metadata(&parent)?;
-            if !parent.is_absolute()
-                || !metadata.is_dir()
-                || metadata.file_type().is_symlink()
-                || metadata.uid() != unsafe { libc::geteuid() }
-                || metadata.permissions().mode() & 0o077 != 0
-            {
-                return Err(unavailable());
-            }
-            let name = CString::new(parent.as_os_str().as_bytes()).map_err(|_| unavailable())?;
-            let mut filesystem = std::mem::MaybeUninit::<libc::statfs>::uninit();
-            if unsafe { libc::statfs(name.as_ptr(), filesystem.as_mut_ptr()) } != 0
-                || unsafe { filesystem.assume_init() }.f_type != libc::TMPFS_MAGIC
-            {
-                return Err(unavailable());
-            }
-            let identity = format!("{:x}", Sha256::digest(root.as_os_str().as_encoded_bytes()));
-            let owned = parent.join(format!("echo-chatgpt-{identity}"));
-            private(&owned)?;
-            let home = owned.join("codex");
-            if home.exists() {
-                std::fs::remove_dir_all(&home)?;
-            }
-            private(&home)?;
-            Ok(Self {
-                home,
-                owned_root: Some(owned),
-            })
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(target_os = "macos"))]
         {
             let _ = root;
             Err(unavailable())
@@ -209,10 +180,31 @@ impl ProtectedHome {
         if let (Some(image), Some(mounted)) = (&self.image, &self.owned_root) {
             return detach_owned(image, mounted).await;
         }
-        #[cfg(target_os = "linux")]
-        if let Some(root) = &self.owned_root {
-            std::fs::remove_dir_all(root)?;
+        Ok(())
+    }
+}
+
+/// Detach an owned volume after startup and worker shutdown have quiesced.
+pub(super) async fn detach_library() -> Result<(), ApiError> {
+    if fixture_runtime() {
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let root = store::blocking(|| {
+            let root = store::data_dir()?;
+            Ok(std::fs::canonicalize(&root).unwrap_or(root))
+        })
+        .await?;
+        let image = root.join("chatgpt-runtime.sparseimage");
+        let mounted = root.join("chatgpt-runtime");
+        if !tokio::fs::try_exists(&image).await? && !tokio::fs::try_exists(&mounted).await? {
+            return Ok(());
         }
+        detach_owned(&image, &mounted).await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
         Ok(())
     }
 }
@@ -227,7 +219,7 @@ async fn command(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>, ApiErro
         .args(args)
         .env_clear()
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .env("TMPDIR", crate::paths::get().runtime_dir)
+        .env("TMPDIR", crate::paths::get()?.runtime_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -254,7 +246,7 @@ async fn plist(args: &[&str], input: Option<&[u8]>) -> Result<Value, ApiError> {
     let mut child = Command::new("/usr/bin/plutil")
         .env_clear()
         .args(["-convert", "json", "-o", "-", "-"])
-        .env("TMPDIR", crate::paths::get().runtime_dir)
+        .env("TMPDIR", crate::paths::get()?.runtime_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

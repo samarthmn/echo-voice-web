@@ -55,33 +55,47 @@ pub fn routes() -> Router {
         )
         .layer(DefaultBodyLimit::max(8 * 1024 * 1024))
 }
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> ApiResult<T> + Send + 'static,
+) -> ApiResult<T> {
+    tokio::task::spawn_blocking(f).await.map_err(|error| {
+        tracing::error!(%error, "Storage task failed");
+        ApiError::new(500, "Echo hit an internal error; retry.")
+    })?
+}
 /// Report local storage readiness without exposing private paths or credentials.
 async fn health() -> ApiResult<Json<Value>> {
-    store::init()?;
+    store::run(|_| Ok(())).await?;
     Ok(Json(
         json!({"status":"ok","version":env!("CARGO_PKG_VERSION"),"storage":"local","framework":"Dioxus + Axum"}),
     ))
 }
 /// Return the saved meeting library.
 async fn list() -> ApiResult<Json<Value>> {
-    Ok(Json(json!({"meetings":store::list_meetings()?})))
+    Ok(Json(
+        json!({"meetings":blocking(store::list_meetings).await?}),
+    ))
 }
 /// Validate creation input and return the new meeting with HTTP 201.
 async fn create(value: Payload) -> ApiResult<(StatusCode, Json<Value>)> {
     Ok((
         StatusCode::CREATED,
-        Json(store::create_meeting(payload(value)?)?),
+        Json(blocking(move || store::create_meeting(payload(value)?)).await?),
     ))
 }
 /// Return a meeting or the deleted-meeting error.
 async fn read(Path(id): Path<String>) -> ApiResult<Json<Value>> {
     Ok(Json(
-        store::get_meeting(&id)?.ok_or_else(ApiError::not_found)?,
+        blocking(move || store::get_meeting(&id))
+            .await?
+            .ok_or_else(ApiError::not_found)?,
     ))
 }
 /// Apply an allowlisted meeting patch through the store.
 async fn update(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
-    Ok(Json(store::update_meeting(&id, payload(value)?)?))
+    Ok(Json(
+        blocking(move || store::update_meeting(&id, payload(value)?)).await?,
+    ))
 }
 /// Restore only restarted status markers claimed by still-running browser jobs.
 async fn processing_heartbeat(value: Payload) -> ApiResult<Json<Value>> {
@@ -99,72 +113,88 @@ async fn processing_heartbeat(value: Payload) -> ApiResult<Json<Value>> {
         })
         .collect::<ApiResult<_>>()?;
     Ok(Json(
-        json!({"restored": store::resume_browser_processing(&ids)?}),
+        json!({"restored": blocking(move || store::resume_browser_processing(&ids)).await?}),
     ))
 }
 /// Remove an inactive meeting and return a deletion acknowledgement.
 async fn delete(Path(id): Path<String>) -> ApiResult<Json<Value>> {
-    store::delete_meeting(&id)?;
+    blocking(move || store::delete_meeting(&id)).await?;
     Ok(Json(json!({"ok":true})))
 }
 /// Append a transcript version to the requested meeting.
 async fn transcript(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
-    Ok(Json(store::add_transcript(&id, payload(value)?)?))
+    Ok(Json(
+        blocking(move || store::add_transcript(&id, payload(value)?)).await?,
+    ))
 }
 /// Append supplied evidence-linked notes to the requested meeting.
 async fn notes(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
-    Ok(Json(store::add_notes(&id, payload(value)?)?))
+    Ok(Json(
+        blocking(move || store::add_notes(&id, payload(value)?)).await?,
+    ))
 }
 /// Create a timestamped bookmark within a meeting.
 async fn moment(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
-    Ok(Json(store::add_moment(&id, payload(value)?)?))
+    Ok(Json(
+        blocking(move || store::add_moment(&id, payload(value)?)).await?,
+    ))
 }
 /// Apply a validated patch to one bookmark.
 async fn edit_moment(
     Path((id, moment)): Path<(String, String)>,
     value: Payload,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(store::update_moment(&id, &moment, payload(value)?)?))
+    Ok(Json(
+        blocking(move || store::update_moment(&id, &moment, payload(value)?)).await?,
+    ))
 }
 /// Delete one bookmark without changing other saved history.
 async fn remove_moment(Path((id, moment)): Path<(String, String)>) -> ApiResult<Json<Value>> {
-    Ok(Json(store::delete_moment(&id, &moment)?))
+    Ok(Json(
+        blocking(move || store::delete_moment(&id, &moment)).await?,
+    ))
 }
 /// Return normalized workspace preferences.
 async fn settings() -> ApiResult<Json<Value>> {
-    Ok(Json(store::get_settings()?))
+    Ok(Json(blocking(store::get_settings).await?))
 }
 /// Persist a validated workspace preference patch.
 async fn edit_settings(value: Payload) -> ApiResult<Json<Value>> {
-    Ok(Json(store::update_settings(payload(value)?)?))
+    Ok(Json(
+        blocking(move || store::update_settings(payload(value)?)).await?,
+    ))
 }
 /// Return the shared transcription vocabulary.
 async fn vocabulary() -> ApiResult<Json<Value>> {
-    Ok(Json(json!({"entries":store::list_vocabulary()?})))
+    Ok(Json(
+        json!({"entries":blocking(store::list_vocabulary).await?}),
+    ))
 }
 /// Create a vocabulary entry with HTTP 201.
 async fn new_vocabulary(value: Payload) -> ApiResult<(StatusCode, Json<Value>)> {
     Ok((
         StatusCode::CREATED,
-        Json(store::add_vocabulary(payload(value)?)?),
+        Json(blocking(move || store::add_vocabulary(payload(value)?)).await?),
     ))
 }
 /// Update a term and its aliases through the store.
 async fn edit_vocabulary(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
-    Ok(Json(store::update_vocabulary(&id, payload(value)?)?))
+    Ok(Json(
+        blocking(move || store::update_vocabulary(&id, payload(value)?)).await?,
+    ))
 }
 /// Delete a vocabulary entry and acknowledge completion.
 async fn remove_vocabulary(Path(id): Path<String>) -> ApiResult<Json<Value>> {
-    store::delete_vocabulary(&id)?;
+    blocking(move || store::delete_vocabulary(&id)).await?;
     Ok(Json(json!({"ok":true})))
 }
 /// Return library counts and managed disk usage.
 async fn storage() -> ApiResult<Json<Value>> {
-    Ok(Json(store::storage_info()?))
+    Ok(Json(blocking(store::storage_info).await?))
 }
 /// Download a portable library backup that excludes integration credentials.
 async fn backup() -> ApiResult<Response> {
-    let backup = crate::recovery::encrypt_backup(store::export_library()?)?;
+    let backup = blocking(|| crate::recovery::encrypt_backup(store::export_library()?)).await?;
     download(
         serde_json::to_string(&backup)?,
         "application/json",
@@ -173,35 +203,40 @@ async fn backup() -> ApiResult<Response> {
 }
 /// Validate and import a portable library backup.
 async fn restore(value: Payload) -> ApiResult<Json<Value>> {
-    let value = payload(value)?;
-    let backup = if value["format"] == "echo-voice-encrypted" {
-        crate::recovery::decrypt_backup(value, None)?
-    } else if let Some(encrypted) = value.get("backup") {
-        if value
-            .as_object()
-            .is_none_or(|v| v.keys().any(|k| k != "backup" && k != "recoveryPhrase"))
-        {
-            return Err(ApiError::bad("Invalid encrypted backup request."));
-        }
-        crate::recovery::decrypt_backup(
-            encrypted.clone(),
+    blocking(move || {
+        let value = payload(value)?;
+        let backup = if value["format"] == "echo-voice-encrypted" {
+            crate::recovery::decrypt_backup(value, None)?
+        } else if let Some(encrypted) = value.get("backup") {
+            if value
+                .as_object()
+                .is_none_or(|v| v.keys().any(|k| k != "backup" && k != "recoveryPhrase"))
+            {
+                return Err(ApiError::bad("Invalid encrypted backup request."));
+            }
+            crate::recovery::decrypt_backup(
+                encrypted.clone(),
+                value
+                    .get("recoveryPhrase")
+                    .and_then(Value::as_str)
+                    .filter(|v| !v.trim().is_empty()),
+            )?
+        } else {
             value
-                .get("recoveryPhrase")
-                .and_then(Value::as_str)
-                .filter(|v| !v.trim().is_empty()),
-        )?
-    } else {
-        value
-    };
-    Ok(Json(store::import_library(backup)?))
+        };
+        Ok(Json(store::import_library(backup)?))
+    })
+    .await
 }
 /// Download a meeting in the requested supported document format.
 async fn export(
     Path(id): Path<String>,
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
-    let (body, mime, filename) =
-        store::export_meeting(&id, query.get("format").map(String::as_str).unwrap_or("md"))?;
+    let (body, mime, filename) = blocking(move || {
+        store::export_meeting(&id, query.get("format").map(String::as_str).unwrap_or("md"))
+    })
+    .await?;
     download(body, mime, &filename)
 }
 /// Build a typed attachment response with a safely quoted filename.
@@ -284,14 +319,17 @@ async fn upload(
         }
     }
     let data = data.ok_or_else(|| ApiError::bad("Choose an audio file to upload."))?;
-    let result = store::add_audio(
-        &id,
-        &data,
-        track.as_deref(),
-        label.as_deref().unwrap_or("Room microphone"),
-        mime.as_deref().unwrap_or("audio/webm"),
-        sequence,
-    )?;
+    let result = blocking(move || {
+        store::add_audio(
+            &id,
+            &data,
+            track.as_deref(),
+            label.as_deref().unwrap_or("Room microphone"),
+            mime.as_deref().unwrap_or("audio/webm"),
+            sequence,
+        )
+    })
+    .await?;
     Ok((StatusCode::CREATED, Json(result)))
 }
 /// Parse a single HTTP byte range, including suffix and open-ended requests.
@@ -346,7 +384,7 @@ async fn audio(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
-    let (track, parts) = store::get_audio_parts(&id, &track_id)?;
+    let (track, parts) = blocking(move || store::get_audio_parts(&id, &track_id)).await?;
     let total = track["bytes"].as_u64().unwrap_or(0);
     let (start, end, partial) = match range(
         headers.get(header::RANGE).and_then(|v| v.to_str().ok()),
@@ -357,7 +395,8 @@ async fn audio(
             let mut response = e.into_response();
             response.headers_mut().insert(
                 header::CONTENT_RANGE,
-                format!("bytes */{total}").parse().unwrap(),
+                axum::http::HeaderValue::from_str(&format!("bytes */{total}"))
+                    .map_err(|_| ApiError::new(500, "Invalid audio range."))?,
             );
             return Ok(response);
         }
@@ -370,10 +409,9 @@ async fn audio(
             let local_start = start.saturating_sub(chunk_start);
             let local_end = (end+1).min(chunk_end)-chunk_start;
             let mut cursor = local_start;
-            let mut file = match store::protected_reader(&part.path) { Ok(file)=>file, Err(error)=>{ yield Err::<Vec<u8>,std::io::Error>(error); return; } };
             while cursor < local_end {
                 let length = (local_end-cursor).min(65536) as usize;
-                match file.read_range(cursor,length) {
+                match store::protected_range(part.path.clone(), cursor, length).await {
                     Ok(bytes)=>{cursor+=bytes.len() as u64; yield Ok(bytes);},
                     Err(error)=>{yield Err(error); return;}
                 }

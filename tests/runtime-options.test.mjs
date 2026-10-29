@@ -7,11 +7,19 @@ test('WASM remains single threaded when the document is not isolated', () => {
 });
 
 test('isolated WASM uses at most four threads and leaves half the reported cores available', () => {
-  for (const [cores, expected] of [[1, 1], [2, 1], [4, 2], [6, 3], [8, 4], [32, 4]]) {
+  for (const [cores, expected] of [
+    [1, 1],
+    [2, 1],
+    [4, 2],
+    [6, 3],
+    [8, 4],
+    [32, 4],
+  ]) {
     assert.equal(wasmThreadCount(true, cores), expected);
   }
 });
 
 test('unknown or invalid hardware concurrency safely uses one thread', () => {
-  for (const cores of [undefined, null, '8', NaN, Infinity, -4]) assert.equal(wasmThreadCount(true, cores), 1);
+  for (const cores of [undefined, null, '8', NaN, Infinity, -4])
+    assert.equal(wasmThreadCount(true, cores), 1);
 });

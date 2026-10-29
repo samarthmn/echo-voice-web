@@ -52,7 +52,7 @@ pub(super) fn config() -> Result<Config, ApiError> {
     if id.is_empty() || secret.is_empty() || id.len() > 256 || secret.len() > 4096 {
         return Err(ApiError::new(503, "Google Calendar is not configured for this source build. See the maintainer setup in docs/integrations.md."));
     }
-    let redirect = crate::config::get().google_redirect_uri.clone();
+    let redirect = crate::config::redirect_uri();
     super::loopback_url(&redirect)?;
     Ok(Config {
         id,
@@ -141,9 +141,10 @@ pub(super) fn pending() -> bool {
             .is_some_and(|session| session.expires > Instant::now())
     })
 }
-fn authorization_url(session: &Session) -> String {
+fn authorization_url(session: &Session) -> Result<String, ApiError> {
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(session.verifier.as_bytes()));
-    let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
+    let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
+        .map_err(|_| ApiError::new(500, "Google authorization is unavailable."))?;
     url.query_pairs_mut().extend_pairs([
         ("client_id", session.config.id.as_str()),
         ("redirect_uri", session.config.redirect.as_str()),
@@ -155,10 +156,10 @@ fn authorization_url(session: &Session) -> String {
         ("code_challenge_method", "S256"),
         ("code_challenge", challenge.as_str()),
     ]);
-    url.into()
+    Ok(url.into())
 }
 fn authorization_redirect(session: &Session) -> Result<Response, ApiError> {
-    let mut response = Redirect::to(&authorization_url(session)).into_response();
+    let mut response = Redirect::to(&authorization_url(session)?).into_response();
     response.headers_mut().append(
         header::SET_COOKIE,
         HeaderValue::from_static(
@@ -296,17 +297,22 @@ async fn complete(
             .get_or_init(|| tokio::sync::Mutex::new(()))
             .lock()
             .await;
-        // Cancellation and replacement cannot race the final synchronous save.
-        let mut current = sessions().lock().map_err(|_| state_error())?;
-        if session.expires <= Instant::now()
-            || !current
-                .as_ref()
-                .is_some_and(|value| Arc::ptr_eq(value, &session))
-        {
-            return Err(state_error());
-        }
-        super::save_tokens(&tokens)?;
-        *current = None;
+        // Keep the session lock through the save so cancellation cannot race publication.
+        let committing = session.clone();
+        crate::store::blocking(move || {
+            let mut current = sessions().lock().map_err(|_| state_error())?;
+            if committing.expires <= Instant::now()
+                || !current
+                    .as_ref()
+                    .is_some_and(|value| Arc::ptr_eq(value, &committing))
+            {
+                return Err(state_error());
+            }
+            super::save_tokens(&tokens)?;
+            *current = None;
+            Ok(())
+        })
+        .await?;
         Ok(())
     }
     .await;
@@ -438,7 +444,7 @@ mod tests {
             reconnect_required: false,
         })
         .unwrap();
-        fs::read(integrations::credentials_file()).unwrap()
+        fs::read(integrations::credentials_file().unwrap()).unwrap()
     }
     async fn launch(provider: &Provider, lifetime: Duration) -> Arc<Session> {
         let response = begin(provider.config(), "http://localhost:3000".into(), lifetime)
@@ -526,7 +532,7 @@ mod tests {
             .unwrap()
             .contains("calendar=error"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         assert!(provider.forms.lock().unwrap().is_empty());
@@ -545,7 +551,7 @@ mod tests {
             .unwrap()
             .contains("calendar=error"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         provider.forms.lock().unwrap().clear();
@@ -563,7 +569,7 @@ mod tests {
         );
         let saved = integrations::read_tokens().unwrap().unwrap();
         assert_eq!(saved.client_id.as_deref(), Some(CLIENT));
-        let disk = fs::read(integrations::credentials_file()).unwrap();
+        let disk = fs::read(integrations::credentials_file().unwrap()).unwrap();
         assert!(disk.starts_with(b"ECHOENC1"));
         assert!(!String::from_utf8_lossy(&disk).contains("synthetic-new"));
         assert_eq!(provider.forms.lock().unwrap().len(), 1);
@@ -605,7 +611,10 @@ mod tests {
             .status(),
             StatusCode::BAD_REQUEST
         );
-        assert_eq!(fs::read(integrations::credentials_file()).unwrap(), disk);
+        assert_eq!(
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
+            disk
+        );
         store::reset_for_tests();
     }
     #[tokio::test]
@@ -636,7 +645,7 @@ mod tests {
             .unwrap()
             .contains("calendar=error"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         store::reset_for_tests();
@@ -656,7 +665,7 @@ mod tests {
         );
         assert!(provider.forms.lock().unwrap().is_empty());
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         saved.client_id = Some(CLIENT.into());
@@ -670,14 +679,14 @@ mod tests {
             "synthetic-web-secret"
         );
         provider.mode.store(4, Ordering::SeqCst);
-        let unchanged = fs::read(integrations::credentials_file()).unwrap();
+        let unchanged = fs::read(integrations::credentials_file().unwrap()).unwrap();
         let diagnostic = integrations::refresh_token(saved.clone(), &provider.config())
             .await
             .unwrap_err();
         assert!(diagnostic.message.contains("invalid_client"));
         assert!(!diagnostic.message.contains("synthetic-private"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             unchanged
         );
         provider.mode.store(0, Ordering::SeqCst);
@@ -729,11 +738,14 @@ mod tests {
                 .reconnect_required
         );
         provider.mode.store(3, Ordering::SeqCst);
-        let before = fs::read(integrations::credentials_file()).unwrap();
+        let before = fs::read(integrations::credentials_file().unwrap()).unwrap();
         assert!(integrations::refresh_token(saved, &provider.config())
             .await
             .is_err());
-        assert_eq!(fs::read(integrations::credentials_file()).unwrap(), before);
+        assert_eq!(
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
+            before
+        );
         store::reset_for_tests();
     }
     #[tokio::test]

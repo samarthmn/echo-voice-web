@@ -1,0 +1,10 @@
+node_modules
+target
+public/assets
+public/js
+public/wasm
+extension/dist
+dist
+tmp
+pnpm-lock.yaml
+.echo-data*

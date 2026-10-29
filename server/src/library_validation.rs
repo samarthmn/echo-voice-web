@@ -12,7 +12,17 @@ fn verify_protected_tree(path: &Path, depth: usize) -> Result<(), ApiError> {
     }
     if metadata.is_dir() {
         for entry in std::fs::read_dir(path)? {
-            verify_protected_tree(&entry?.path(), depth + 1)?;
+            let entry = entry?;
+            if path.file_name().is_some_and(|name| name == "credentials")
+                && matches!(
+                    entry.file_name().to_str(),
+                    Some("runner-token" | "runner-token.lock")
+                )
+                && entry.file_type()?.is_file()
+            {
+                continue;
+            }
+            verify_protected_tree(&entry.path(), depth + 1)?;
         }
     } else if metadata.is_file() {
         let mut reader = store::protected_reader(path)?;
@@ -82,7 +92,7 @@ pub(crate) fn verify() -> Result<(), ApiError> {
         {
             return Err(ApiError::bad("The selected library contains an invalid audio reference. The original has not been changed."));
         }
-        let path = store::data_dir().join(area).join(id).join(file);
+        let path = store::data_dir()?.join(area).join(id).join(file);
         let data = zeroize::Zeroizing::new(store::read_protected(&path)?);
         if data.len() as u64 != bytes || format!("{:x}", Sha256::digest(data.as_slice())) != digest
         {
@@ -92,7 +102,7 @@ pub(crate) fn verify() -> Result<(), ApiError> {
     // The database references alone cannot prove the copied tree is complete:
     // offline/recovery files and optional credentials may not have indexed rows.
     for name in ["audio", "extension-pcm", "credentials", "chatgpt/auth.json"] {
-        let path = store::data_dir().join(name);
+        let path = store::data_dir()?.join(name);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => verify_protected_tree(&path, 0)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Echo Meeting Recorder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minimum_chrome_version": "120",
   "description": "Record your meeting tab locally and send it to your paired Echo library.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzDwSA0Wnr+xf8y51FpsPUJXJZTjIbyNFLEfSrAS8FNKBGvhpIHE9xKsf73Zv1bM35XiaVIgDlyUGNBVEHKrM+ibTyciLJcN4QvXKN5xZxjxHF/P4v0dct43UVvRZQ8bk2WO70CufH3MNgtdv/kd+/qIoxrTQtKKjLBBtvSNQlCCrFgtoV//wto9zccSgKg2dKJIl8xbfoGiT2kGoKkyhbxkH+knfx638K93wHbtx3/jbHGbNbHRxDp0XeE7CzjHkQsd+aaLbBpSDdqVnawjoiQMfUGpbLLz8878kodvctcxZ7qCnYii1oIv4qN3mdFc96D0oqHCVsZWAmHN7Yhdt/QIDAQAB",
@@ -14,11 +14,7 @@
     "unlimitedStorage",
     "alarms"
   ],
-  "host_permissions": [
-    "http://localhost/*",
-    "http://127.0.0.1/*",
-    "http://[::1]/*"
-  ],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "http://[::1]/*"],
   "optional_host_permissions": [
     "https://meet.google.com/*",
     "https://*.zoom.us/*",
@@ -46,7 +42,16 @@
     "128": "icons/128.png"
   },
   "options_page": "setup.html",
+  "commands": {
+    "toggle-recording": {
+      "suggested_key": { "default": "Alt+Shift+R", "mac": "MacCtrl+Shift+R" },
+      "description": "Start or stop recording the meeting in this tab"
+    }
+  },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://localhost:* http://127.0.0.1:* http://[::1]:*"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://localhost:* http://127.0.0.1:*"
+  },
+  "externally_connectable": {
+    "matches": ["http://localhost/*", "http://127.0.0.1/*"]
   }
 }

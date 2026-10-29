@@ -12,89 +12,63 @@ concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  verify:
-    name: Build and test local workspace
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      CARGO_TERM_COLOR: always
-      ECHO_TEST_BINARY: target/debug/echo-server
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
+env:
+  CARGO_TERM_COLOR: always
+  # Line tables keep panic locations while compiling and caching far less debug info.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
-      - name: Keep verification scratch in the checkout
+# The two jobs run in parallel; together they cover ./scripts/check.sh --all.
+jobs:
+  rust:
+    name: Rust lint and tests
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep temporary files in the checkout
         run: |
           mkdir -p "$GITHUB_WORKSPACE/tmp"
           printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-
-      - name: Set up Rust and WebAssembly target
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Failed runs still warm the cache, so the next run skips dependency builds.
+          cache-on-failure: true
+      - run: ./scripts/check.sh --rust
 
-      - name: Cache Rust dependencies and build output
-        uses: Swatinem/rust-cache@v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+  app:
+    name: App build and browser tests
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep temporary files in the checkout
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tmp"
+          printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-
-      # The build script runs npm ci --ignore-scripts and installs the matching
-      # wasm-bindgen CLI from Cargo.lock before building browser and server assets.
-      - name: Install native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev
-
-      - name: Build browser assets and release server
-        run: bash scripts/build.sh
-
-      - name: Build encrypted-storage fixture server
-        run: cargo build --locked -p echo-server
-
-      - name: Verify production builds reject test keys
-        run: node --test tests/release-key-policy.test.mjs
-
-      - name: Install Chromium and system dependencies
-        run: npx playwright install --with-deps chromium
-
-      - name: Select the installed Chromium executable
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Read the wasm-bindgen version from Cargo.lock
+        id: bindgen
         run: |
-          node --input-type=module <<'JS'
-          import { chromium } from '@playwright/test';
-          import { appendFileSync } from 'node:fs';
-          appendFileSync(process.env.GITHUB_ENV, `CHROMIUM_PATH=${chromium.executablePath()}\n`);
-          JS
-
-      - name: Test Rust server
-        run: cargo test --locked -p echo-server -p echo-app
-
-      - name: Check Rust formatting and server lint
-        run: |
-          cargo fmt --all -- --check
-          cargo clippy --locked -p echo-server --all-targets -- -D warnings
-
-      - name: Validate managed config with the real pinned Codex helper
-        run: node scripts/smoke-codex.mjs
-
-      - name: Test browser modules and REST lifecycle
-        run: npm test
-
-      - name: Test AMI score provenance and numerical reproduction
-        run: python3 -B tests/ami_score_test.py
-
-      - name: Test native speech API
-        run: python3 -B -m unittest discover -s tests -p 'native_speech_http_test.py' -v
-
-      - name: Test extension capture, recovery and authorization
-        run: npm run test:extension
-
-      - name: Test protected storage and extension pairing
-        run: |
-          node --test tests/protected-storage.test.mjs tests/extension-pairing.test.mjs tests/google-oauth-web.test.mjs
-
-      - name: Test browser workflows and accessibility
-        run: npm run test:e2e
+          version="$(awk '/name = "wasm-bindgen"/{getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      # A prebuilt binary instead of compiling wasm-bindgen-cli in setup.sh.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.bindgen.outputs.version }}
+      - run: ./scripts/setup.sh
+      - run: pnpm exec playwright install chromium
+      - run: ./scripts/check.sh --app

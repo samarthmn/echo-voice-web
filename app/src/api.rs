@@ -21,6 +21,9 @@ async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value,
     let status = response.status();
     let value = response.json::<Value>().await;
     if !(200..300).contains(&status) {
+        if path == "/extensions/intent" && status == 404 {
+            return Err("Update Echo to connect your browser extension.".into());
+        }
         return Err(value
             .as_ref()
             .ok()
@@ -75,22 +78,28 @@ pub fn local_date(value: &str) -> String {
     )
 }
 
-/// Render stored UTC timestamps with the browser's calendar time and UTC offset.
+/// Display timestamps in the browser's local time.
 pub fn local_date_time(value: &str) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
     if !date.get_time().is_finite() {
         return value.to_string();
     }
-    let offset = -date.get_timezone_offset() as i32;
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let hours = date.get_hours();
     format!(
-        "{} · {:02}:{:02}:{:02} UTC{}{:02}:{:02}",
-        local_date(value),
-        date.get_hours(),
+        "{} {} {}, {}:{:02} {}",
+        date.get_date(),
+        months[date.get_month() as usize],
+        date.get_full_year(),
+        if hours.is_multiple_of(12) {
+            12
+        } else {
+            hours % 12
+        },
         date.get_minutes(),
-        date.get_seconds(),
-        if offset >= 0 { "+" } else { "−" },
-        offset.abs() / 60,
-        offset.abs() % 60
+        if hours < 12 { "AM" } else { "PM" }
     )
 }
 /// Format a finite nonnegative byte count for storage and recording displays.

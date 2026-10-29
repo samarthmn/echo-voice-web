@@ -14,7 +14,10 @@ export function createRecorderController({ request = localRequest } = {}) {
 
   /** Read the monotonic recording duration while excluding paused intervals. */
   function elapsed(s) {
-    return Math.max(0, (s.activeMs + (s.activeSince === null ? 0 : performance.now() - s.activeSince)) / 1000);
+    return Math.max(
+      0,
+      (s.activeMs + (s.activeSince === null ? 0 : performance.now() - s.activeSince)) / 1000,
+    );
   }
 
   /** Snapshot elapsed time before pausing or stopping capture. */
@@ -63,8 +66,10 @@ export function createRecorderController({ request = localRequest } = {}) {
         if (now - lastUpdate > 80) {
           lastUpdate = now;
           analyser.getByteTimeDomainData(values);
-          const power = values.reduce((sum, value) => sum + ((value - 128) / 128) ** 2, 0) / values.length;
-          const level = s.muted || s.recorder.state !== 'recording' ? 0 : Math.min(1, Math.sqrt(power) * 4);
+          const power =
+            values.reduce((sum, value) => sum + ((value - 128) / 128) ** 2, 0) / values.length;
+          const level =
+            s.muted || s.recorder.state !== 'recording' ? 0 : Math.min(1, Math.sqrt(power) * 4);
           update({ level: Math.round(level * 100) / 100 });
         }
         s.frame = requestAnimationFrame(measure);
@@ -83,14 +88,21 @@ export function createRecorderController({ request = localRequest } = {}) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 750));
       const form = new FormData();
-      const extension = chunk.mimeType.includes('mp4') ? 'm4a' : chunk.mimeType.includes('ogg') ? 'ogg' : 'webm';
+      const extension = chunk.mimeType.includes('mp4')
+        ? 'm4a'
+        : chunk.mimeType.includes('ogg')
+          ? 'ogg'
+          : 'webm';
       form.append('file', chunk.blob, `microphone-${chunk.sequence}.${extension}`);
       form.append('sequence', String(chunk.sequence));
       form.append('trackId', s.trackId);
       form.append('label', 'Microphone');
       form.append('mimeType', chunk.mimeType);
       try {
-        await request(`/meetings/${encodeURIComponent(s.meeting.id)}/audio`, { method: 'POST', body: form });
+        await request(`/meetings/${encodeURIComponent(s.meeting.id)}/audio`, {
+          method: 'POST',
+          body: form,
+        });
         return;
       } catch (error) {
         lastError = error;
@@ -114,7 +126,8 @@ export function createRecorderController({ request = localRequest } = {}) {
       } catch (error) {
         s.uploadError = error;
         s.interrupted = true;
-        s.interruptionReason = 'Recording stopped after a save error. All retained audio has now been saved.';
+        s.interruptionReason =
+          'Recording stopped after a save error. All retained audio has now been saved.';
         if (!s.stopping) void finalize(s).catch(() => {});
         throw error;
       } finally {
@@ -132,7 +145,15 @@ export function createRecorderController({ request = localRequest } = {}) {
       await Promise.race([
         s.captureStopped,
         new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error('The browser has not finished the final audio chunk. Keep this page open and retry saving.')), 15000);
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  'The browser has not finished the final audio chunk. Keep this page open and retry saving.',
+                ),
+              ),
+            15000,
+          );
         }),
       ]);
     } finally {
@@ -159,19 +180,39 @@ export function createRecorderController({ request = localRequest } = {}) {
         const meeting = await request(`/meetings/${encodeURIComponent(s.meeting.id)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ duration: elapsed(s), status: s.interrupted ? 'interrupted' : 'saved', gaps: s.gaps }),
+          body: JSON.stringify({
+            duration: elapsed(s),
+            status: s.interrupted ? 'interrupted' : 'saved',
+            gaps: s.gaps,
+          }),
         });
         s.saved = meeting;
-        update({ status: 'idle', elapsed: elapsed(s), muted: false, level: 0, error: s.interruptionReason || undefined, hasPendingAudio: false });
+        update({
+          status: 'idle',
+          elapsed: elapsed(s),
+          muted: false,
+          level: 0,
+          error: s.interruptionReason || undefined,
+          hasPendingAudio: false,
+        });
         window.dispatchEvent(new CustomEvent('echo-recording-saved', { detail: meeting }));
         // A consumer callback failure must never turn an already saved recording into a failed save.
         try {
-          Promise.resolve(s.onSaved?.(meeting)).catch((error) => console.error('Recording saved, but its UI callback failed.', error));
-        } catch (error) { console.error('Recording saved, but its UI callback failed.', error); }
+          Promise.resolve(s.onSaved?.(meeting)).catch((error) =>
+            console.error('Recording saved, but its UI callback failed.', error),
+          );
+        } catch (error) {
+          console.error('Recording saved, but its UI callback failed.', error);
+        }
         return meeting;
       } catch (error) {
         release(s);
-        update({ status: 'error', elapsed: elapsed(s), level: 0, error: `${errorMessage(error)} Your unsaved audio is retained in this tab. Keep it open and retry saving.` });
+        update({
+          status: 'error',
+          elapsed: elapsed(s),
+          level: 0,
+          error: `${errorMessage(error)} Your unsaved audio is retained in this tab. Keep it open and retry saving.`,
+        });
         throw error;
       } finally {
         s.finalizing = null;
@@ -183,29 +224,53 @@ export function createRecorderController({ request = localRequest } = {}) {
   /** Request microphone access and start a consent-checked meeting recording. */
   async function start({ meeting, deviceId, startMuted = false, onSaved } = {}) {
     if (disposed) throw new Error('The recorder has been disposed.');
-    if (starting || (session && !session.saved)) throw new Error('Save the current recording before starting another one.');
+    if (starting || (session && !session.saved))
+      throw new Error('Save the current recording before starting another one.');
     if (!meeting?.id) throw new Error('Create a meeting before starting the recorder.');
     if (!meeting.consent) throw new Error('Confirm participant consent before recording.');
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      const error = new Error('Microphone recording requires localhost or a secure HTTPS page. Open Echo Voice on localhost.');
+      const error = new Error(
+        'Microphone recording requires localhost or a secure HTTPS page. Open Echo on localhost.',
+      );
       update({ status: 'error', error: error.message });
       throw error;
     }
     if (typeof MediaRecorder === 'undefined') {
-      const error = new Error('This browser does not support audio recording. Use a current version of Chrome, Edge, Firefox, or Safari.');
+      const error = new Error(
+        'This browser does not support audio recording. Use a current version of Chrome, Edge, Firefox, or Safari.',
+      );
       update({ status: 'error', error: error.message });
       throw error;
     }
     starting = true;
-    update({ status: 'idle', elapsed: 0, muted: startMuted, level: 0, error: undefined, meetingId: meeting.id });
+    update({
+      status: 'idle',
+      elapsed: 0,
+      muted: startMuted,
+      level: 0,
+      error: undefined,
+      meetingId: meeting.id,
+    });
     let stream;
     let markedRecording = false;
     try {
       // An explicitly selected microphone must never silently fall back to another device.
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), echoCancellation: true, noiseSuppression: true }, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+        video: false,
+      });
       if (disposed) throw new Error('Recorder closed before microphone permission was granted.');
-      if (!stream.getAudioTracks().some((track) => track.readyState === 'live')) throw new Error('The selected microphone is no longer connected. Select a microphone and try again.');
-      const mimeType = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type));
+      if (!stream.getAudioTracks().some((track) => track.readyState === 'live'))
+        throw new Error(
+          'The selected microphone is no longer connected. Select a microphone and try again.',
+        );
+      const mimeType = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find(
+        (type) => MediaRecorder.isTypeSupported(type),
+      );
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       await request(`/meetings/${encodeURIComponent(meeting.id)}`, {
         method: 'PATCH',
@@ -214,22 +279,47 @@ export function createRecorderController({ request = localRequest } = {}) {
       });
       markedRecording = true;
       if (disposed) throw new Error('Recorder closed before capture started.');
-      if (!stream.getAudioTracks().some((track) => track.readyState === 'live')) throw new Error('The microphone disconnected before capture started.');
+      if (!stream.getAudioTracks().some((track) => track.readyState === 'live'))
+        throw new Error('The microphone disconnected before capture started.');
       let resolveStopped;
       const s = {
-        meeting, stream, recorder, onSaved, trackId: crypto.randomUUID(),
-        activeMs: 0, activeSince: null, muted: startMuted, muteStart: startMuted ? 0 : null,
-        gaps: [...(meeting.gaps || [])], queue: [], sequence: 0, draining: null, uploadError: null,
-        finalizing: null, stopping: false, saved: null, interrupted: false, interruptionReason: '',
-        clock: null, frame: 0, context: null, stopEventReceived: false,
-        captureStopped: new Promise((resolve) => { resolveStopped = resolve; }),
+        meeting,
+        stream,
+        recorder,
+        onSaved,
+        trackId: crypto.randomUUID(),
+        activeMs: 0,
+        activeSince: null,
+        muted: startMuted,
+        muteStart: startMuted ? 0 : null,
+        gaps: [...(meeting.gaps || [])],
+        queue: [],
+        sequence: 0,
+        draining: null,
+        uploadError: null,
+        finalizing: null,
+        stopping: false,
+        saved: null,
+        interrupted: false,
+        interruptionReason: '',
+        clock: null,
+        frame: 0,
+        context: null,
+        stopEventReceived: false,
+        captureStopped: new Promise((resolve) => {
+          resolveStopped = resolve;
+        }),
         onTrackEnded: null,
       };
       session = s;
       for (const track of stream.getAudioTracks()) track.enabled = !startMuted;
       recorder.addEventListener('dataavailable', (event) => {
         if (!event.data?.size || s.saved) return;
-        s.queue.push({ blob: event.data, sequence: s.sequence++, mimeType: recorder.mimeType || event.data.type || 'audio/webm' });
+        s.queue.push({
+          blob: event.data,
+          sequence: s.sequence++,
+          mimeType: recorder.mimeType || event.data.type || 'audio/webm',
+        });
         if (!s.uploadError) void drain(s).catch(() => {});
       });
       recorder.addEventListener('stop', () => {
@@ -237,7 +327,8 @@ export function createRecorderController({ request = localRequest } = {}) {
         resolveStopped();
         if (!s.stopping) {
           s.interrupted = true;
-          s.interruptionReason = 'The browser stopped microphone capture. Audio recorded before the interruption was saved.';
+          s.interruptionReason =
+            'The browser stopped microphone capture. Audio recorded before the interruption was saved.';
           void finalize(s).catch(() => {});
         }
       });
@@ -249,14 +340,21 @@ export function createRecorderController({ request = localRequest } = {}) {
       s.onTrackEnded = () => {
         if (s.stopping) return;
         s.interrupted = true;
-        s.interruptionReason = 'The microphone disconnected or permission was revoked. Audio recorded before the interruption was saved.';
+        s.interruptionReason =
+          'The microphone disconnected or permission was revoked. Audio recorded before the interruption was saved.';
         void finalize(s).catch(() => {});
       };
       for (const track of stream.getAudioTracks()) track.addEventListener('ended', s.onTrackEnded);
       recorder.start(5000);
       s.activeSince = performance.now();
       s.clock = setInterval(() => update({ elapsed: elapsed(s) }), 250);
-      update({ status: 'recording', elapsed: 0, muted: startMuted, error: undefined, hasPendingAudio: true });
+      update({
+        status: 'recording',
+        elapsed: 0,
+        muted: startMuted,
+        error: undefined,
+        hasPendingAudio: true,
+      });
       startMeter(s);
     } catch (error) {
       if (stream) for (const track of stream.getTracks()) track.stop();
@@ -265,7 +363,8 @@ export function createRecorderController({ request = localRequest } = {}) {
       const message = microphoneError(error);
       if (markedRecording) {
         void request(`/meetings/${encodeURIComponent(meeting.id)}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'interrupted', error: message }),
         }).catch(() => {});
       }
@@ -319,7 +418,14 @@ export function createRecorderController({ request = localRequest } = {}) {
 
   /** Request final capture data and finish after pending audio uploads settle. */
   function stop() {
-    if (!session) return Promise.reject(new Error(starting ? 'Wait for the microphone permission request to finish.' : 'There is no recording to save.'));
+    if (!session)
+      return Promise.reject(
+        new Error(
+          starting
+            ? 'Wait for the microphone permission request to finish.'
+            : 'There is no recording to save.',
+        ),
+      );
     return finalize(session);
   }
 
@@ -349,7 +455,18 @@ export function createRecorderController({ request = localRequest } = {}) {
   }
 
   window.addEventListener('beforeunload', beforeUnload);
-  return { get state() { return { ...state }; }, start, pause, resume, toggleMute, stop, retry, dispose };
+  return {
+    get state() {
+      return { ...state };
+    },
+    start,
+    pause,
+    resume,
+    toggleMute,
+    stop,
+    retry,
+    dispose,
+  };
 }
 
 /** Send recorder API requests and translate network or HTTP errors into actionable messages. */
@@ -374,16 +491,25 @@ async function localRequest(path, init) {
 }
 
 /** Normalize thrown values into a readable recorder failure message. */
-function errorMessage(error) { return error?.message || String(error || 'An unexpected recording error occurred.'); }
+function errorMessage(error) {
+  return error?.message || String(error || 'An unexpected recording error occurred.');
+}
 
 /** Translate browser microphone permission and device failures into setup guidance. */
 function microphoneError(error) {
   switch (error?.name) {
-    case 'NotAllowedError': case 'SecurityError': return 'Microphone permission was denied. Allow microphone access in your browser’s site settings, then try again.';
-    case 'NotFoundError': return 'No microphone was found. Connect a microphone and try again.';
-    case 'OverconstrainedError': return 'The selected microphone is unavailable. Choose a connected microphone and try again.';
-    case 'NotReadableError': case 'AbortError': return 'The microphone could not be opened. Check that it is connected and available, then try again.';
-    default: return errorMessage(error);
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'Microphone permission was denied. Allow microphone access in your browser’s site settings, then try again.';
+    case 'NotFoundError':
+      return 'No microphone was found. Connect a microphone and try again.';
+    case 'OverconstrainedError':
+      return 'The selected microphone is unavailable. Choose a connected microphone and try again.';
+    case 'NotReadableError':
+    case 'AbortError':
+      return 'The microphone could not be opened. Check that it is connected and available, then try again.';
+    default:
+      return errorMessage(error);
   }
 }
 
