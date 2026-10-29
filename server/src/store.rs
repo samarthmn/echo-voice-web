@@ -32,8 +32,8 @@ fn id() -> String {
     Uuid::new_v4().to_string()
 }
 /// Resolve the library location from a developer override or shared runtime config.
-pub fn data_dir() -> PathBuf {
-    crate::paths::get().data_dir
+pub fn data_dir() -> Result<PathBuf> {
+    Ok(crate::paths::get()?.data_dir)
 }
 #[cfg(unix)]
 /// Restrict managed data to the current account on Unix; other platforms use inherited ACLs.
@@ -76,7 +76,7 @@ pub(crate) fn with_key<T>(f: impl FnOnce(&LibraryKey) -> std::io::Result<T>) -> 
     let guard = LIBRARY_KEY
         .get_or_init(|| Mutex::new(None))
         .lock()
-        .map_err(|_| std::io::Error::other("The library key lock is unavailable."))?;
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     f(guard.as_ref().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -85,7 +85,7 @@ pub(crate) fn with_key<T>(f: impl FnOnce(&LibraryKey) -> std::io::Result<T>) -> 
     })?)
 }
 fn file_context(path: &Path) -> std::io::Result<String> {
-    let root = data_dir();
+    let root = data_dir().map_err(std::io::Error::other)?;
     let relative = path
         .strip_prefix(&root)
         .map_err(|_| std::io::Error::other("Invalid protected storage path."))?;
@@ -318,14 +318,9 @@ pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result
     let mut guard = DATABASE
         .get_or_init(|| Mutex::new(None))
         .lock()
-        .map_err(|_| {
-            ApiError::new(
-                500,
-                "The workspace lock is unavailable. Restart Echo Voice.",
-            )
-        })?;
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if guard.is_none() {
-        let root = data_dir();
+        let root = data_dir()?;
         mkdir(&root)?;
         mkdir(&root.join("audio"))?;
         let lock_path = root.join("workspace.lock");
@@ -338,15 +333,7 @@ pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result
         secure(&lock_path, false)?;
         fs2::FileExt::try_lock_exclusive(&lock).map_err(|_|ApiError::new(409,"Another Echo Voice server is using this data folder. Stop that server or choose a separate ECHO_DATA_DIR."))?;
         preflight_plaintext_schema(&root)?;
-        let encrypted_legacy = crate::legacy::preflight(&root, None)?;
-        let isolated_test_key = cfg!(debug_assertions)
-            && std::env::var("ECHO_TEST_MODE").as_deref() == Ok("1")
-            && std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some();
-        if encrypted_legacy && !root.join("protection.json").exists() && !isolated_test_key {
-            return Err(ApiError::new(503, "The existing protected legacy recording cannot be unlocked. Restore this library's key before migration; no new key or database was created."));
-        }
-        let key = protected_storage::library_key(&root).map_err(|_| ApiError::new(503, "Echo cannot unlock this library. Unlock the operating system credential store and retry. No replacement key or plaintext library was created."))?;
-        crate::legacy::preflight(&root, Some(&key))?;
+        let key = protected_storage::library_key(&root).map_err(|error| { tracing::warn!(%error, "Library key unlock failed"); ApiError::new(503, "Echo cannot unlock this library. Unlock the operating system credential store and retry. No replacement key or plaintext library was created.") })?;
         let mut db = open_protected_database(&root, &key)?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
         CREATE TABLE IF NOT EXISTS meetings(id TEXT PRIMARY KEY,data TEXT NOT NULL);
@@ -369,22 +356,75 @@ pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result
         *LIBRARY_KEY
             .get_or_init(|| Mutex::new(None))
             .lock()
-            .map_err(|_| ApiError::new(500, "The library key lock is unavailable."))? = Some(key);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(key);
         if let Err(error) = migrate_protected_files(&db)
             .and_then(|_| crate::chatgpt::protect_legacy_state())
-            .and_then(|_| crate::legacy::protect_retired_recordings())
             .and_then(|_| recover(&mut db))
         {
-            LIBRARY_KEY.get().unwrap().lock().unwrap().take();
+            LIBRARY_KEY
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             return Err(error);
         }
         *guard = Some(db);
         *WORKSPACE_LOCK
             .get_or_init(|| Mutex::new(None))
             .lock()
-            .map_err(|_| ApiError::new(500, "The workspace lock is unavailable."))? = Some(lock);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(lock);
     }
-    f(guard.as_mut().unwrap())
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| ApiError::new(500, "The local database is unavailable."))?;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(conn))) {
+        Ok(result) => result,
+        Err(panic) => {
+            let message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown panic");
+            tracing::error!(%message, "Database operation panicked");
+            if !conn.is_autocommit() {
+                if let Err(error) = conn.execute_batch("ROLLBACK") {
+                    tracing::error!(%error, "Database rollback failed after panic");
+                }
+            }
+            Err(ApiError::new(500, "Echo hit an internal error; retry."))
+        }
+    }
+}
+
+/// Execute serialized database work away from asynchronous worker threads.
+pub async fn run<T: Send + 'static>(
+    f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(move || with_db(f))
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "Database task failed");
+            ApiError::new(500, "Echo hit an internal error; retry.")
+        })?
+}
+/// Run synchronous storage work without blocking an async worker.
+pub async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(f).await.map_err(|error| {
+        tracing::error!(%error, "Storage task failed");
+        ApiError::new(500, "Echo hit an internal error; retry.")
+    })?
+}
+/// Read and authenticate one bounded range on a blocking worker.
+pub async fn protected_range(
+    path: PathBuf,
+    offset: u64,
+    length: usize,
+) -> std::io::Result<Vec<u8>> {
+    tokio::task::spawn_blocking(move || protected_reader(&path)?.read_range(offset, length))
+        .await
+        .map_err(std::io::Error::other)?
 }
 /// Open the library and complete startup recovery before accepting requests.
 pub fn init() -> Result<()> {
@@ -440,7 +480,7 @@ fn migrate_protected_files(db: &Connection) -> Result<()> {
             return Err(ApiError::new(500, "Invalid audio migration reference."));
         }
         migrate_file(
-            &data_dir().join("audio").join(meeting).join(file),
+            &data_dir()?.join("audio").join(meeting).join(file),
             Some((bytes, &digest)),
         )?;
     }
@@ -461,11 +501,11 @@ fn migrate_protected_files(db: &Connection) -> Result<()> {
             return Err(ApiError::new(500, "Invalid PCM migration reference."));
         }
         migrate_file(
-            &data_dir().join("extension-pcm").join(recording).join(file),
+            &data_dir()?.join("extension-pcm").join(recording).join(file),
             Some((frames * 2, &digest)),
         )?;
     }
-    let credentials = data_dir().join("credentials");
+    let credentials = data_dir()?.join("credentials");
     if credentials.exists() {
         for entry in fs::read_dir(&credentials)? {
             let entry = entry?;
@@ -486,9 +526,9 @@ fn migrate_protected_files(db: &Connection) -> Result<()> {
     // Old interrupted imports have no committed ownership. Their audio must
     // still be encrypted before acknowledging completion of the migration.
     for area in ["audio", "extension-pcm"] {
-        migrate_unindexed_files(&data_dir().join(area))?;
+        migrate_unindexed_files(&data_dir()?.join(area))?;
     }
-    for entry in fs::read_dir(data_dir())? {
+    for entry in fs::read_dir(data_dir()?)? {
         let entry = entry?;
         if entry.file_type()?.is_dir()
             && entry.file_name().to_string_lossy().starts_with(".import-")
@@ -559,6 +599,7 @@ pub(crate) fn test_directory() -> tempfile::TempDir {
 }
 #[cfg(test)]
 pub(crate) fn test_key() {
+    crate::paths::init(crate::paths::RuntimePaths::resolve().unwrap());
     std::env::set_var("ECHO_TEST_MODE", "1");
     std::env::set_var("ECHO_TEST_STORAGE_KEY", STANDARD.encode([42u8; 32]));
 }
@@ -577,11 +618,9 @@ fn recover(db: &mut Connection) -> Result<()> {
             continue;
         }
         let removed = (|| {
-            for area in ["audio", "bot"] {
-                let dir = data_dir().join(area).join(&key);
-                if dir.exists() {
-                    fs::remove_dir_all(dir)?;
-                }
+            let dir = data_dir()?.join("audio").join(&key);
+            if dir.exists() {
+                fs::remove_dir_all(dir)?;
             }
             crate::extensions::cleanup_pcm(db, &key)?;
             Ok::<_, ApiError>(())
@@ -704,7 +743,8 @@ fn identifier(v: &Value, key: &str, required: bool) -> Result<()> {
 }
 /// Require a parseable RFC 3339 timestamp for portable records.
 fn timestamp(v: &Value, key: &str) -> Result<()> {
-    let s = string(v, key, 100, true)?.unwrap();
+    let s =
+        string(v, key, 100, true)?.ok_or_else(|| ApiError::bad("A required value is missing."))?;
     chrono::DateTime::parse_from_rfc3339(s)
         .map_err(|_| ApiError::bad(format!("'{key}' must be an ISO date.")))?;
     Ok(())
@@ -714,7 +754,11 @@ fn unique(items: &[Value]) -> Result<()> {
     let mut ids = HashSet::new();
     for item in items {
         identifier(item, "id", true)?;
-        if !ids.insert(item["id"].as_str().unwrap()) {
+        if !ids.insert(
+            item["id"]
+                .as_str()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?,
+        ) {
             return Err(ApiError::bad("A list contains duplicate identifiers."));
         }
     }
@@ -752,8 +796,10 @@ fn validate_vocabulary(v: &Value, with_id: bool) -> Result<()> {
 fn validate_passage(v: &Value) -> Result<()> {
     object(v, &["id", "start", "end", "text", "speaker", "uncertain"])?;
     identifier(v, "id", true)?;
-    let start = number(v, "start", true)?.unwrap();
-    let end = number(v, "end", true)?.unwrap();
+    let start =
+        number(v, "start", true)?.ok_or_else(|| ApiError::bad("A required value is missing."))?;
+    let end =
+        number(v, "end", true)?.ok_or_else(|| ApiError::bad("A required value is missing."))?;
     if end < start {
         return Err(ApiError::bad("Passage end must be after its start."));
     }
@@ -902,7 +948,10 @@ fn validate_notes(v: &Value, with_id: bool) -> Result<()> {
 fn validate_gaps(v: &Value) -> Result<()> {
     for gap in arr(v, "gaps", 10000)? {
         object(gap, &["start", "end", "reason"])?;
-        if number(gap, "end", true)?.unwrap() < number(gap, "start", true)?.unwrap() {
+        if number(gap, "end", true)?.ok_or_else(|| ApiError::bad("A required value is missing."))?
+            < number(gap, "start", true)?
+                .ok_or_else(|| ApiError::bad("A required value is missing."))?
+        {
             return Err(ApiError::bad("Gap end must be after its start."));
         }
         string(gap, "reason", 1000, true)?;
@@ -967,11 +1016,17 @@ fn validate_references(m: &Value) -> Result<()> {
             .find(|t| t["id"] == n["transcriptVersionId"])
             .ok_or_else(|| ApiError::bad("Notes reference a missing source transcript."))?;
         for group in ["summary", "decisions", "actions"] {
-            for note in n[group].as_array().unwrap() {
-                for p in note["passageIds"].as_array().unwrap() {
+            for note in n[group]
+                .as_array()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            {
+                for p in note["passageIds"]
+                    .as_array()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                {
                     if !t["passages"]
                         .as_array()
-                        .unwrap()
+                        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
                         .iter()
                         .any(|v| &v["id"] == p)
                     {
@@ -986,9 +1041,7 @@ fn validate_references(m: &Value) -> Result<()> {
             if !transcripts.iter().any(|t| {
                 t["passages"]
                     .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|v| &v["id"] == p)
+                    .is_some_and(|passages| passages.iter().any(|v| &v["id"] == p))
             }) {
                 return Err(ApiError::bad(
                     "A saved moment references a missing passage.",
@@ -1081,10 +1134,16 @@ pub(crate) fn validate_meeting(m: &Value) -> Result<()> {
             },
         )?)?;
     }
-    for t in m["tracks"].as_array().unwrap() {
+    for t in m["tracks"]
+        .as_array()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+    {
         object(t, &["id", "label", "mimeType", "bytes", "url"])?;
         string(t, "label", 200, true)?;
-        audio_type(string(t, "mimeType", 100, true)?.unwrap())?;
+        audio_type(
+            string(t, "mimeType", 100, true)?
+                .ok_or_else(|| ApiError::bad("A required value is missing."))?,
+        )?;
         string(t, "url", 500, true)?;
         if t["bytes"]
             .as_u64()
@@ -1094,19 +1153,32 @@ pub(crate) fn validate_meeting(m: &Value) -> Result<()> {
             return Err(ApiError::bad("Invalid audio track size."));
         }
     }
-    for t in m["transcripts"].as_array().unwrap() {
+    for t in m["transcripts"]
+        .as_array()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+    {
         validate_transcript(t, true)?;
     }
-    for n in m["notes"].as_array().unwrap() {
+    for n in m["notes"]
+        .as_array()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+    {
         validate_notes(n, true)?;
     }
-    for m in m["moments"].as_array().unwrap() {
+    for m in m["moments"]
+        .as_array()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+    {
         validate_moment(m, true)?;
     }
     if let Some(extension) = m.get("extensionRecording") {
         crate::extensions::validate_metadata(extension)?;
-        let ids = extension["partTrackIds"].as_array().unwrap();
-        let tracks = m["tracks"].as_array().unwrap();
+        let ids = extension["partTrackIds"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
+        let tracks = m["tracks"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
         if ids.len() != tracks.len()
             || ids
                 .iter()
@@ -1124,9 +1196,15 @@ pub(crate) fn validate_meeting(m: &Value) -> Result<()> {
                 })
             }) || tracks
                 .iter()
-                .map(|track| (track["bytes"].as_u64().unwrap() - 44) / 2)
+                .filter_map(|track| {
+                    track["bytes"]
+                        .as_u64()
+                        .map(|bytes| bytes.saturating_sub(44) / 2)
+                })
                 .sum::<u64>()
-                != extension["totalFrames"].as_u64().unwrap())
+                != extension["totalFrames"]
+                    .as_u64()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?)
         {
             return Err(ApiError::bad(
                 "Sequential recording sizes do not match their frame timeline.",
@@ -1201,7 +1279,10 @@ pub fn resume_browser_processing(ids: &[String]) -> Result<Vec<String>> {
             };
             if meeting["status"] == "error" && meeting["error"] == PROCESSING_RESTART_ERROR {
                 meeting["status"] = json!("processing");
-                meeting.as_object_mut().unwrap().remove("error");
+                meeting
+                    .as_object_mut()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                    .remove("error");
                 save(&tx, &mut meeting)?;
                 restored.push(key.clone());
             }
@@ -1218,7 +1299,10 @@ fn defaults() -> Value {
 fn normalized_settings(saved: Value) -> Result<Value> {
     validate_settings(&saved, false)?;
     let mut settings = defaults();
-    for (key, value) in saved.as_object().unwrap() {
+    for (key, value) in saved
+        .as_object()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+    {
         settings[key] = value.clone();
     }
     if matches!(
@@ -1264,7 +1348,8 @@ pub fn create_meeting(input: Value) -> Result<Value> {
         ],
     )?;
     string(&input, "title", 300, true)?;
-    let consent = boolean(&input, "consent", true)?.unwrap();
+    let consent = boolean(&input, "consent", true)?
+        .ok_or_else(|| ApiError::bad("A required value is missing."))?;
     boolean(&input, "liveTranscription", false)?;
     if !matches!(
         input["mode"].as_str(),
@@ -1373,9 +1458,14 @@ pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
         if patch["status"] == "processing" {
             crate::extensions::preempt(&tx, key)?;
         }
-        for (k, v) in patch.as_object().unwrap() {
+        for (k, v) in patch
+            .as_object()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             if v.is_null() {
-                m.as_object_mut().unwrap().remove(k);
+                m.as_object_mut()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                    .remove(k);
             } else {
                 m[k] = v.clone();
             }
@@ -1405,26 +1495,6 @@ pub fn delete_meeting(key: &str) -> Result<()> {
                 "Stop the browser recording and finish transferring its audio before deleting this meeting.",
             ));
         }
-        if data_dir()
-            .join("bot-starts")
-            .join(format!("{key}.json"))
-            .exists()
-        {
-            return Err(ApiError::new(409, "A recording start is still being reconciled. Stop the meeting assistant before deleting this meeting."));
-        }
-        let session_file = data_dir().join("bot").join(key).join("session.json");
-        if session_file.exists() {
-            let session = crate::legacy::read_metadata(&session_file)?;
-            if matches!(
-                session["status"].as_str(),
-                Some("joining" | "waiting" | "recording" | "stopping")
-            ) {
-                return Err(ApiError::new(
-                    409,
-                    "Stop the meeting assistant before deleting its recording.",
-                ));
-            }
-        }
         if matches!(
             meeting["status"].as_str(),
             Some("recording" | "paused" | "processing")
@@ -1438,11 +1508,9 @@ pub fn delete_meeting(key: &str) -> Result<()> {
         tx.execute("INSERT OR IGNORE INTO deletion_jobs(id) VALUES(?)", [key])?;
         tx.commit()?;
         let removed = (|| {
-            for area in ["audio", "bot"] {
-                let dir = data_dir().join(area).join(key);
-                if dir.exists() {
-                    fs::remove_dir_all(dir)?;
-                }
+            let dir = data_dir()?.join("audio").join(key);
+            if dir.exists() {
+                fs::remove_dir_all(dir)?;
             }
             crate::extensions::cleanup_pcm(db, key)?;
             Ok::<_, ApiError>(())
@@ -1484,7 +1552,12 @@ pub fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
         validate_transcript(&input, false)?;
         let tx = db.transaction()?;
         let mut m = require_meeting(&tx, key)?;
-        if m["transcripts"].as_array().unwrap().len() >= 1000 {
+        if m["transcripts"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .len()
+            >= 1000
+        {
             return Err(ApiError::bad(
                 "This meeting reached its 1,000-version history limit.",
             ));
@@ -1493,8 +1566,13 @@ pub fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
         input["id"] = json!(id());
         input["createdAt"] = json!(now());
         m["activeTranscriptId"] = input["id"].clone();
-        m["transcripts"].as_array_mut().unwrap().push(input);
-        m.as_object_mut().unwrap().remove("error");
+        m["transcripts"]
+            .as_array_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .push(input);
+        m.as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("error");
         if !matches!(m["status"].as_str(), Some("recording" | "paused")) {
             m["status"] = json!("ready");
         }
@@ -1529,17 +1607,27 @@ fn add_notes_checked(
                 return Err(ApiError::new(409,"The selected transcript changed during generation. Generate notes again for the current version."));
             }
         }
-        if m["notes"].as_array().unwrap().len() >= 1000 {
+        if m["notes"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .len()
+            >= 1000
+        {
             return Err(ApiError::bad(
                 "This meeting reached its 1,000-version notes limit.",
             ));
         }
         if input["edited"] == true {
-            if let Some(source) = m["notes"].as_array().unwrap().iter().find(|note| {
-                note["id"] == m["activeNotesId"]
-                    && note["model"] == input["model"]
-                    && note["transcriptVersionId"] == input["transcriptVersionId"]
-            }) {
+            if let Some(source) = m["notes"]
+                .as_array()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                .iter()
+                .find(|note| {
+                    note["id"] == m["activeNotesId"]
+                        && note["model"] == input["model"]
+                        && note["transcriptVersionId"] == input["transcriptVersionId"]
+                })
+            {
                 for key in ["provider", "usage"] {
                     if input.get(key).is_none() {
                         if let Some(value) = source.get(key) {
@@ -1556,9 +1644,14 @@ fn add_notes_checked(
         input["id"] = json!(id());
         input["createdAt"] = json!(now());
         m["activeNotesId"] = input["id"].clone();
-        m["notes"].as_array_mut().unwrap().push(input);
+        m["notes"]
+            .as_array_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .push(input);
         validate_references(&m)?;
-        m.as_object_mut().unwrap().remove("error");
+        m.as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("error");
         save(&tx, &mut m)?;
         tx.commit()?;
         Ok(m)
@@ -1570,11 +1663,19 @@ pub fn add_moment(key: &str, mut input: Value) -> Result<Value> {
     with_db(|db| {
         let tx = db.transaction()?;
         let mut m = require_meeting(&tx, key)?;
-        if m["moments"].as_array().unwrap().len() >= 10000 {
+        if m["moments"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .len()
+            >= 10000
+        {
             return Err(ApiError::bad("This meeting has too many saved moments."));
         }
         input["id"] = json!(id());
-        m["moments"].as_array_mut().unwrap().push(input);
+        m["moments"]
+            .as_array_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .push(input);
         validate_references(&m)?;
         save(&tx, &mut m)?;
         tx.commit()?;
@@ -1590,11 +1691,14 @@ pub fn update_moment(key: &str, moment_id: &str, patch: Value) -> Result<Value> 
         let mut m = require_meeting(&tx, key)?;
         let moment = m["moments"]
             .as_array_mut()
-            .unwrap()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
             .iter_mut()
             .find(|v| v["id"] == moment_id)
             .ok_or_else(|| ApiError::new(404, "This saved moment could not be found."))?;
-        for (k, v) in patch.as_object().unwrap() {
+        for (k, v) in patch
+            .as_object()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             moment[k] = v.clone();
         }
         validate_moment(moment, true)?;
@@ -1610,7 +1714,9 @@ pub fn delete_moment(key: &str, moment_id: &str) -> Result<Value> {
     with_db(|db| {
         let tx = db.transaction()?;
         let mut m = require_meeting(&tx, key)?;
-        let moments = m["moments"].as_array_mut().unwrap();
+        let moments = m["moments"]
+            .as_array_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
         let before = moments.len();
         moments.retain(|m| m["id"] != moment_id);
         if before == moments.len() {
@@ -1689,7 +1795,10 @@ pub fn update_settings(patch: Value) -> Result<Value> {
     validate_settings(&patch, false)?;
     with_db(|db| {
         let mut settings = settings_db(db)?;
-        for (k, v) in patch.as_object().unwrap() {
+        for (k, v) in patch
+            .as_object()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             settings[k] = v.clone();
         }
         validate_settings(&settings, true)?;
@@ -1736,7 +1845,10 @@ pub fn update_vocabulary(key: &str, patch: Value) -> Result<Value> {
             &source
                 .ok_or_else(|| ApiError::new(404, "This vocabulary entry could not be found."))?,
         )?;
-        for (k, v) in patch.as_object().unwrap() {
+        for (k, v) in patch
+            .as_object()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             entry[k] = v.clone();
         }
         validate_vocabulary(&entry, true)?;
@@ -1858,7 +1970,7 @@ pub fn add_audio(
         }
         let existing_track = m["tracks"]
             .as_array()
-            .unwrap()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
             .iter()
             .find(|t| t["id"] == track_id)
             .cloned();
@@ -1882,7 +1994,7 @@ pub fn add_audio(
             if Path::new(&file).file_name().and_then(|name| name.to_str()) != Some(file.as_str()) {
                 return Err(ApiError::new(500, "Invalid saved audio reference."));
             }
-            let path = data_dir().join("audio").join(key).join(file);
+            let path = data_dir()?.join("audio").join(key).join(file);
             let saved = read_protected(&path)?;
             if saved.len() as u64 != bytes || format!("{:x}", Sha256::digest(&saved)) != hash {
                 return Err(ApiError::new(
@@ -1891,7 +2003,11 @@ pub fn add_audio(
                 ));
             }
             fs::File::open(&path)?.sync_all()?;
-            fs::File::open(path.parent().unwrap())?.sync_all()?;
+            fs::File::open(
+                path.parent()
+                    .ok_or_else(|| ApiError::new(500, "Invalid audio path."))?,
+            )?
+            .sync_all()?;
             return existing_track.ok_or_else(|| {
                 ApiError::new(500, "The audio index is damaged. Restore from a backup.")
             });
@@ -1912,7 +2028,12 @@ pub fn add_audio(
                     "The recording format changed. Start a new track.",
                 ));
             }
-        } else if m["tracks"].as_array().unwrap().len() >= 20 {
+        } else if m["tracks"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .len()
+            >= 20
+        {
             return Err(ApiError::bad(
                 "A meeting can contain at most 20 audio tracks.",
             ));
@@ -1928,20 +2049,26 @@ pub fn add_audio(
                 "This track reached 2 GB. Save it and start another meeting.",
             ));
         }
-        let dir = data_dir().join("audio").join(key);
+        let dir = data_dir()?.join("audio").join(key);
         mkdir(&dir)?;
         let name = format!("{track_id}-{seq}-{}.chunk", id());
         let path = dir.join(&name);
         written = Some(path.clone());
         write_protected(&path, data)?;
         fs::File::open(&dir)?.sync_all()?;
-        fs::File::open(dir.parent().unwrap())?.sync_all()?;
+        fs::File::open(
+            dir.parent()
+                .ok_or_else(|| ApiError::new(500, "Invalid audio directory."))?,
+        )?
+        .sync_all()?;
         tx.execute(
             "INSERT INTO audio_chunks VALUES(?,?,?,?,?,?)",
             params![key, track_id, seq, name, data.len() as i64, digest],
         )?;
         let track = json!({"id":track_id,"label":label,"mimeType":mime,"bytes":bytes,"url":audio_url(key,track_id)});
-        let tracks = m["tracks"].as_array_mut().unwrap();
+        let tracks = m["tracks"]
+            .as_array_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
         if let Some(existing) = tracks.iter_mut().find(|t| t["id"] == track_id) {
             *existing = track.clone();
         } else {
@@ -1970,7 +2097,7 @@ pub fn get_audio_parts(key: &str, track_id: &str) -> Result<(Value, Vec<AudioPar
         let m = require_meeting(db, key)?;
         let track = m["tracks"]
             .as_array()
-            .unwrap()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
             .iter()
             .find(|t| t["id"] == track_id)
             .cloned()
@@ -1985,7 +2112,7 @@ pub fn get_audio_parts(key: &str, track_id: &str) -> Result<(Value, Vec<AudioPar
             if Path::new(&file).file_name().and_then(|s| s.to_str()) != Some(&file) {
                 return Err(ApiError::new(500, "Invalid saved audio reference."));
             }
-            let path = data_dir().join("audio").join(key).join(file);
+            let path = data_dir()?.join("audio").join(key).join(file);
             if !path.exists()
                 || fs::symlink_metadata(&path)?.file_type().is_symlink()
                 || protected_reader(&path)
@@ -2028,7 +2155,7 @@ fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
 /// Summarize meeting counts and library disk usage for storage settings.
 pub fn storage_info() -> Result<Value> {
     init()?;
-    let root = data_dir();
+    let root = data_dir()?;
     let bytes = directory_bytes(&root)?;
     let available = fs2::available_space(&root).unwrap_or(0);
     Ok(
@@ -2067,7 +2194,7 @@ pub fn export_library() -> Result<Value> {
             if Path::new(&file).file_name().and_then(|s| s.to_str()) != Some(&file) {
                 return Err(ApiError::new(500, "An audio storage reference is invalid."));
             }
-            let path = data_dir().join("audio").join(&meeting).join(file);
+            let path = data_dir()?.join("audio").join(&meeting).join(file);
             if fs::symlink_metadata(&path)?.file_type().is_symlink() {
                 return Err(ApiError::new(500, "Audio links cannot be exported."));
             }
@@ -2081,7 +2208,10 @@ pub fn export_library() -> Result<Value> {
             audio.push(json!({"meetingId":meeting,"trackId":track,"sequence":sequence,"data":STANDARD.encode(data)}));
         }
         let mut settings = settings_db(db)?;
-        settings.as_object_mut().unwrap().remove("ollamaUrl");
+        settings
+            .as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("ollamaUrl");
         Ok(
             json!({"format":"echo-voice-web","version":1,"exportedAt":now(),"meetings":meetings,"vocabulary":vocabulary_db(db)?,"settings":settings,"audio":audio,"extensionRecordings":crate::extensions::backup_receipts(db)?}),
         )
@@ -2143,19 +2273,29 @@ pub fn import_library(input: Value) -> Result<Value> {
                 "onboardingComplete",
             ],
         )?;
-        for (k, v) in imported.as_object().unwrap() {
+        for (k, v) in imported
+            .as_object()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             settings[k] = v.clone();
         }
         validate_settings(&settings, true)?;
     }
     let mut tracks = HashMap::new();
     for m in meetings {
-        for track in m["tracks"].as_array().unwrap() {
+        for track in m["tracks"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             tracks.insert(
                 format!(
                     "{}/{}",
-                    m["id"].as_str().unwrap(),
-                    track["id"].as_str().unwrap()
+                    m["id"]
+                        .as_str()
+                        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?,
+                    track["id"]
+                        .as_str()
+                        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
                 ),
                 track,
             );
@@ -2179,9 +2319,9 @@ pub fn import_library(input: Value) -> Result<Value> {
     }
     chunks.sort_by_key(|c| {
         (
-            c["meetingId"].as_str().unwrap(),
-            c["trackId"].as_str().unwrap(),
-            c["sequence"].as_i64().unwrap(),
+            c["meetingId"].as_str(),
+            c["trackId"].as_str(),
+            c["sequence"].as_i64(),
         )
     });
     let mut sizes = HashMap::<String, u64>::new();
@@ -2189,20 +2329,30 @@ pub fn import_library(input: Value) -> Result<Value> {
     let mut prepared = Vec::new();
     let mut total = 0usize;
     for chunk in chunks {
-        let meeting = chunk["meetingId"].as_str().unwrap();
-        let track_id = chunk["trackId"].as_str().unwrap();
+        let meeting = chunk["meetingId"]
+            .as_str()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
+        let track_id = chunk["trackId"]
+            .as_str()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
         let key = format!("{meeting}/{track_id}");
         let track = tracks.get(&key).ok_or_else(|| {
             ApiError::bad("The backup contains audio without a matching meeting track.")
         })?;
-        let sequence = chunk["sequence"].as_i64().unwrap();
+        let sequence = chunk["sequence"]
+            .as_i64()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
         if sequence != *sequences.get(&key).unwrap_or(&0) {
             return Err(ApiError::bad(
                 "The backup contains missing or duplicate audio chunks.",
             ));
         }
         let data = STANDARD
-            .decode(chunk["data"].as_str().unwrap())
+            .decode(
+                chunk["data"]
+                    .as_str()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?,
+            )
             .map_err(|_| ApiError::bad("The backup contains invalid audio encoding."))?;
         if data.is_empty() || data.len() > MAX_AUDIO {
             return Err(ApiError::bad(
@@ -2210,7 +2360,12 @@ pub fn import_library(input: Value) -> Result<Value> {
             ));
         }
         if sequence == 0 {
-            audio_header(&data, track["mimeType"].as_str().unwrap())?;
+            audio_header(
+                &data,
+                track["mimeType"]
+                    .as_str()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?,
+            )?;
         }
         total += data.len();
         if total > MAX_BACKUP {
@@ -2237,7 +2392,7 @@ pub fn import_library(input: Value) -> Result<Value> {
         }
     }
     init()?;
-    let staging = data_dir().join(format!(".import-{}", id()));
+    let staging = data_dir()?.join(format!(".import-{}", id()));
     mkdir(&staging)?;
     let mut installed = Vec::<PathBuf>::new();
     let outcome = (|| {
@@ -2246,7 +2401,7 @@ pub fn import_library(input: Value) -> Result<Value> {
             mkdir(&dir)?;
             write_protected_for(
                 &dir.join(&chunk.filename),
-                &data_dir()
+                &data_dir()?
                     .join("audio")
                     .join(&chunk.meeting)
                     .join(&chunk.filename),
@@ -2266,9 +2421,20 @@ pub fn import_library(input: Value) -> Result<Value> {
             crate::extensions::restore_receipts(&tx, &receipts)?;
             for source in meetings {
                 let mut m = source.clone();
-                let key = m["id"].as_str().unwrap().to_string();
-                for t in m["tracks"].as_array_mut().unwrap() {
-                    t["url"] = json!(audio_url(&key, t["id"].as_str().unwrap()));
+                let key = m["id"]
+                    .as_str()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                    .to_string();
+                for t in m["tracks"]
+                    .as_array_mut()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                {
+                    t["url"] = json!(audio_url(
+                        &key,
+                        t["id"]
+                            .as_str()
+                            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                    ));
                 }
                 if matches!(
                     m["status"].as_str(),
@@ -2283,7 +2449,7 @@ pub fn import_library(input: Value) -> Result<Value> {
                 )?;
                 let from = staging.join(&key);
                 if from.exists() {
-                    let dest = data_dir().join("audio").join(&key);
+                    let dest = data_dir()?.join("audio").join(&key);
                     if dest.exists() {
                         return Err(ApiError::new(409,"A leftover audio folder conflicts with this backup. Use an empty data folder."));
                     }
@@ -2365,12 +2531,12 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
         .collect::<String>();
     let transcript = m["transcripts"]
         .as_array()
-        .unwrap()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
         .iter()
         .find(|v| v["id"] == m["activeTranscriptId"]);
     let notes = m["notes"]
         .as_array()
-        .unwrap()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
         .iter()
         .find(|v| v["id"] == m["activeNotesId"]);
     let empty = Vec::new();
@@ -2432,7 +2598,10 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             ("actions", "Action items"),
         ] {
             body.push_str(&format!("\n## {title}\n"));
-            for n in notes[group].as_array().unwrap() {
+            for n in notes[group]
+                .as_array()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            {
                 body.push_str(&format!(
                     "- {}{}{}{} [Evidence: {}]\n",
                     if n["done"] == true { "[x] " } else { "" },
@@ -2447,7 +2616,7 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
                         .unwrap_or_default(),
                     n["passageIds"]
                         .as_array()
-                        .unwrap()
+                        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
                         .iter()
                         .filter_map(Value::as_str)
                         .collect::<Vec<_>>()
@@ -2467,9 +2636,16 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             strv(p, "id")
         ));
     }
-    if !m["moments"].as_array().unwrap().is_empty() {
+    if !m["moments"]
+        .as_array()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        .is_empty()
+    {
         body.push_str("\n## Saved moments\n");
-        for moment in m["moments"].as_array().unwrap() {
+        for moment in m["moments"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             body.push_str(&format!(
                 "- [{}] {}: {} [{}]\n",
                 stamp(moment["time"].as_f64().unwrap_or(0.0), false),
@@ -2479,9 +2655,16 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             ));
         }
     }
-    if !m["gaps"].as_array().unwrap().is_empty() {
+    if !m["gaps"]
+        .as_array()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        .is_empty()
+    {
         body.push_str("\n## Recording gaps\n");
-        for gap in m["gaps"].as_array().unwrap() {
+        for gap in m["gaps"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             body.push_str(&format!(
                 "- {}–{}: {}\n",
                 stamp(gap["start"].as_f64().unwrap_or(0.0), false),
@@ -2490,9 +2673,16 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             ));
         }
     }
-    if !m["tracks"].as_array().unwrap().is_empty() {
+    if !m["tracks"]
+        .as_array()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        .is_empty()
+    {
         body.push_str("\n## Audio tracks\n");
-        for t in m["tracks"].as_array().unwrap() {
+        for t in m["tracks"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
             body.push_str(&format!(
                 "- {} ({}, {} bytes); download separately from Echo Voice.\n",
                 strv(t, "label"),
@@ -2515,6 +2705,32 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn panic_rolls_back_and_database_remains_available() {
+        let _guard = TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = test_directory();
+        reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        test_key();
+        init().unwrap();
+        let error = with_db::<()>(|db| {
+            db.execute_batch("BEGIN; INSERT INTO preferences VALUES ('panic-test', '{}');")?;
+            panic!("synthetic database panic");
+        })
+        .unwrap_err();
+        assert_eq!(error.message, "Echo hit an internal error; retry.");
+        let count = with_db(|db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM preferences WHERE id='panic-test'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .unwrap();
+        assert_eq!(count, 0);
+        reset_for_tests();
+        std::env::remove_var("ECHO_DATA_DIR");
+    }
     fn database_bytes(root: &Path) -> Vec<(String, String)> {
         // SQLite read-only WAL readers may update transient -shm read marks.
         // Authoritative database and committed WAL bytes must remain identical.
@@ -2781,6 +2997,47 @@ mod tests {
         assert!(validate_notes(&note, false).is_ok());
         note["provider"] = json!("api-key");
         assert!(validate_notes(&note, false).is_err());
+    }
+
+    #[test]
+    fn retired_bot_data_survives_deletion_and_recovery() {
+        let _guard = TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = test_directory();
+        reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        test_key();
+        init().unwrap();
+        for pending in [false, true] {
+            let meeting =
+                create_meeting(json!({"title":"Old data", "mode":"import", "consent":false}))
+                    .unwrap();
+            let key = meeting["id"].as_str().unwrap();
+            let bot = directory.path().join("bot").join(key);
+            fs::create_dir_all(&bot).unwrap();
+            fs::write(bot.join("session.json"), b"untouched old recording").unwrap();
+            reset_for_tests();
+            init().unwrap();
+            assert_eq!(
+                fs::read(bot.join("session.json")).unwrap(),
+                b"untouched old recording"
+            );
+            if pending {
+                with_db(|db| {
+                    db.execute("INSERT INTO deletion_jobs(id) VALUES(?)", [key])?;
+                    recover(db)
+                })
+                .unwrap();
+            } else {
+                delete_meeting(key).unwrap();
+            }
+            assert!(get_meeting(key).unwrap().is_none());
+            assert_eq!(
+                fs::read(bot.join("session.json")).unwrap(),
+                b"untouched old recording"
+            );
+        }
+        reset_for_tests();
+        std::env::remove_var("ECHO_DATA_DIR");
     }
 
     #[test]
@@ -3064,7 +3321,7 @@ mod tests {
         for entry in list_vocabulary().unwrap() {
             delete_vocabulary(entry["id"].as_str().unwrap()).unwrap();
         }
-        assert!(!data_dir().join("audio").join(key).exists());
+        assert!(!data_dir().unwrap().join("audio").join(key).exists());
         let mut malformed = backup.clone();
         malformed["credentials"] = json!({"token":"must-not-import"});
         assert!(import_library(malformed).is_err());

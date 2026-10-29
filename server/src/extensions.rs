@@ -97,19 +97,24 @@ fn save_recording(db: &Connection, r: &Value) -> Result<()> {
     )?;
     Ok(())
 }
-fn public_recording(mut r: Value, lib: &str) -> Value {
-    r.as_object_mut().unwrap().remove("lease");
-    r.as_object_mut().unwrap().remove("manifest");
-    r.as_object_mut().unwrap().remove("input");
-    r.as_object_mut().unwrap().remove("controlHistory");
-    r["libraryId"] = json!(lib);
-    r
+fn public_recording(mut r: Value, lib: &str) -> Result<Value> {
+    let object = r
+        .as_object_mut()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
+    for key in ["lease", "manifest", "input", "controlHistory"] {
+        object.remove(key);
+    }
+    object.insert("libraryId".into(), json!(lib));
+    Ok(r)
 }
-fn extension_recording(r: Value, lib: &str) -> Value {
-    let mut value = public_recording(r, lib);
-    value.as_object_mut().unwrap().remove("draft");
-    value.as_object_mut().unwrap().remove("liveStatus");
-    value
+fn extension_recording(r: Value, lib: &str) -> Result<Value> {
+    let mut value = public_recording(r, lib)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
+    object.remove("draft");
+    object.remove("liveStatus");
+    Ok(value)
 }
 pub(crate) fn validate_metadata(v: &Value) -> Result<()> {
     fields(
@@ -150,8 +155,12 @@ pub(crate) fn tombstone(db: &Connection, meeting: &str) -> Result<()> {
         let mut r: Value = serde_json::from_str(&raw)?;
         r["status"] = json!("deleted");
         r["controls"] = json!([]);
-        r.as_object_mut().unwrap().remove("draft");
-        r.as_object_mut().unwrap().remove("lease");
+        r.as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("draft");
+        r.as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("lease");
         for key in [
             "input",
             "title",
@@ -160,7 +169,9 @@ pub(crate) fn tombstone(db: &Connection, meeting: &str) -> Result<()> {
             "manifest",
             "controlHistory",
         ] {
-            r.as_object_mut().unwrap().remove(key);
+            r.as_object_mut()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                .remove(key);
         }
         save_recording(db, &r)?;
         db.execute(
@@ -181,7 +192,9 @@ pub(crate) fn preempt(db: &Connection, meeting: &str) -> Result<()> {
     if let Some(raw) = raw {
         let mut r: Value = serde_json::from_str(&raw)?;
         r["generation"] = json!(r["generation"].as_u64().unwrap_or(0) + 1);
-        r.as_object_mut().unwrap().remove("lease");
+        r.as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("lease");
         save_recording(db, &r)?;
     }
     Ok(())
@@ -197,7 +210,9 @@ pub(crate) fn final_succeeded(db: &Connection, meeting: &str) -> Result<()> {
         .optional()?;
     if let Some(raw) = raw {
         let mut r: Value = serde_json::from_str(&raw)?;
-        r.as_object_mut().unwrap().remove("draft");
+        r.as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("draft");
         save_recording(db, &r)?;
     }
     Ok(())
@@ -278,10 +293,7 @@ async fn protocol_response(response: Response) -> Response {
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
         );
-        Response::from_parts(
-            parts,
-            axum::body::Body::from(serde_json::to_vec(&v).unwrap()),
-        )
+        Response::from_parts(parts, axum::body::Body::from(v.to_string()))
     } else {
         Response::from_parts(parts, body)
     }
@@ -297,16 +309,26 @@ async fn access(req: Request, next: Next) -> Response {
             "Extension access requires a loopback host and validated origin.",
         ));
     }
-    let origin = origin.unwrap();
+    let Ok(origin) = origin else {
+        return reply_error(ApiError::new(
+            403,
+            "Extension access requires a validated origin.",
+        ));
+    };
+    let Ok(origin_header) = HeaderValue::from_str(&origin) else {
+        return reply_error(ApiError::new(
+            403,
+            "Extension access requires a validated origin.",
+        ));
+    };
     let mut response = if req.method() == Method::OPTIONS {
         (StatusCode::NO_CONTENT, "").into_response()
     } else {
         protocol_response(next.run(req).await).await
     };
-    response.headers_mut().insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_str(&origin).unwrap(),
-    );
+    response
+        .headers_mut()
+        .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin_header);
     response
         .headers_mut()
         .insert(header::VARY, HeaderValue::from_static("Origin"));
@@ -365,22 +387,23 @@ pub fn workspace_routes() -> Router {
         .layer(axum::middleware::from_fn(protocol))
 }
 async fn connection(headers: HeaderMap) -> Result<Json<Value>> {
-    store::with_db(|db| {
+    store::run(move |db| {
         let installation = authenticated(db, &headers)?;
         Ok(reply(
             json!({"installationId":installation,"libraryId":library(db)?,"appVersion":env!("CARGO_PKG_VERSION"),"storageProtectionVersion":1,"recordingReceiptVersion":1}),
         ))
-    })
+    }).await
 }
 async fn disconnect(headers: HeaderMap) -> Result<Json<Value>> {
-    store::with_db(|db| {
+    store::run(move |db| {
         let installation = authenticated(db, &headers)?;
         pairing::revoke_connection(db, &installation)?;
         Ok(reply(json!({"status":"disconnected"})))
     })
+    .await
 }
 async fn connections() -> Result<Json<Value>> {
-    store::with_db(|db| {
+    store::run(move |db| {
         let mut stmt =
             db.prepare("SELECT installation_id,name,created_at FROM extension_connections")?;
         let connections=stmt.query_map([],|r|Ok(json!({"installationId":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"createdAt":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
@@ -389,20 +412,22 @@ async fn connections() -> Result<Json<Value>> {
         Ok(reply(
             json!({"libraryId":library(db)?,"connections":connections,"requests":requests}),
         ))
-    })
+    }).await
 }
 async fn revoke(Path(id): Path<String>) -> Result<Json<Value>> {
     uid(&id)?;
-    store::with_db(|db| {
+    store::run(move |db| {
         pairing::revoke_connection(db, &id)?;
         Ok(reply(json!({"status":"revoked"})))
     })
+    .await
 }
 async fn start(
     Path(id): Path<String>,
     headers: HeaderMap,
     Json(v): Json<Value>,
 ) -> Result<Json<Value>> {
+    store::run(move |db| {
     uid(&id)?;
     fields(
         &v,
@@ -449,7 +474,6 @@ async fn start(
     }
     chrono::DateTime::parse_from_rfc3339(text(&v, "createdAt", 100)?)
         .map_err(|_| ApiError::bad("Invalid creation time."))?;
-    store::with_db(|db| {
         let tx = db.transaction()?;
         let install = authenticated(&tx, &headers)?;
         let existing: Option<String> = tx
@@ -475,7 +499,7 @@ async fn start(
                 ));
             }
             verify_complete_files(&tx, &r)?;
-            return Ok(reply(extension_recording(r, &lib)));
+            return Ok(reply(extension_recording(r, &lib)?));
         }
         let count:i64=tx.query_row("SELECT COUNT(*) FROM extension_recordings WHERE installation_id=? AND json_extract(data,'$.status')='receiving'",[&install],|r|r.get(0))?;
         if count >= 20 {
@@ -503,14 +527,16 @@ async fn start(
             params![id, install, meeting, r.to_string()],
         )?;
         tx.commit()?;
-        Ok(reply(extension_recording(r, &lib)))
-    })
+        Ok(reply(extension_recording(r, &lib)?))
+    }).await
 }
 fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
     if r["status"] != "complete" {
         return Ok(());
     }
-    let meeting_id = r["meetingId"].as_str().unwrap();
+    let meeting_id = r["meetingId"]
+        .as_str()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
     let meeting = store::require_meeting(db, meeting_id)?;
     store::validate_meeting(&meeting)?;
     let mut stmt = db.prepare("SELECT file,bytes,digest FROM audio_chunks WHERE meeting_id=?")?;
@@ -525,9 +551,15 @@ fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let expected = meeting["tracks"]
         .as_array()
-        .unwrap()
+        .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
         .iter()
-        .map(|t| t["bytes"].as_u64().unwrap())
+        .map(|t| {
+            t["bytes"]
+                .as_u64()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
         .sum::<u64>();
     if rows.iter().map(|row| row.1).sum::<u64>() != expected || rows.is_empty() {
         return Err(ApiError::new(410, "The completed audio index is incomplete. Keep your local recording and restore Echo audio."));
@@ -540,7 +572,7 @@ fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
         {
             return Err(ApiError::new(410, "Invalid completed audio reference."));
         }
-        let path = store::data_dir().join("audio").join(meeting_id).join(file);
+        let path = store::data_dir()?.join("audio").join(meeting_id).join(file);
         let metadata = fs::symlink_metadata(&path).map_err(|_| {
             ApiError::new(
                 410,
@@ -580,22 +612,29 @@ fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
     Ok(())
 }
 async fn status(Path(id): Path<String>, headers: HeaderMap) -> Result<Json<Value>> {
-    store::with_db(|db| {
+    store::run(move |db| {
         let r = owned(db, &headers, &id)?;
         verify_complete_files(db, &r)?;
-        Ok(reply(extension_recording(r, &library(db)?)))
+        Ok(reply(extension_recording(r, &library(db)?)?))
     })
+    .await
 }
 /// Only a short draft tail is exposed to the recording's authenticated installation.
 async fn live_preview(Path(id): Path<String>, headers: HeaderMap) -> Result<Json<Value>> {
-    store::with_db(|db| {
+    store::run(move |db| {
         let r = owned(db, &headers, &id)?;
         if r["status"] == "deleted" {
             return Err(ApiError::new(410, "Recording was deleted."));
         }
-        let meeting = store::require_meeting(db, r["meetingId"].as_str().unwrap())?;
+        let meeting = store::require_meeting(
+            db,
+            r["meetingId"]
+                .as_str()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?,
+        )?;
         Ok(reply(live_snapshot(&r, &meeting, &library(db)?, seconds())))
     })
+    .await
 }
 fn live_snapshot(r: &Value, meeting: &Value, lib: &str, now: i64) -> Value {
     let total = r["totalFrames"].as_u64().unwrap_or(0);
@@ -656,22 +695,22 @@ fn live_snapshot(r: &Value, meeting: &Value, lib: &str, now: i64) -> Value {
 }
 /// A status heartbeat is advisory; it never changes draft text or acquires a processing lease.
 async fn live_status(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(&v, &["ownerId", "generation", "status"])?;
-    text(&v, "ownerId", 100)?;
-    let status = text(&v, "status", 32)?;
-    if !matches!(
-        status,
-        "live"
-            | "catching-up"
-            | "waiting-audio"
-            | "model-missing"
-            | "processing-busy"
-            | "paused-open-echo"
-    ) || v["generation"].as_u64().is_none()
-    {
-        return Err(ApiError::bad("Invalid live status."));
-    }
-    store::with_db(|db| {
+    store::run(move |db| {
+        fields(&v, &["ownerId", "generation", "status"])?;
+        text(&v, "ownerId", 100)?;
+        let status = text(&v, "status", 32)?;
+        if !matches!(
+            status,
+            "live"
+                | "catching-up"
+                | "waiting-audio"
+                | "model-missing"
+                | "processing-busy"
+                | "paused-open-echo"
+        ) || v["generation"].as_u64().is_none()
+        {
+            return Err(ApiError::bad("Invalid live status."));
+        }
         let mut r = recording(db, &id)?;
         let active = r["lease"]["expiresAt"]
             .as_i64()
@@ -694,9 +733,10 @@ async fn live_status(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Jso
         save_recording(db, &r)?;
         Ok(reply(json!({"status":"saved"})))
     })
+    .await
 }
-fn pcm_dir(id: &str) -> PathBuf {
-    store::data_dir().join("extension-pcm").join(id)
+fn pcm_dir(id: &str) -> Result<PathBuf> {
+    Ok(store::data_dir()?.join("extension-pcm").join(id))
 }
 #[cfg(test)]
 #[derive(Default)]
@@ -738,7 +778,7 @@ fn chunk_path(id: &str, file: &str) -> Result<PathBuf> {
     {
         return Err(ApiError::new(410, "Invalid saved PCM reference."));
     }
-    Ok(pcm_dir(id).join(file))
+    Ok(pcm_dir(id)?.join(file))
 }
 fn read_chunk(path: &std::path::Path, frames: u64, digest: &str) -> Result<Vec<u8>> {
     if fs::symlink_metadata(path)?.file_type().is_symlink() {
@@ -763,6 +803,7 @@ async fn chunk(
     headers: HeaderMap,
     data: Bytes,
 ) -> Result<Json<Value>> {
+    store::run(move |db| {
     let frames = headers
         .get("x-echo-frames")
         .and_then(|v| v.to_str().ok())
@@ -777,7 +818,6 @@ async fn chunk(
     if data.len() as u64 != frames * 2 || hash(&data) != digest {
         return Err(ApiError::bad("Audio hash or frame count mismatch."));
     }
-    store::with_db(|db| {
         let tx = db.transaction()?;
         let mut r = owned(&tx, &headers, &id)?;
         if r["status"] == "deleted" {
@@ -793,9 +833,9 @@ async fn chunk(
             }
             let path = chunk_path(&id, &file)?;
             read_chunk(&path, n, &h)?;
-            sync_audio(&path, &pcm_dir(&id))?;
+            sync_audio(&path, &pcm_dir(&id)?)?;
             verify_complete_files(&tx, &r)?;
-            return Ok(reply(extension_recording(r, &library(&tx)?)));
+            return Ok(reply(extension_recording(r, &library(&tx)?)?));
         }
         if r["status"] != "receiving" || r["nextSequence"].as_u64() != Some(sequence) {
             return Err(ApiError::new(
@@ -803,14 +843,14 @@ async fn chunk(
                 "Send the missing chunk before continuing.",
             ));
         }
-        let total = r["totalFrames"].as_u64().unwrap() + frames;
+        let total = r["totalFrames"].as_u64().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))? + frames;
         if total > MAX_FRAMES {
             return Err(ApiError::new(413, "Recording reached eight hours."));
         }
-        let dir = pcm_dir(&id);
+        let dir = pcm_dir(&id)?;
         store::mkdir(&dir)?;
-        synced_directory(dir.parent().unwrap())?;
-        synced_directory(&store::data_dir())?;
+        synced_directory(dir.parent().ok_or_else(|| ApiError::new(500, "Invalid recording directory."))?)?;
+        synced_directory(&store::data_dir()?)?;
         let file = format!("{sequence}-{digest}.pcm");
         let path = dir.join(&file);
         if path.exists() && fs::symlink_metadata(&path)?.file_type().is_symlink() {
@@ -830,14 +870,14 @@ async fn chunk(
         r["nextSequence"] = json!(sequence + 1);
         r["totalFrames"] = json!(total);
         save_recording(&tx, &r)?;
-        let mut meeting = store::require_meeting(&tx, r["meetingId"].as_str().unwrap())?;
+        let mut meeting = store::require_meeting(&tx, r["meetingId"].as_str().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?)?;
         meeting["duration"] = json!(total as f64 / RATE as f64);
         meeting["extensionRecording"]["totalFrames"] = json!(total);
         store::save(&tx, &mut meeting)?;
         let lib = library(&tx)?;
         tx.commit()?;
-        Ok(reply(extension_recording(r, &lib)))
-    })
+        Ok(reply(extension_recording(r, &lib)?))
+    }).await
 }
 fn wav_header(frames: u64) -> Vec<u8> {
     let len = (frames * 2) as u32;
@@ -889,19 +929,19 @@ async fn complete(
         return Err(ApiError::bad("Invalid completion manifest."));
     }
     let manifest = serde_json::to_value(&input)?;
-    store::with_db(|db| {
+    store::run(move |db| {
         let tx = db.transaction()?;
         let mut r = owned(&tx, &headers, &id)?;
         let lib = library(&tx)?;
         if r["status"] == "deleted" {
-            return Ok(reply(extension_recording(r, &lib)));
+            return Ok(reply(extension_recording(r, &lib)?));
         }
         if r["status"] == "complete" {
             verify_complete_files(&tx, &r)?;
             if r["manifest"] != manifest {
                 return Err(ApiError::new(409, "Completion manifest conflicts."));
             }
-            return Ok(reply(extension_recording(r, &lib)));
+            return Ok(reply(extension_recording(r, &lib)?));
         }
         if r["nextSequence"] != input.chunk_count || r["totalFrames"] != input.total_frames {
             return Err(ApiError::new(
@@ -929,11 +969,11 @@ async fn complete(
         {
             return Err(ApiError::new(409, "Stored chunk manifest is incomplete."));
         }
-        let meeting_id = r["meetingId"].as_str().unwrap();
+        let meeting_id = r["meetingId"].as_str().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
         let mut meeting = store::require_meeting(&tx, meeting_id)?;
-        let dir = store::data_dir().join("audio").join(meeting_id);
+        let dir = store::data_dir()?.join("audio").join(meeting_id);
         store::mkdir(&dir)?;
-        synced_directory(dir.parent().unwrap())?;
+        synced_directory(dir.parent().ok_or_else(|| ApiError::new(500, "Invalid recording directory."))?)?;
         let part_count = input.total_frames.div_ceil(PART_FRAMES);
         if part_count > 16 {
             return Err(ApiError::new(413, "Recording has too many parts."));
@@ -988,7 +1028,7 @@ async fn complete(
         } else {
             "saved"
         });
-        meeting.as_object_mut().unwrap().remove("error");
+        meeting.as_object_mut().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?.remove("error");
         meeting["duration"] = json!(input.total_frames as f64 / RATE as f64);
         meeting["gaps"]=json!(input.gaps.iter().map(|g|json!({"start":g.at_frame as f64/RATE as f64,"end":g.at_frame as f64/RATE as f64,"reason":format!("Recording paused for {} ms",g.pause_ms)})).collect::<Vec<_>>());
         store::validate_meeting(&meeting)?;
@@ -996,35 +1036,36 @@ async fn complete(
         r["status"] = json!("complete");
         r["manifest"] = manifest;
         r["generation"] = json!(r["generation"].as_u64().unwrap_or(0) + 1);
-        r.as_object_mut().unwrap().remove("lease");
+        r.as_object_mut().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?.remove("lease");
         save_recording(&tx, &r)?;
         tx.commit()?;
         verify_complete_files(db, &r)?;
-        Ok(reply(extension_recording(r, &lib)))
-    })
+        Ok(reply(extension_recording(r, &lib)?))
+    }).await
 }
 async fn recordings() -> Result<Json<Value>> {
-    store::with_db(|db| {
+    store::run(move |db| {
         let lib = library(db)?;
         let mut stmt = db.prepare("SELECT data FROM extension_recordings")?;
         let values = stmt
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|r| Ok(public_recording(serde_json::from_str(&r)?, &lib)))
+            .map(|r| public_recording(serde_json::from_str(&r)?, &lib))
             .collect::<Result<Vec<_>>>()?;
         Ok(reply(json!({"libraryId":lib,"recordings":values})))
     })
+    .await
 }
 async fn control(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(&v, &["action", "commandId"])?;
-    let action = text(&v, "action", 10)?;
-    if !matches!(action, "pause" | "resume" | "stop") {
-        return Err(ApiError::bad("Unsupported recording control."));
-    }
-    let command = text(&v, "commandId", 36)?;
-    uid(command)?;
-    store::with_db(|db| {
+    store::run(move |db| {
+        fields(&v, &["action", "commandId"])?;
+        let action = text(&v, "action", 10)?;
+        if !matches!(action, "pause" | "resume" | "stop") {
+            return Err(ApiError::bad("Unsupported recording control."));
+        }
+        let command = text(&v, "commandId", 36)?;
+        uid(command)?;
         let mut r = recording(db, &id)?;
         if r["status"] != "receiving" {
             return Err(ApiError::new(409, "Recording is no longer receiving."));
@@ -1034,42 +1075,52 @@ async fn control(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Va
                 return Err(ApiError::new(409, "Control command conflicts."));
             }
         } else {
-            if r["controls"].as_array().unwrap().len() >= 100
-                || r["controlHistory"].as_object().unwrap().len() >= 10000
+            if r["controls"]
+                .as_array()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                .len()
+                >= 100
+                || r["controlHistory"]
+                    .as_object()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+                    .len()
+                    >= 10000
             {
                 return Err(ApiError::new(429, "Too many controls."));
             }
             r["controlHistory"][command] = json!(action);
             r["controls"]
                 .as_array_mut()
-                .unwrap()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
                 .push(json!({"commandId":command,"action":action}));
         }
         save_recording(db, &r)?;
         Ok(reply(json!({"status":"queued"})))
     })
+    .await
 }
 async fn ack(
     Path((id, command)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<Value>> {
     uid(&command)?;
-    store::with_db(|db| {
+    store::run(move |db| {
         let mut r = owned(db, &headers, &id)?;
         r["controls"]
             .as_array_mut()
-            .unwrap()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
             .retain(|c| c["commandId"] != command);
         save_recording(db, &r)?;
         Ok(reply(json!({"status":"acknowledged"})))
     })
+    .await
 }
 async fn lease(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Value>> {
+    store::run(move |db| {
     fields(&v, &["ownerId"])?;
     let owner = text(&v, "ownerId", 100)?;
-    store::with_db(|db| {
         let mut r = recording(db, &id)?;
-        let meeting = store::require_meeting(db, r["meetingId"].as_str().unwrap())?;
+        let meeting = store::require_meeting(db, r["meetingId"].as_str().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?)?;
         if r["status"] != "receiving"
             || r["liveTranscription"] != true
             || meeting["status"] == "processing"
@@ -1093,7 +1144,7 @@ async fn lease(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Valu
         Ok(reply(
             json!({"generation":generation,"expiresAt":expires,"totalFrames":r["totalFrames"],"draft":r.get("draft").cloned().unwrap_or(Value::Null)}),
         ))
-    })
+    }).await
 }
 /// Preserve prior temporal ownership; newly owned overlapping words may sort before old words.
 fn committed_words_match(old: &Value, submitted: &[Value]) -> bool {
@@ -1108,8 +1159,10 @@ fn committed_words_match(old: &Value, submitted: &[Value]) -> bool {
     let prior_owned: Vec<&Value> = submitted
         .iter()
         .filter(|word| {
-            word["startFrame"].as_u64().unwrap() + word["endFrame"].as_u64().unwrap()
-                <= 2 * previous
+            word["startFrame"]
+                .as_u64()
+                .zip(word["endFrame"].as_u64())
+                .is_some_and(|(start, end)| start.saturating_add(end) <= 2 * previous)
         })
         .collect();
     stable == prior_owned
@@ -1161,7 +1214,7 @@ async fn draft(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Valu
         }
         previous = start;
     }
-    store::with_db(|db| {
+    store::run(move |db| {
         let mut r = recording(db, &id)?;
         if r["status"] != "receiving"
             || r["lease"]["ownerId"] != v["ownerId"]
@@ -1175,7 +1228,10 @@ async fn draft(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Valu
                 "Processing lease expired or was replaced.",
             ));
         }
-        if through > r["totalFrames"].as_u64().unwrap()
+        if through
+            > r["totalFrames"]
+                .as_u64()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
             || through < r["draft"]["throughFrame"].as_u64().unwrap_or(0)
             || committed < r["draft"]["committedThroughFrame"].as_u64().unwrap_or(0)
         {
@@ -1184,19 +1240,31 @@ async fn draft(Path(id): Path<String>, Json(v): Json<Value>) -> Result<Json<Valu
                 "Draft cursor is outside saved audio or moved backwards.",
             ));
         }
-        if !committed_words_match(&r["draft"], v["words"].as_array().unwrap()) {
+        if !committed_words_match(
+            &r["draft"],
+            v["words"]
+                .as_array()
+                .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?,
+        ) {
             return Err(ApiError::new(
                 409,
                 "Committed live words cannot be replaced.",
             ));
         }
         let mut saved = v;
-        saved.as_object_mut().unwrap().remove("ownerId");
-        saved.as_object_mut().unwrap().remove("generation");
+        saved
+            .as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("ownerId");
+        saved
+            .as_object_mut()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+            .remove("generation");
         r["draft"] = saved;
         save_recording(db, &r)?;
         Ok(reply(json!({"status":"saved"})))
     })
+    .await
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1208,15 +1276,16 @@ async fn pcm(Path(id): Path<String>, Query(q): Query<PcmQuery>) -> Result<Respon
     if q.frame_count == 0 || q.frame_count > RATE * 20 {
         return Err(ApiError::bad("Request at most 20 seconds of PCM."));
     }
-    let data = store::with_db(|db| {
+    let data = store::run(move |db| {
         let r = recording(db, &id)?;
         if r["status"] == "deleted" {
             return Err(ApiError::new(410, "Recording was deleted."));
         }
+        let total_frames = r["totalFrames"].as_u64().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
         let end = q
             .start_frame
             .checked_add(q.frame_count)
-            .filter(|n| *n <= r["totalFrames"].as_u64().unwrap())
+            .filter(|n| *n <= total_frames)
             .ok_or_else(|| ApiError::bad("PCM range exceeds saved audio."))?;
         let mut stmt=db.prepare("SELECT frames,digest,file FROM extension_chunks WHERE recording_id=? ORDER BY sequence")?;
         let rows = stmt
@@ -1247,7 +1316,7 @@ async fn pcm(Path(id): Path<String>, Query(q): Query<PcmQuery>) -> Result<Respon
             return Err(ApiError::new(410, "PCM data is incomplete."));
         }
         Ok(out)
-    })?;
+    }).await?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/octet-stream"),
@@ -1263,31 +1332,45 @@ async fn meeting_audio(
     headers: HeaderMap,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response> {
-    let meeting = store::get_meeting(&id)?.ok_or_else(ApiError::not_found)?;
-    let metadata = meeting
-        .get("extensionRecording")
-        .ok_or_else(ApiError::not_found)?;
-    validate_metadata(metadata)?;
-    let frames = metadata["totalFrames"].as_u64().unwrap();
+    let (frames, sources) = store::blocking(move || {
+        let meeting = store::get_meeting(&id)?.ok_or_else(ApiError::not_found)?;
+        let metadata = meeting
+            .get("extensionRecording")
+            .ok_or_else(ApiError::not_found)?;
+        validate_metadata(metadata)?;
+        let frames = metadata["totalFrames"]
+            .as_u64()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?;
+        let mut sources = Vec::new();
+        for track in metadata["partTrackIds"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
+        {
+            let (_, parts) = store::get_audio_parts(
+                &id,
+                track
+                    .as_str()
+                    .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?,
+            )?;
+            for (index, part) in parts.into_iter().enumerate() {
+                let skip = if index == 0 { 44 } else { 0 };
+                if part.bytes < skip {
+                    return Err(ApiError::new(410, "Sequential WAV part is incomplete."));
+                }
+                sources.push((part.path, skip, part.bytes - skip));
+            }
+        }
+        if sources.iter().map(|s| s.2).sum::<u64>() != frames * 2 {
+            return Err(ApiError::new(
+                410,
+                "Recording has incomplete sequential parts.",
+            ));
+        }
+        Ok((frames, sources))
+    })
+    .await?;
     let total = 44 + frames * 2;
     let header_bytes = wav_header(frames);
-    let mut sources = Vec::new();
-    for track in metadata["partTrackIds"].as_array().unwrap() {
-        let (_, parts) = store::get_audio_parts(&id, track.as_str().unwrap())?;
-        for (index, part) in parts.into_iter().enumerate() {
-            let skip = if index == 0 { 44 } else { 0 };
-            if part.bytes < skip {
-                return Err(ApiError::new(410, "Sequential WAV part is incomplete."));
-            }
-            sources.push((part.path, skip, part.bytes - skip));
-        }
-    }
-    if sources.iter().map(|s| s.2).sum::<u64>() != frames * 2 {
-        return Err(ApiError::new(
-            410,
-            "Recording has incomplete sequential parts.",
-        ));
-    }
     let (start, end, partial) = match audio_range(
         headers.get(header::RANGE).and_then(|h| h.to_str().ok()),
         total,
@@ -1297,7 +1380,8 @@ async fn meeting_audio(
             let mut response = reply_error(error);
             response.headers_mut().insert(
                 header::CONTENT_RANGE,
-                format!("bytes */{total}").parse().unwrap(),
+                HeaderValue::from_str(&format!("bytes */{total}"))
+                    .map_err(|_| ApiError::new(500, "Invalid audio range."))?,
             );
             return Ok(response);
         }
@@ -1310,10 +1394,9 @@ async fn meeting_audio(
             if part_end <= start || part_start > end { continue; }
             let from = start.saturating_sub(part_start); let until = (end+1).min(part_end)-part_start;
             let mut cursor = from;
-            let mut file = match store::protected_reader(&path) { Ok(file)=>file, Err(error)=>{ yield Err(error); return; } };
             while cursor < until {
                 let length = (until-cursor).min(65536) as usize;
-                match file.read_range(skip+cursor, length) {
+                match store::protected_range(path.clone(), skip+cursor, length).await {
                     Ok(bytes)=>{cursor += bytes.len() as u64; yield Ok(bytes);},
                     Err(error)=>{ yield Err(error); return; }
                 }
@@ -1390,7 +1473,7 @@ pub(crate) fn cleanup_pcm(db: &Connection, meeting: &str) -> Result<()> {
         .optional()?;
     if let Some(id) = id {
         uid(&id)?;
-        let dir = pcm_dir(&id);
+        let dir = pcm_dir(&id)?;
         if dir.exists() {
             fs::remove_dir_all(dir)?;
         }
@@ -1964,7 +2047,7 @@ mod tests {
         );
         assert_eq!(
             read_chunk(
-                &pcm_dir(&id).join(format!("0-{}.pcm", hash(&pcm))),
+                &pcm_dir(&id).unwrap().join(format!("0-{}.pcm", hash(&pcm))),
                 4,
                 &hash(&pcm)
             )
@@ -2142,8 +2225,12 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
         // Repair a file left partially written before a durable manifest commit.
-        store::mkdir(&pcm_dir(&id)).unwrap();
-        fs::write(pcm_dir(&id).join(format!("0-{}.pcm", hash(&data))), [1]).unwrap();
+        store::mkdir(&pcm_dir(&id).unwrap()).unwrap();
+        fs::write(
+            pcm_dir(&id).unwrap().join(format!("0-{}.pcm", hash(&data))),
+            [1],
+        )
+        .unwrap();
         let (status, _, _) = send(
             &app,
             "PUT",
@@ -2387,7 +2474,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
-        let saved_file = pcm_dir(&id).join(format!("0-{}.pcm", hash(&data)));
+        let saved_file = pcm_dir(&id).unwrap().join(format!("0-{}.pcm", hash(&data)));
         fs::write(&saved_file, [9; 8]).unwrap();
         let manifest = json!({"chunkCount":1,"totalFrames":4,"gaps":[{"atFrame":2,"pauseMs":100}],"interrupted":false});
         let (status, _) = json_request(
@@ -2494,7 +2581,7 @@ mod tests {
         assert!(!backup.to_string().contains(&token));
         assert!(!backup.to_string().contains(&code));
         store::delete_meeting(&meeting).unwrap();
-        assert!(!pcm_dir(&id).exists());
+        assert!(!pcm_dir(&id).unwrap().exists());
         let (_, r) = json_request(&app, "GET", &path, ORIGIN, Some(&token), json!({})).await;
         assert_eq!(r["status"], "deleted");
         let (_, r) = json_request(&app, "PUT", &path, ORIGIN, Some(&token), input()).await;
@@ -2585,9 +2672,9 @@ mod tests {
         let meeting = r["meetingId"].as_str().unwrap().to_string();
         let block = vec![17u8; (RATE * 2) as usize];
         let tail = vec![29u8; 2];
-        store::mkdir(&pcm_dir(&id)).unwrap();
-        store::write_protected(&pcm_dir(&id).join("fixture-block.pcm"), &block).unwrap();
-        store::write_protected(&pcm_dir(&id).join("fixture-tail.pcm"), &tail).unwrap();
+        store::mkdir(&pcm_dir(&id).unwrap()).unwrap();
+        store::write_protected(&pcm_dir(&id).unwrap().join("fixture-block.pcm"), &block).unwrap();
+        store::write_protected(&pcm_dir(&id).unwrap().join("fixture-tail.pcm"), &tail).unwrap();
         store::with_db(|db| {
             let tx = db.transaction()?;
             for sequence in 0..1800 {
@@ -2645,6 +2732,7 @@ mod tests {
         let restored_directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", restored_directory.path());
+        store::test_key();
         store::import_library(backup.clone()).unwrap();
         let restored = store::get_meeting(&meeting).unwrap().unwrap();
         assert_eq!(restored["extensionRecording"], m["extensionRecording"]);
@@ -2685,6 +2773,7 @@ mod tests {
         let tombstone_directory = crate::store::test_directory();
         store::reset_for_tests();
         std::env::set_var("ECHO_DATA_DIR", tombstone_directory.path());
+        store::test_key();
         store::import_library(tombstones).unwrap();
         assert_eq!(
             store::with_db(|db| Ok(recording(db, &id)?["status"].clone())).unwrap(),
@@ -2774,7 +2863,7 @@ mod tests {
             let path = format!("/extension/v1/recordings/{id}");
             let (status, _) = json_request(&app, "PUT", &path, ORIGIN, Some(&token), input()).await;
             assert_eq!(status, StatusCode::OK);
-            let dir = pcm_dir(&id);
+            let dir = pcm_dir(&id).unwrap();
             store::mkdir(&dir).unwrap();
             let file = dir.join(format!("0-{}.pcm", hash(&pcm)));
             // Valid content without fsync models a process death/failed prior durability attempt.
@@ -2855,7 +2944,7 @@ mod tests {
             )
             .await;
             assert_eq!(status, StatusCode::OK);
-            let dir = store::data_dir().join("audio").join(meeting);
+            let dir = store::data_dir().unwrap().join("audio").join(meeting);
             store::mkdir(&dir).unwrap();
             let mut wav = wav_header(4);
             wav.extend_from_slice(&pcm);

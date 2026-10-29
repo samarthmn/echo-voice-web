@@ -153,6 +153,7 @@ fn commit_connection(db: &Connection, row: &Reservation, credential: &str) -> Re
 }
 
 pub(super) async fn pair_begin(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
+    store::run(move |db| {
     fields(&v, &["requestId", "installationId", "name", "claimSecret"])?;
     let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
     if secret.len() != 64
@@ -166,7 +167,6 @@ pub(super) async fn pair_begin(headers: HeaderMap, Json(v): Json<Value>) -> Resu
     }
     let name = text(&v, "name", 100)?;
     let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
         let tx = db.transaction()?;
         let now = seconds();
         let lib = library(&tx)?;
@@ -202,11 +202,11 @@ pub(super) async fn pair_begin(headers: HeaderMap, Json(v): Json<Value>) -> Resu
         Ok(reply(
             json!({"requestId":request,"installationId":installation,"libraryId":lib,"status":"pending","expiresAt":expires,"activationRequired":true}),
         ))
-    })
+    }).await
 }
 
 pub(super) async fn pair_code() -> Result<Json<Value>> {
-    store::with_db(|db| {
+    store::run(move |db| {
         let tx = db.transaction()?;
         let now = seconds();
         reserve_capacity(&tx, None, now)?;
@@ -222,9 +222,11 @@ pub(super) async fn pair_code() -> Result<Json<Value>> {
             json!({"code":code,"expiresAt":expires,"libraryId":lib}),
         ))
     })
+    .await
 }
 
 pub(super) async fn pair_request(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
+    store::run(move |db| {
     fields(
         &v,
         &["code", "installationId", "name", "deferredActivation"],
@@ -239,7 +241,6 @@ pub(super) async fn pair_request(headers: HeaderMap, Json(v): Json<Value>) -> Re
         _ => return Err(ApiError::bad("deferredActivation must be a boolean.")),
     };
     let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
         let tx = db.transaction()?;
         let mut row = reservation(&tx, "code_hash", &hash(code))?
             .filter(|r| r.kind == "manual")
@@ -267,12 +268,12 @@ pub(super) async fn pair_request(headers: HeaderMap, Json(v): Json<Value>) -> Re
         let result = reply(public_status(&row, &library(&tx)?));
         tx.commit()?;
         Ok(result)
-    })
+    }).await
 }
 
 pub(super) async fn request_metadata(Path(id): Path<String>) -> Result<Json<Value>> {
     uid(&id)?;
-    store::with_db(|db| {
+    store::run(move |db| {
         let row = reservation(db, "request_id", &id)?.ok_or_else(ApiError::not_found)?;
         let status = if row.expires <= seconds() && !current_receipt(db, &row)? {
             "expired"
@@ -282,19 +283,19 @@ pub(super) async fn request_metadata(Path(id): Path<String>) -> Result<Json<Valu
         Ok(reply(
             json!({"requestId":row.request,"installationId":row.installation,"libraryId":library(db)?,"name":row.name,"origin":row.origin,"kind":row.kind,"status":status,"expiresAt":row.expires}),
         ))
-    })
+    }).await
 }
 pub(super) async fn approve(Path(id): Path<String>) -> Result<Json<Value>> {
-    decision(&id, true)
+    decision(id, true).await
 }
 pub(super) async fn reject(Path(id): Path<String>) -> Result<Json<Value>> {
-    decision(&id, false)
+    decision(id, false).await
 }
-fn decision(id: &str, approved: bool) -> Result<Json<Value>> {
-    uid(id)?;
-    store::with_db(|db| {
+async fn decision(id: String, approved: bool) -> Result<Json<Value>> {
+    uid(&id)?;
+    store::run(move |db| {
         let tx = db.transaction()?;
-        let mut row = reservation(&tx, "request_id", id)?.ok_or_else(ApiError::not_found)?;
+        let mut row = reservation(&tx, "request_id", &id)?.ok_or_else(ApiError::not_found)?;
         require_live(&row, seconds())?;
         let target = if approved { "approved" } else { "rejected" };
         if row.state == "pending"
@@ -317,13 +318,14 @@ fn decision(id: &str, approved: bool) -> Result<Json<Value>> {
         tx.commit()?;
         Ok(response)
     })
+    .await
 }
 
 pub(super) async fn pair_claim(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
+    store::run(move |db| {
     fields(&v, &["requestId", "installationId", "code"])?;
     let (request, installation, secret) = identifying_fields(&v, "code")?;
     let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
         let tx = db.transaction()?;
         let mut row = bound_request(&tx, request, installation, secret, &origin)?;
         if row.state != "claimed" || !row.staged {
@@ -347,19 +349,19 @@ pub(super) async fn pair_claim(headers: HeaderMap, Json(v): Json<Value>) -> Resu
         }
         tx.commit()?;
         Ok(receipt(&row, &lib, &credential))
-    })
+    }).await
 }
 
 pub(super) async fn pair_activate(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(
-        &v,
-        &["requestId", "installationId", "claimSecret", "libraryId"],
-    )?;
-    let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
-    let requested_library = text(&v, "libraryId", 36)?;
-    uid(requested_library)?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
+    store::run(move |db| {
+        fields(
+            &v,
+            &["requestId", "installationId", "claimSecret", "libraryId"],
+        )?;
+        let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
+        let requested_library = text(&v, "libraryId", 36)?;
+        uid(requested_library)?;
+        let origin = extension_origin(&headers)?;
         let tx = db.transaction()?;
         let mut row = bound_request(&tx, request, installation, secret, &origin)?;
         let lib = library(&tx)?;
@@ -392,16 +394,17 @@ pub(super) async fn pair_activate(headers: HeaderMap, Json(v): Json<Value>) -> R
         tx.commit()?;
         Ok(receipt(&row, &lib, &credential))
     })
+    .await
 }
 
 pub(super) async fn pair_cancel(headers: HeaderMap, Json(v): Json<Value>) -> Result<Json<Value>> {
-    fields(
-        &v,
-        &["requestId", "installationId", "claimSecret", "libraryId"],
-    )?;
-    let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
-    let origin = extension_origin(&headers)?;
-    store::with_db(|db| {
+    store::run(move |db| {
+        fields(
+            &v,
+            &["requestId", "installationId", "claimSecret", "libraryId"],
+        )?;
+        let (request, installation, secret) = identifying_fields(&v, "claimSecret")?;
+        let origin = extension_origin(&headers)?;
         let tx = db.transaction()?;
         let mut row = bound_request(&tx, request, installation, secret, &origin)?;
         let lib = library(&tx)?;
@@ -429,6 +432,7 @@ pub(super) async fn pair_cancel(headers: HeaderMap, Json(v): Json<Value>) -> Res
         tx.commit()?;
         Ok(reply(public_status(&row, &lib)))
     })
+    .await
 }
 
 pub(super) fn revoke_connection(db: &mut Connection, installation: &str) -> Result<()> {

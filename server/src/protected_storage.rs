@@ -86,7 +86,7 @@ struct KeyReference {
 /// Run before creating an OS key entry. Missing descriptors cannot authorize a
 /// replacement key while any encrypted library data remains, including optional
 /// ChatGPT state after partial loss of the database and key reference.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn preflight_new_library_key(root: &Path) -> Result<()> {
     let database = root.join("workspace.sqlite");
     if database.exists() {
@@ -99,8 +99,8 @@ fn preflight_new_library_key(root: &Path) -> Result<()> {
     if root.join("recovery.json").exists() || root.join(".workspace-encrypted.sqlite").exists() {
         return Err(key_error());
     }
-    for area in ["audio", "extension-pcm", "credentials", "bot", "chatgpt"] {
-        if contains_encrypted_file(&root.join(area))? {
+    for area in ["audio", "extension-pcm", "credentials", "chatgpt"] {
+        if contains_encrypted_file(&root.join(area), area == "chatgpt", area == "credentials")? {
             return Err(key_error());
         }
     }
@@ -126,15 +126,22 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
     if std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some() {
         return Err(key_error());
     }
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        if reference.exists() && fs::symlink_metadata(&reference)?.file_type().is_symlink() {
-            return Err(key_error());
+        if fs::symlink_metadata(&reference).is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("Symbolic link in key descriptor: {}", reference.display()),
+            ));
         }
         let existing = match fs::read(&reference) {
-            Ok(bytes) => {
-                Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|_| key_error())?)
-            }
+            Ok(bytes) => Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid key descriptor: {e}"),
+                )
+            })?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
         };
@@ -143,8 +150,12 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
                 return Err(key_error());
             }
             let entry = keyring::Entry::new("com.echo.voice.library", &existing.key_id)
-                .map_err(|_| key_error())?;
-            let password = Zeroizing::new(entry.get_password().map_err(|_| key_error())?);
+                .map_err(|e| std::io::Error::other(format!("Keychain entry: {e}")))?;
+            let password = Zeroizing::new(
+                entry
+                    .get_password()
+                    .map_err(|e| std::io::Error::other(format!("Keychain read: {e}")))?,
+            );
             let decoded = Zeroizing::new(
                 STANDARD
                     .decode(password.as_bytes())
@@ -157,13 +168,19 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
         // new unrelated key. New or plaintext libraries may be migrated later.
         preflight_new_library_key(root)?;
         let key_id = uuid::Uuid::new_v4().to_string();
-        let entry =
-            keyring::Entry::new("com.echo.voice.library", &key_id).map_err(|_| key_error())?;
+        let entry = keyring::Entry::new("com.echo.voice.library", &key_id)
+            .map_err(|e| std::io::Error::other(format!("Keychain entry: {e}")))?;
         let mut bytes = Zeroizing::new([0u8; 32]);
         OsRng.fill_bytes(bytes.as_mut());
         let encoded = Zeroizing::new(STANDARD.encode(bytes.as_ref()));
-        entry.set_password(&encoded).map_err(|_| key_error())?;
-        let confirmed = Zeroizing::new(entry.get_password().map_err(|_| key_error())?);
+        entry
+            .set_password(&encoded)
+            .map_err(|e| std::io::Error::other(format!("Keychain write: {e}")))?;
+        let confirmed = Zeroizing::new(
+            entry
+                .get_password()
+                .map_err(|e| std::io::Error::other(format!("Keychain read: {e}")))?,
+        );
         if confirmed.as_str() != encoded.as_str() {
             return Err(key_error());
         }
@@ -188,7 +205,7 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
         saved?;
         Ok(LibraryKey::from_bytes(*bytes))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = reference;
         Err(key_error())
@@ -216,16 +233,19 @@ pub(crate) fn restore_library_key(root: &Path, master: &[u8; 32]) -> Result<()> 
     if std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some() {
         return Err(key_error());
     }
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
         let path = root.join("protection.json");
         if path.exists() && fs::symlink_metadata(&path)?.file_type().is_symlink() {
             return Err(key_error());
         }
         let existing = match fs::read(&path) {
-            Ok(bytes) => {
-                Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|_| key_error())?)
-            }
+            Ok(bytes) => Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid key descriptor: {e}"),
+                )
+            })?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
@@ -240,8 +260,14 @@ pub(crate) fn restore_library_key(root: &Path, master: &[u8; 32]) -> Result<()> 
         let entry = keyring::Entry::new("com.echo.voice.library", &reference.key_id)
             .map_err(|_| key_error())?;
         let encoded = Zeroizing::new(STANDARD.encode(master));
-        entry.set_password(&encoded).map_err(|_| key_error())?;
-        let confirmed = Zeroizing::new(entry.get_password().map_err(|_| key_error())?);
+        entry
+            .set_password(&encoded)
+            .map_err(|e| std::io::Error::other(format!("Keychain write: {e}")))?;
+        let confirmed = Zeroizing::new(
+            entry
+                .get_password()
+                .map_err(|e| std::io::Error::other(format!("Keychain read: {e}")))?,
+        );
         if confirmed.as_str() != encoded.as_str() {
             return Err(key_error());
         }
@@ -265,27 +291,54 @@ pub(crate) fn restore_library_key(root: &Path, master: &[u8; 32]) -> Result<()> 
         }
         Ok(())
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = (root, master);
         Err(key_error())
     }
 }
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn contains_encrypted_file(directory: &Path) -> Result<bool> {
-    if !directory.exists() {
-        return Ok(false);
-    }
-    if fs::symlink_metadata(directory)?.file_type().is_symlink() {
-        return Err(key_error());
+#[cfg(target_os = "macos")]
+fn contains_encrypted_file(
+    directory: &Path,
+    chatgpt_root: bool,
+    credentials_root: bool,
+) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("Symbolic link in protected data: {}", directory.display()),
+        ));
     }
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
+        if chatgpt_root && entry.file_name() == "tmp" {
+            continue;
+        }
         if entry.file_type()?.is_symlink() {
-            return Err(key_error());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "Symbolic link in protected data: {}",
+                    entry.path().display()
+                ),
+            ));
+        }
+        if credentials_root
+            && matches!(
+                entry.file_name().to_str(),
+                Some("runner-token" | "runner-token.lock")
+            )
+            && entry.file_type()?.is_file()
+        {
+            continue;
         }
         if entry.file_type()?.is_dir() {
-            if contains_encrypted_file(&entry.path())? {
+            if contains_encrypted_file(&entry.path(), false, false)? {
                 return Ok(true);
             }
         } else if entry.file_type()?.is_file() && is_encrypted(&entry.path())? {
@@ -464,7 +517,7 @@ mod tests {
             .unwrap()
     }
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     fn missing_key_reference_rejects_chatgpt_remnants_before_key_or_database_creation() {
         for relative in ["chatgpt/auth.json", "chatgpt/sessions/history.jsonl"] {
             let dir = fixture();
@@ -494,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     fn preflight_allows_only_unprotected_chatgpt_state_for_legacy_migration() {
         let dir = fixture();
         let path = dir.path().join("chatgpt/auth.json");
@@ -504,6 +557,18 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"{\"fixture\":true}");
         assert!(!dir.path().join("protection.json").exists());
         assert!(!dir.path().join("workspace.sqlite").exists());
+    }
+    #[test]
+    #[cfg(unix)]
+    fn codex_transient_symlinks_do_not_block_preflight() {
+        use std::os::unix::fs::symlink;
+        let dir = fixture();
+        let transient = dir.path().join("chatgpt/tmp/arg0/codex-arg123");
+        fs::create_dir_all(&transient).unwrap();
+        symlink("/missing/codex", transient.join("apply_patch")).unwrap();
+        preflight_new_library_key(dir.path()).unwrap();
+        symlink("/missing/secret", dir.path().join("chatgpt/auth.json")).unwrap();
+        assert!(preflight_new_library_key(dir.path()).is_err());
     }
     #[test]
     fn ranges_and_empty_files_are_authenticated() {

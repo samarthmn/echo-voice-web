@@ -47,7 +47,7 @@ fn validated(v: &Value) -> Result<&str> {
 }
 pub(super) async fn save(headers: HeaderMap, Json(value): Json<Value>) -> Result<Json<Value>> {
     let id = validated(&value)?.to_string();
-    store::with_db(|db| {
+    store::run(move |db| {
         let tx = db.transaction()?;
         let installation = authenticated(&tx, &headers)?;
         let existing: Option<(String, String)> = tx
@@ -72,7 +72,7 @@ pub(super) async fn save(headers: HeaderMap, Json(value): Json<Value>) -> Result
         Ok(reply(
             json!({"vaultId":id,"libraryId":library_id,"registered":true}),
         ))
-    })
+    }).await
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,7 +85,7 @@ pub(super) async fn read(
     Query(query): Query<VaultQuery>,
 ) -> Result<Json<Value>> {
     uid(&query.id)?;
-    store::with_db(|db| {
+    store::run(move |db| {
         let installation = authenticated(db, &headers)?;
         let existing: Option<(String, String)> = db
             .query_row(
@@ -104,5 +104,5 @@ pub(super) async fn read(
         let mut result: Value = serde_json::from_str(&data)?;
         result["libraryId"] = json!(library(db)?);
         Ok(reply(result))
-    })
+    }).await
 }

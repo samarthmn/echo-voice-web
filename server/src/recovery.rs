@@ -113,8 +113,13 @@ fn open(
             .map_err(|_| failure())?,
     ))
 }
-fn recovery_context(id: &str, fingerprint: &str) -> Vec<u8> {
-    serde_json::to_vec(&json!(["echo-library-recovery", 1, id, fingerprint])).unwrap()
+fn recovery_context(id: &str, fingerprint: &str) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(&json!([
+        "echo-library-recovery",
+        1,
+        id,
+        fingerprint
+    ]))?)
 }
 fn integrity_context(recovery: &Recovery) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec(&json!([
@@ -177,7 +182,7 @@ fn make_recovery(master: &[u8; 32]) -> Result<(Recovery, Zeroizing<String>)> {
     let id = Uuid::new_v4().to_string();
     let fingerprint = fingerprint(master);
     let cipher = key_for(entropy.as_ref(), &id, "Echo library recovery v1")?;
-    let sealed = seal(&cipher, master, &recovery_context(&id, &fingerprint))?;
+    let sealed = seal(&cipher, master, &recovery_context(&id, &fingerprint)?)?;
     let mut recovery = Recovery {
         version: 1,
         id,
@@ -211,7 +216,7 @@ fn recover_key(recovery: &Recovery, phrase: &str) -> Result<Zeroizing<[u8; 32]>>
     let bytes = open(
         &cipher,
         &recovery.sealed,
-        &recovery_context(&recovery.id, &recovery.fingerprint),
+        &recovery_context(&recovery.id, &recovery.fingerprint)?,
         32,
     )?;
     let key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| failure())?;
@@ -247,7 +252,7 @@ pub(crate) fn validate_saved_recovery() -> Result<()> {
     let invalid = || {
         ApiError::bad("The selected library's recovery metadata is damaged or from an unsupported draft format. Save and confirm a new recovery phrase in the original library before copying it. Saved files have not been changed.")
     };
-    let Some(recovery) = read_recovery(&store::data_dir()).map_err(|_| invalid())? else {
+    let Some(recovery) = read_recovery(&store::data_dir()?).map_err(|_| invalid())? else {
         return Ok(());
     };
     store::with_key(|key| validate_recovery(&recovery, key.bytes()).map_err(std::io::Error::other))
@@ -330,19 +335,26 @@ pub(crate) fn recover_library(root: &Path, phrase: &str) -> Result<()> {
     Ok(())
 }
 async fn status() -> Result<Json<Value>> {
-    let recovery = read_recovery(&store::data_dir())?;
-    let recovery_ready = if let Some(recovery) = recovery {
-        store::with_key(|key| Ok(validate_recovery(&recovery, key.bytes()).is_ok()))?
-    } else {
-        false
-    };
-    Ok(Json(
-        json!({"protected":true,"recoveryReady":recovery_ready,"phraseWords":24}),
-    ))
+    store::blocking(|| {
+        let recovery = read_recovery(&store::data_dir()?)?;
+        let recovery_ready = if let Some(recovery) = recovery {
+            store::with_key(|key| Ok(validate_recovery(&recovery, key.bytes()).is_ok()))?
+        } else {
+            false
+        };
+        Ok(Json(
+            json!({"protected":true,"recoveryReady":recovery_ready,"phraseWords":24}),
+        ))
+    })
+    .await
 }
 async fn prepare() -> Result<Json<Value>> {
-    let (recovery, phrase) =
-        store::with_key(|key| make_recovery(key.bytes()).map_err(std::io::Error::other))?;
+    let (recovery, phrase) = store::blocking(|| {
+        Ok(store::with_key(|key| {
+            make_recovery(key.bytes()).map_err(std::io::Error::other)
+        })?)
+    })
+    .await?;
     let words = phrase.split_whitespace().collect::<Vec<_>>();
     let indices = [3usize, 11, 20];
     let id = Uuid::new_v4().to_string();
@@ -371,34 +383,37 @@ struct Confirmation {
     words: Vec<String>,
 }
 async fn confirm(Json(input): Json<Confirmation>) -> Result<Json<Value>> {
-    if input.words.len() != 3 || input.words.iter().any(|word| word.len() > 32) {
-        return Err(failure());
-    }
-    let mut guard = PENDING
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| failure())?;
-    let pending = guard.as_ref().ok_or_else(|| {
-        ApiError::bad("Recovery setup expired. Generate a new phrase and save it.")
-    })?;
-    if pending.id != input.id || pending.expires < Instant::now() {
-        return Err(ApiError::bad(
-            "Recovery setup expired. Generate a new phrase and save it.",
-        ));
-    }
-    if input
-        .words
-        .iter()
-        .zip(&pending.words)
-        .any(|(actual, expected)| actual.trim().to_lowercase() != expected.as_str())
-    {
-        return Err(ApiError::bad(
-            "Those words do not match. Check the phrase you saved and try again.",
-        ));
-    }
-    write_recovery(&store::data_dir(), &pending.recovery)?;
-    *guard = None;
-    Ok(Json(json!({"recoveryReady":true})))
+    store::blocking(move || {
+        if input.words.len() != 3 || input.words.iter().any(|word| word.len() > 32) {
+            return Err(failure());
+        }
+        let mut guard = PENDING
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .map_err(|_| failure())?;
+        let pending = guard.as_ref().ok_or_else(|| {
+            ApiError::bad("Recovery setup expired. Generate a new phrase and save it.")
+        })?;
+        if pending.id != input.id || pending.expires < Instant::now() {
+            return Err(ApiError::bad(
+                "Recovery setup expired. Generate a new phrase and save it.",
+            ));
+        }
+        if input
+            .words
+            .iter()
+            .zip(&pending.words)
+            .any(|(actual, expected)| actual.trim().to_lowercase() != expected.as_str())
+        {
+            return Err(ApiError::bad(
+                "Those words do not match. Check the phrase you saved and try again.",
+            ));
+        }
+        write_recovery(&store::data_dir()?, &pending.recovery)?;
+        *guard = None;
+        Ok(Json(json!({"recoveryReady":true})))
+    })
+    .await
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -434,7 +449,7 @@ fn backup_context(id: &str, recovery: &Recovery) -> Result<Vec<u8>> {
     ]))?)
 }
 pub(crate) fn encrypt_backup(plaintext: Value) -> Result<Value> {
-    let recovery=read_recovery(&store::data_dir())?.ok_or_else(||ApiError::new(409,"Save and confirm your library recovery phrase in Settings → Storage before creating an encrypted backup."))?;
+    let recovery=read_recovery(&store::data_dir()?)?.ok_or_else(||ApiError::new(409,"Save and confirm your library recovery phrase in Settings → Storage before creating an encrypted backup."))?;
     let bytes = Zeroizing::new(serde_json::to_vec(&plaintext)?);
     if bytes.len() > MAX_BACKUP {
         return Err(ApiError::new(

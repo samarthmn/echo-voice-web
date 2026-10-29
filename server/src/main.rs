@@ -1,9 +1,9 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 mod api;
 mod chatgpt;
 mod config;
 mod extensions;
 mod integrations;
-mod legacy;
 mod library_schema;
 mod library_validation;
 mod notes;
@@ -17,16 +17,30 @@ use axum::{
     http::{header, HeaderValue},
     Router,
 };
+use std::future::IntoFuture;
 use tower_http::{
     services::{ServeDir, ServeFile},
     set_header::SetResponseHeaderLayer,
 };
 
-#[tokio::main]
+/// Bound runtime teardown even when an in-flight blocking operation cannot be cancelled.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(run());
+    runtime.shutdown_timeout(std::time::Duration::from_millis(100));
+    result
+}
+
 /// Initialize the local library and integrations, serve the workspace, and shut down the helper gracefully.
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenvy::dotenv().ok();
-    let runtime_paths = paths::RuntimePaths::resolve().map_err(|e| e.to_string())?;
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let root = paths::resource_root().map_err(|e| e.to_string())?;
+    dotenvy::from_path(root.join(".env")).ok();
+    config::init(&root).map_err(|e| e.to_string())?;
+    let runtime_paths = paths::RuntimePaths::resolve_at(root).map_err(|e| e.to_string())?;
+    paths::private_directory(&runtime_paths.runtime_dir).map_err(|e| e.to_string())?;
+    paths::init(runtime_paths.clone());
     if std::env::args().nth(1).as_deref() == Some("--recover-library") {
         use std::io::Read;
         let mut input = zeroize::Zeroizing::new(String::new());
@@ -53,10 +67,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind = config::loopback_bind(
         &std::env::var("ECHO_BIND").unwrap_or_else(|_| config::get().bind.clone()),
     )?;
+    tracing::info!(%bind, data_dir = %runtime_paths.data_dir.display(), resource_root = %runtime_paths.resource_root.display(), redirect_uri = %config::redirect_uri(), "Echo runtime configuration");
     store::init()?;
     if std::env::args().nth(1).as_deref() == Some("--check-library") {
         library_validation::verify()?;
-        legacy::validate_stored_sessions()?;
         println!("Library validation completed.");
         return Ok(());
     }
@@ -71,16 +85,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .merge(chatgpt::routes())
                 .merge(speech::routes())
                 .merge(extensions::workspace_routes())
-                .merge(legacy::routes())
                 .route(
                     "/demo",
                     axum::routing::get(|| async {
-                        axum::Json(
-                            serde_json::from_str::<serde_json::Value>(include_str!(
-                                "../../public/demo-meeting.json"
-                            ))
-                            .unwrap(),
-                        )
+                        serde_json::from_str::<serde_json::Value>(include_str!(
+                            "../../public/demo-meeting.json"
+                        ))
+                        .map(axum::Json)
+                        .map_err(|error| {
+                            tracing::error!(%error, "Invalid bundled demo meeting");
+                            security::ApiError::new(500, "The demo meeting is unavailable.")
+                        })
                     }),
                 )
                 .layer(axum::middleware::from_fn(security::local_access)),
@@ -110,17 +125,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             header::REFERRER_POLICY,
             HeaderValue::from_static("no-referrer"),
         ));
-    let listener = tokio::net::TcpListener::bind(bind).await?;
+    let listener = match tokio::net::TcpListener::bind(bind).await {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            return Err(format!("Port {} is already in use. Stop the other process (lsof -nP -iTCP:{} -sTCP:LISTEN) or set ECHO_BIND=127.0.0.1:<other>.", bind.port(), bind.port()).into());
+        }
+        Err(error) => return Err(error.into()),
+    };
     tracing::info!("Echo Voice is ready at http://{}", bind);
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            integrations::shutdown();
-            speech::shutdown().await;
-        })
-        .await?;
-    integrations::shutdown();
-    speech::shutdown().await;
-    chatgpt::shutdown().await;
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let server = axum::serve(listener, router).with_graceful_shutdown(async {
+        let _ = shutdown_rx.await;
+    });
+    let server = server.into_future();
+    tokio::pin!(server);
+    tokio::select! {
+        result = &mut server => result?,
+        _ = shutdown_signal() => {
+            chatgpt::begin_shutdown();
+            let _ = shutdown_tx.send(());
+            if tokio::time::timeout(std::time::Duration::from_secs(10), &mut server).await.is_err() {
+                tracing::warn!("Server drain exceeded shutdown deadline");
+            }
+            let limit = std::time::Duration::from_secs(5);
+            let (integration_result, speech_result, chatgpt_result) = tokio::join!(
+                tokio::time::timeout(limit, tokio::task::spawn_blocking(integrations::shutdown)),
+                tokio::time::timeout(limit, speech::shutdown()),
+                tokio::time::timeout(limit, chatgpt::shutdown()),
+            );
+            if integration_result.is_err() || speech_result.is_err() || chatgpt_result.is_err() {
+                tracing::warn!("Shutdown cleanup exceeded its deadline");
+            }
+        }
+    }
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = signal.recv() => {} }
+            }
+            Err(error) => {
+                tracing::error!(%error, "Cannot register SIGTERM handler");
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }

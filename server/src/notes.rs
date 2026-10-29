@@ -152,7 +152,7 @@ async fn model_list(base: &str) -> Result<Vec<String>, ApiError> {
 
 /// Report local inference availability without treating an offline optional provider as a server failure.
 async fn status() -> Json<Value> {
-    let result = async { model_list(&settings_url()?).await }.await;
+    let result = async { model_list(&store::blocking(settings_url).await?).await }.await;
     match result {
         Ok(models) => Json(json!({ "available": true, "models": models })),
         Err(error) => Json(json!({ "available": false, "models": [], "error": error.message })),
@@ -451,10 +451,15 @@ fn source_unchanged(meeting_id: &str, transcript_id: &str) -> Result<(), ApiErro
     Ok(())
 }
 /// Combine chunk results while preserving distinct evidence and action owners.
-fn merge_evidence(result: &mut Value, notes: Value) {
+fn merge_evidence(result: &mut Value, notes: Value) -> Result<(), ApiError> {
     for key in ["summary", "decisions", "actions"] {
-        let target = result[key].as_array_mut().expect("generated note arrays");
-        for note in notes[key].as_array().expect("validated note arrays") {
+        let target = result[key]
+            .as_array_mut()
+            .ok_or_else(|| ApiError::new(500, "Generated notes are invalid."))?;
+        for note in notes[key]
+            .as_array()
+            .ok_or_else(|| ApiError::new(500, "Generated notes are invalid."))?
+        {
             // Different explicit owners/dates are different commitments, even when text matches.
             if let Some(existing) = target.iter_mut().find(|item| {
                 item["text"]
@@ -466,10 +471,10 @@ fn merge_evidence(result: &mut Value, notes: Value) {
             }) {
                 let ids = existing["passageIds"]
                     .as_array_mut()
-                    .expect("validated evidence array");
+                    .ok_or_else(|| ApiError::new(500, "Generated notes are invalid."))?;
                 for id in note["passageIds"]
                     .as_array()
-                    .expect("validated evidence array")
+                    .ok_or_else(|| ApiError::new(500, "Generated notes are invalid."))?
                 {
                     if !ids.contains(id) {
                         ids.push(id.clone());
@@ -480,6 +485,7 @@ fn merge_evidence(result: &mut Value, notes: Value) {
             }
         }
     }
+    Ok(())
 }
 
 /// Generate consent-gated notes, validate provenance, and save only a complete successful result.
@@ -489,14 +495,17 @@ async fn generate(Json(input): Json<GenerateRequest>) -> Result<Json<Value>, Api
     if let Some(provider) = input.provider {
         require_cloud_consent(provider, input.cloud_consent)?;
     }
-    let settings = store::get_settings()?;
+    let settings = store::blocking(store::get_settings).await?;
     let provider = match input.provider {
         Some(provider) => provider,
         None => NotesProvider::from_settings(&settings)?,
     };
     require_cloud_consent(provider, input.cloud_consent)?;
     let _running = RunningGuard::acquire(input.meeting_id.clone())?;
-    let meeting = store::get_meeting(&input.meeting_id)?.ok_or_else(ApiError::not_found)?;
+    let meeting_id = input.meeting_id.clone();
+    let meeting = store::blocking(move || store::get_meeting(&meeting_id))
+        .await?
+        .ok_or_else(ApiError::not_found)?;
     let versions = meeting["transcripts"]
         .as_array()
         .ok_or_else(|| ApiError::new(409, "Create a transcript before generating notes."))?;
@@ -553,7 +562,9 @@ async fn generate(Json(input): Json<GenerateRequest>) -> Result<Json<Value>, Api
     let mut usage = UsageTotals::new();
     let mut actual_model: Option<String> = None;
     for (index, chunk) in chunks.iter().enumerate() {
-        source_unchanged(&input.meeting_id, transcript_id)?;
+        let meeting_id = input.meeting_id.clone();
+        let source_id = transcript_id.to_owned();
+        store::blocking(move || source_unchanged(&meeting_id, &source_id)).await?;
         let excerpt: Vec<_> = chunk
             .iter()
             .map(|p| json!({"id":p.id,"speaker":p.speaker,"text":p.text}))
@@ -566,7 +577,9 @@ async fn generate(Json(input): Json<GenerateRequest>) -> Result<Json<Value>, Api
         );
         let (content, model, chunk_usage) = match provider {
             NotesProvider::Ollama => {
-                let (client, base) = local.as_ref().expect("explicit local provider");
+                let (client, base) = local
+                    .as_ref()
+                    .ok_or_else(|| ApiError::new(500, "Local notes provider is unavailable."))?;
                 let body = json!({"model":selected_model,"stream":false,"format":output_schema(),"options":{"temperature":0.1,"num_ctx":8192,"num_predict":4096},"messages":[{"role":"system","content":NOTES_INSTRUCTIONS},{"role":"user","content":excerpt_prompt}]});
                 let output = bounded_json(
                     checked(client.post(format!("{base}/api/chat")).json(&body)).await?,
@@ -612,18 +625,19 @@ async fn generate(Json(input): Json<GenerateRequest>) -> Result<Json<Value>, Api
             return Err(ApiError::new(502,"The notes provider changed models during generation. Earlier notes are unchanged; select a model explicitly and retry."));
         }
         actual_model = Some(model);
-        merge_evidence(&mut result, parse_evidence(&content, chunk)?);
+        merge_evidence(&mut result, parse_evidence(&content, chunk)?)?;
         usage.add(&chunk_usage)?;
     }
     result["provider"] = json!(provider.name());
-    result["model"] = json!(actual_model.expect("at least one completed excerpt"));
+    result["model"] =
+        json!(actual_model.ok_or_else(|| ApiError::new(500, "No notes excerpt was completed."))?);
     result["usage"] = usage.value();
     result["transcriptVersionId"] = json!(transcript_id);
-    Ok(Json(store::add_generated_notes(
-        &input.meeting_id,
-        result,
-        transcript_id,
-    )?))
+    let source_id = transcript_id.to_owned();
+    Ok(Json(
+        store::blocking(move || store::add_generated_notes(&input.meeting_id, result, &source_id))
+            .await?,
+    ))
 }
 
 /// Stream bounded local model-download progress back to the browser.
@@ -631,7 +645,7 @@ async fn pull(Json(input): Json<ModelRequest>) -> Result<Response, ApiError> {
     validate_model(&input.model)?;
     let upstream = checked(
         client(3600)?
-            .post(format!("{}/api/pull", settings_url()?))
+            .post(format!("{}/api/pull", store::blocking(settings_url).await?))
             .json(&json!({ "model": input.model, "stream": true })),
     )
     .await?;
@@ -654,7 +668,10 @@ async fn remove(Json(input): Json<ModelRequest>) -> Result<Json<Value>, ApiError
     validate_model(&input.model)?;
     checked(
         client(30)?
-            .delete(format!("{}/api/delete", settings_url()?))
+            .delete(format!(
+                "{}/api/delete",
+                store::blocking(settings_url).await?
+            ))
             .json(&json!({ "model": input.model })),
     )
     .await?;
@@ -791,8 +808,8 @@ mod tests {
         let mut result = json!({"summary":[],"decisions":[],"actions":[]});
         let first=parse_evidence(r#"{"summary":[],"decisions":[],"actions":[{"text":"Review the draft","passageIds":["p1"],"owner":"Asha","dueDate":null}]}"#,&[passage("p1","Asha, review the draft")]).unwrap();
         let second=parse_evidence(r#"{"summary":[],"decisions":[],"actions":[{"text":"Review the draft","passageIds":["p2"],"owner":"Sam","dueDate":null}]}"#,&[passage("p2","Sam, review the draft")]).unwrap();
-        merge_evidence(&mut result, first);
-        merge_evidence(&mut result, second);
+        merge_evidence(&mut result, first).unwrap();
+        merge_evidence(&mut result, second).unwrap();
         assert_eq!(result["actions"].as_array().unwrap().len(), 2);
     }
 

@@ -23,7 +23,8 @@ impl Writer {
     pub async fn create(path: &Path) -> std::io::Result<Self> {
         let mut key = Zeroizing::new([0; 32]);
         OsRng.fill_bytes(key.as_mut());
-        let cipher = Aes256Gcm::new_from_slice(key.as_ref()).unwrap();
+        let cipher = Aes256Gcm::new_from_slice(key.as_ref())
+            .map_err(|_| std::io::Error::other("Invalid speech spool key."))?;
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]

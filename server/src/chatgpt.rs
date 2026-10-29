@@ -72,7 +72,10 @@ struct PublicState {
     login_completion: Option<(String, bool)>,
 }
 struct Manager {
-    worker: Mutex<Option<Arc<Worker>>>,
+    worker: Arc<Mutex<Option<Arc<Worker>>>>,
+    shutting_down: Arc<AtomicBool>,
+    unsafe_to_detach: Arc<AtomicBool>,
+    preserve_volume: Arc<AtomicBool>,
     operation: Mutex<()>,
     busy: AtomicBool,
 }
@@ -90,7 +93,10 @@ struct Worker {
 /// Return the process-wide helper owner used to serialize account and generation operations.
 fn manager() -> &'static Manager {
     MANAGER.get_or_init(|| Manager {
-        worker: Mutex::new(None),
+        worker: Arc::new(Mutex::new(None)),
+        shutting_down: Arc::new(AtomicBool::new(false)),
+        unsafe_to_detach: Arc::new(AtomicBool::new(false)),
+        preserve_volume: Arc::new(AtomicBool::new(false)),
         operation: Mutex::new(()),
         busy: AtomicBool::new(false),
     })
@@ -169,15 +175,11 @@ fn helper_path() -> Option<PathBuf> {
             .then(|| std::fs::canonicalize(path).ok())
             .flatten();
     }
-    let executable = if cfg!(windows) { "codex.exe" } else { "codex" };
-    let root = crate::paths::get().resource_root;
+    let executable = "codex";
+    let root = crate::paths::get().ok()?.resource_root;
     let (package, triple) = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => ("codex-linux-x64", "x86_64-unknown-linux-musl"),
-        ("linux", "aarch64") => ("codex-linux-arm64", "aarch64-unknown-linux-musl"),
         ("macos", "x86_64") => ("codex-darwin-x64", "x86_64-apple-darwin"),
         ("macos", "aarch64") => ("codex-darwin-arm64", "aarch64-apple-darwin"),
-        ("windows", "x86_64") => ("codex-win32-x64", "x86_64-pc-windows-msvc"),
-        ("windows", "aarch64") => ("codex-win32-arm64", "aarch64-pc-windows-msvc"),
         _ => return None,
     };
     let paths = [
@@ -266,7 +268,7 @@ pub(crate) fn protect_legacy_state() -> Result<(), ApiError> {
     if runtime::fixture_runtime() {
         return Ok(());
     }
-    fn visit(folder: &Path) -> Result<(), ApiError> {
+    fn visit(folder: &Path, root: bool) -> Result<(), ApiError> {
         if !folder.exists() {
             return Ok(());
         }
@@ -277,6 +279,9 @@ pub(crate) fn protect_legacy_state() -> Result<(), ApiError> {
         }
         for item in std::fs::read_dir(folder)? {
             let item = item?;
+            if root && item.file_name() == "tmp" {
+                continue;
+            }
             let kind = item.file_type()?;
             if kind.is_symlink() {
                 return Err(ApiError::bad(
@@ -284,7 +289,7 @@ pub(crate) fn protect_legacy_state() -> Result<(), ApiError> {
                 ));
             }
             if kind.is_dir() {
-                visit(&item.path())?;
+                visit(&item.path(), false)?;
             } else if kind.is_file() && !crate::protected_storage::is_encrypted(&item.path())? {
                 if item.metadata()?.len() > 512 * 1024 * 1024 {
                     return Err(ApiError::new(413, "An old ChatGPT cache exceeds the protected migration limit. Its original has been preserved."));
@@ -295,7 +300,7 @@ pub(crate) fn protect_legacy_state() -> Result<(), ApiError> {
         }
         Ok(())
     }
-    visit(&store::data_dir().join("chatgpt"))
+    visit(&store::data_dir()?.join("chatgpt"), true)
 }
 fn auth_migration_error() -> ApiError {
     ApiError::new(503, "Echo could not move the existing ChatGPT connection into its isolated OS credential store. Unlock the credential store and retry. The encrypted original is preserved; no account was replaced.")
@@ -312,7 +317,7 @@ fn auth_store_identity(home: &Path) -> Result<String, ApiError> {
         return Err(auth_migration_error());
     }
     // The official backend falls back to the absolute spelling while an
-    // encrypted runtime is unmounted (or its Linux tmpfs was cleaned up).
+    // encrypted runtime is unmounted.
     let canonical = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
     let digest = format!(
         "{:x}",
@@ -346,13 +351,13 @@ fn migrate_auth_to_keyring(home: &Path) -> Result<(), ApiError> {
     if runtime::fixture_runtime() {
         return Ok(());
     }
-    let original = store::data_dir().join("chatgpt/auth.json");
+    let original = store::data_dir()?.join("chatgpt/auth.json");
     if !original.exists() {
         return Ok(());
     }
     let bytes = Zeroizing::new(store::read_protected(&original)?);
     let source = std::str::from_utf8(&bytes).map_err(|_| auth_migration_error())?;
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
         // Test-key libraries must never touch the user's real OS account store.
         if cfg!(debug_assertions) && std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some() {
@@ -374,10 +379,10 @@ fn migrate_auth_to_keyring(home: &Path) -> Result<(), ApiError> {
             },
         )?;
         std::fs::remove_file(&original)?;
-        std::fs::File::open(original.parent().unwrap())?.sync_all()?;
+        std::fs::File::open(original.parent().ok_or_else(auth_migration_error)?)?.sync_all()?;
         Ok(())
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = (source, home);
         Err(auth_migration_error())
@@ -392,18 +397,25 @@ async fn spawn_worker(binary: PathBuf, protected: ProtectedHome) -> Result<Arc<W
             Ok(worker)
         }
         Err(error) => {
-            let _ = protected.close().await;
+            // A failed startup may have spawned a helper whose termination could
+            // not be confirmed. Keep the mount in place until ownership is known.
+            tracing::warn!("ChatGPT startup failed; leaving its encrypted volume mounted");
             Err(error)
         }
     }
 }
 async fn spawn_protected_worker(binary: PathBuf, home: &Path) -> Result<Arc<Worker>, ApiError> {
-    private_directory(home)?;
-    private_directory(&home.join("tmp"))?;
-    migrate_auth_to_keyring(home)?;
-    let working = home.join("work");
-    private_directory(&working)?;
-    private_directory(&working.join(".git"))?;
+    let work_home = home.to_path_buf();
+    let working = store::blocking(move || {
+        private_directory(&work_home)?;
+        private_directory(&work_home.join("tmp"))?;
+        migrate_auth_to_keyring(&work_home)?;
+        let working = work_home.join("work");
+        private_directory(&working)?;
+        private_directory(&working.join(".git"))?;
+        Ok(working)
+    })
+    .await?;
     let mut probe = child_command(&binary, home, &working);
     probe
         .arg("--version")
@@ -414,18 +426,22 @@ async fn spawn_protected_worker(binary: PathBuf, home: &Path) -> Result<Arc<Work
         return Err(ApiError::new(503,"Echo Voice requires the official Codex helper 0.160.0 for its isolated notes connection. Install the pinned version; other versions are not enabled."));
     }
     let config_path = home.join("config.toml");
-    if std::fs::symlink_metadata(&config_path).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err(ApiError::new(
-            409,
-            "The managed ChatGPT configuration must not be a symbolic link.",
-        ));
-    }
-    std::fs::write(&config_path, configuration())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    store::blocking(move || {
+        if std::fs::symlink_metadata(&config_path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(ApiError::new(
+                409,
+                "The managed ChatGPT configuration must not be a symbolic link.",
+            ));
+        }
+        std::fs::write(&config_path, configuration())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(())
+    })
+    .await?;
     let mut command = child_command(&binary, home, &working);
     command
         .args(["app-server", "--stdio", "--strict-config"])
@@ -455,30 +471,97 @@ async fn spawn_protected_worker(binary: PathBuf, home: &Path) -> Result<Arc<Work
         worker.shutdown().await;
         return Err(error);
     }
-    worker.send(json!({"method":"initialized"})).await?;
+    if let Err(error) = worker.send(json!({"method":"initialized"})).await {
+        worker.shutdown().await;
+        return Err(error);
+    }
     Ok(worker)
 }
 impl Manager {
-    /// Reuse a live worker or initialize a replacement in the library's private helper home.
+    /// Fence new starts and wait for the owner of any in-flight startup.
+    async fn fence(
+        &self,
+        limit: Duration,
+    ) -> Option<tokio::sync::OwnedMutexGuard<Option<Arc<Worker>>>> {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        timeout(limit, Arc::clone(&self.worker).lock_owned())
+            .await
+            .ok()
+    }
+
+    /// Keep startup ownership alive if the requesting HTTP task is cancelled.
     async fn worker(&self) -> Result<Arc<Worker>, ApiError> {
-        let mut current = self.worker.lock().await;
+        if self.shutting_down.load(Ordering::SeqCst) || self.unsafe_to_detach.load(Ordering::SeqCst)
+        {
+            return Err(unavailable());
+        }
+        let mut current = Arc::clone(&self.worker).lock_owned().await;
+        if self.shutting_down.load(Ordering::SeqCst) || self.unsafe_to_detach.load(Ordering::SeqCst)
+        {
+            return Err(unavailable());
+        }
         if let Some(worker) = current.as_ref() {
             if worker.alive.load(Ordering::SeqCst) {
                 return Ok(Arc::clone(worker));
             }
-            worker.shutdown().await;
         }
-        let path=helper_path().ok_or_else(||ApiError::new(503,"Install the optional official Codex helper 0.160.0 to connect ChatGPT. Local AI remains available."))?;
-        let root = std::fs::canonicalize(store::data_dir()).or_else(|_| {
-            std::fs::create_dir_all(store::data_dir())?;
-            std::fs::canonicalize(store::data_dir())
-        })?;
-        let protected = ProtectedHome::prepare(&root).await?;
-        let worker = spawn_worker(path, protected).await?;
-        *current = Some(Arc::clone(&worker));
-        Ok(worker)
+        let shutting_down = Arc::clone(&self.shutting_down);
+        let unsafe_to_detach = Arc::clone(&self.unsafe_to_detach);
+        let preserve_volume = Arc::clone(&self.preserve_volume);
+        tokio::spawn(async move {
+            if let Some(worker) = current.as_ref() {
+                if !worker.shutdown().await { return Err(unavailable()); }
+            }
+            if shutting_down.load(Ordering::SeqCst) { return Err(unavailable()); }
+            let (path, root) = store::blocking(|| {
+                let path = helper_path().ok_or_else(|| ApiError::new(503, "Install the optional official Codex helper 0.160.0 to connect ChatGPT. Local AI remains available."))?;
+                let data_dir = store::data_dir()?;
+                let root = std::fs::canonicalize(&data_dir).or_else(|_| {
+                    std::fs::create_dir_all(&data_dir)?;
+                    std::fs::canonicalize(&data_dir)
+                })?;
+                Ok((path, root))
+            }).await?;
+            if shutting_down.load(Ordering::SeqCst) { return Err(unavailable()); }
+            // Keep the uncertain-ownership fence set across every startup await,
+            // including panics or cancellation of the task itself.
+            unsafe_to_detach.store(true, Ordering::SeqCst);
+            let protected = match ProtectedHome::prepare(&root).await {
+                Ok(protected) => protected,
+                Err(error) => {
+                    tracing::warn!("ChatGPT runtime preparation failed; leaving any encrypted volume mounted");
+                    return Err(error);
+                }
+            };
+            if shutting_down.load(Ordering::SeqCst) {
+                if preserve_volume.load(Ordering::SeqCst) {
+                    tracing::warn!("ChatGPT startup exceeded shutdown deadline; leaving its encrypted volume mounted");
+                    return Err(unavailable());
+                }
+                match protected.close().await {
+                    Ok(()) => unsafe_to_detach.store(false, Ordering::SeqCst),
+                    Err(error) => tracing::warn!(%error, "Could not detach encrypted ChatGPT helper volume"),
+                }
+                return Err(unavailable());
+            }
+            let worker = match spawn_worker(path, protected).await {
+                Ok(worker) => worker,
+                Err(error) => {
+                    unsafe_to_detach.store(true, Ordering::SeqCst);
+                    return Err(error);
+                }
+            };
+            *current = Some(Arc::clone(&worker));
+            unsafe_to_detach.store(false, Ordering::SeqCst);
+            if shutting_down.load(Ordering::SeqCst) { return Err(unavailable()); }
+            Ok(worker)
+        }).await.map_err(|error| {
+            tracing::error!(%error, "ChatGPT startup task failed");
+            unavailable()
+        })?
     }
 }
+
 impl Worker {
     /// Write one bounded JSON-RPC message while serializing access to helper stdin.
     async fn send(&self, value: Value) -> Result<(), ApiError> {
@@ -527,21 +610,33 @@ impl Worker {
         }
     }
     /// Terminate the managed helper process and fail any outstanding protocol requests.
-    async fn shutdown(&self) {
+    async fn shutdown(&self) -> bool {
         self.alive.store(false, Ordering::SeqCst);
-        {
+        let stopped = {
             let mut child = self.child.lock().await;
             let _ = child.kill().await;
-            let _ = child.wait().await;
+            child.wait().await.is_ok()
+        };
+        if !stopped {
+            tracing::warn!("ChatGPT helper could not be confirmed stopped; leaving its encrypted volume mounted");
+            return false;
         }
         self.fail_pending().await;
         let mut runtime = self.runtime.lock().await;
+        if manager().preserve_volume.load(Ordering::SeqCst) {
+            tracing::warn!(
+                "ChatGPT shutdown deadline expired; leaving its encrypted volume mounted"
+            );
+            return false;
+        }
         if let Some(protected) = runtime.as_ref() {
             if protected.close().await.is_err() {
                 tracing::warn!("The encrypted ChatGPT helper volume remains mounted; Echo will retry its owned cleanup on the next connection.");
+                return false;
             }
         }
         runtime.take();
+        true
     }
     /// Wake outstanding callers when the helper connection is no longer usable.
     async fn fail_pending(&self) {
@@ -692,7 +787,9 @@ fn rpc_error(value: &Value) -> ApiError {
 /// Return installation, account, allowance, and pending-login state with secrets removed.
 async fn status() -> Json<Value> {
     let m = manager();
-    let installed = helper_path().is_some();
+    let installed = store::blocking(|| Ok(helper_path().is_some()))
+        .await
+        .unwrap_or(false);
     if !installed {
         return Json(
             json!({"installed":false,"connected":false,"busy":false,"account":null,"login":{"pending":false},"rateLimits":null}),
@@ -911,7 +1008,10 @@ async fn run_generation(
             .find(|m| m["isDefault"] == true)
             .unwrap_or(&available[0])
     };
-    let model = chosen["id"].as_str().unwrap().to_owned();
+    let model = chosen["id"]
+        .as_str()
+        .ok_or_else(|| ApiError::new(502, "The ChatGPT model catalog is invalid."))?
+        .to_owned();
     let rates = worker
         .rpc(
             "account/rateLimits/read",
@@ -1046,12 +1146,39 @@ pub async fn generate(
     }
 }
 
+/// Prevent any further helper startup as soon as shutdown is signalled.
+pub fn begin_shutdown() {
+    manager().shutting_down.store(true, Ordering::SeqCst);
+}
+
 /// Stop our helper when the local web server shuts down. Login persists locally.
 pub async fn shutdown() {
-    if let Some(manager) = MANAGER.get() {
-        if let Some(worker) = manager.worker.lock().await.take() {
-            worker.shutdown().await;
+    let manager = manager();
+    let Some(mut guard) = manager.fence(Duration::from_secs(3)).await else {
+        manager.preserve_volume.store(true, Ordering::SeqCst);
+        tracing::warn!("ChatGPT startup is still active; leaving its encrypted volume mounted");
+        return;
+    };
+    if manager.unsafe_to_detach.load(Ordering::SeqCst) {
+        tracing::warn!(
+            "ChatGPT startup ownership is uncertain; leaving its encrypted volume mounted"
+        );
+        return;
+    }
+    if let Some(worker) = guard.take() {
+        match timeout(Duration::from_secs(1), worker.shutdown()).await {
+            Ok(true) => {}
+            _ => {
+                manager.preserve_volume.store(true, Ordering::SeqCst);
+                tracing::warn!(
+                    "ChatGPT helper did not stop safely; leaving its encrypted volume mounted"
+                );
+                return;
+            }
         }
+    }
+    if let Err(error) = runtime::detach_library().await {
+        tracing::warn!(%error, "Could not detach encrypted ChatGPT helper volume");
     }
 }
 
@@ -1059,6 +1186,23 @@ pub async fn shutdown() {
 mod protection_tests {
     use super::*;
     use std::cell::RefCell;
+    #[tokio::test]
+    async fn shutdown_fence_waits_for_startup_and_rejects_new_workers() {
+        let manager = Manager {
+            worker: Arc::new(Mutex::new(None)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            unsafe_to_detach: Arc::new(AtomicBool::new(false)),
+            preserve_volume: Arc::new(AtomicBool::new(false)),
+            operation: Mutex::new(()),
+            busy: AtomicBool::new(false),
+        };
+        let startup = Arc::clone(&manager.worker).lock_owned().await;
+        assert!(manager.fence(Duration::from_millis(20)).await.is_none());
+        assert!(manager.worker().await.is_err());
+        drop(startup);
+        assert!(manager.fence(Duration::from_millis(100)).await.is_some());
+    }
+
     #[test]
     fn keyring_migration_preserves_conflicts_and_requires_verified_readback() {
         let source = r#"{"tokens":{"access_token":"synthetic","refresh_token":"synthetic"},"OPENAI_API_KEY":null}"#;
