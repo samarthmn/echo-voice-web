@@ -200,7 +200,7 @@ export async function recording(id: string): Promise<Recording | undefined> {
   if (!isV3(row))
     throw new Error(
       isV2(row)
-        ? 'Connect to Echo to unlock this older recording.'
+        ? 'Connect to Echo, or enter your old recovery phrase in Setup, to unlock this older recording.'
         : 'This older recording is still being prepared. Its audio is kept.',
     );
   return decode(row);

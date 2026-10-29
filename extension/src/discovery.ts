@@ -8,20 +8,23 @@ const DISCOVERY_CANDIDATES = [
   ...[3001, 3002, 3003, 3004, 3005].map((port) => `http://127.0.0.1:${port}`),
 ];
 const ECHO_NOT_FOUND = "Echo isn't running on this Mac — start it with ./scripts/start.sh";
-/** True when `origin` answers GET /hello as an Echo v2 server within 700 ms. */
-export async function probe(origin: string): Promise<boolean> {
+/** The library an Echo v2 server at `origin` serves, if it answers GET /hello within 700 ms. */
+export async function hello(origin: string): Promise<{ libraryId: string } | undefined> {
   try {
     const body = await jsonRequest(endpointURL(origin), '/hello', {
       signal: AbortSignal.timeout(700),
     });
-    return (
-      body.service === 'echo-voice' &&
+    return body.service === 'echo-voice' &&
       body.protocolVersion === 2 &&
       typeof body.libraryId === 'string'
-    );
+      ? { libraryId: body.libraryId }
+      : undefined;
   } catch {
-    return false; // Unreachable or not Echo: try the next candidate.
+    return undefined; // Unreachable or not Echo: try the next candidate.
   }
+}
+export async function probe(origin: string): Promise<boolean> {
+  return !!(await hello(origin));
 }
 /** Find Echo: manual address, saved endpoint, an announced Echo tab, then default ports. */
 export async function discover(manual?: string): Promise<string> {

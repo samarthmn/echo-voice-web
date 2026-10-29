@@ -221,3 +221,115 @@ test('cancel ends waiting locally even when Echo is offline; malformed Echo mess
     /Unverified/,
   );
 });
+test('an Echo-started connect from a moved Echo replaces the old link and forgets the old Echo', async () => {
+  const h = await harness();
+  const moved = 'http://127.0.0.1:3112';
+  const otherLibrary = '33333333-3333-4333-8333-333333333333';
+  await h.api.saveLink({
+    state: 'connected',
+    endpoint,
+    libraryId: library,
+    credential: 'b'.repeat(64),
+  });
+  const wire = h.fetch;
+  h.fetch = async (url, options) => {
+    if (url.startsWith(endpoint)) throw new Error('old Echo is gone');
+    if (url.endsWith('/hello'))
+      return reply({ service: 'echo-voice', protocolVersion: 2, libraryId: otherLibrary });
+    if (url.endsWith('/claim'))
+      return reply({ status: 'approved', libraryId: otherLibrary, credential: 'c'.repeat(64) });
+    if (url.endsWith('/connection'))
+      return reply({
+        libraryId: otherLibrary,
+        appVersion: '0.1.0',
+        storageProtectionVersion: 1,
+        recordingReceiptVersion: 1,
+      });
+    return wire(url, options);
+  };
+  h.approved = true;
+  const result = await h.api.externalMessage(
+    { type: 'ECHO_CONNECT', intent: 'e'.repeat(64) },
+    { origin: moved },
+  );
+  assert.equal(result.ok, true);
+  const link = await h.api.readLink();
+  assert.equal(link.endpoint, moved);
+  assert.equal(link.libraryId, otherLibrary);
+  const pair = h.calls.find(([url]) => url === `${moved}/extension/v1/pair`);
+  assert.equal(JSON.parse(pair[1].body).intent, 'e'.repeat(64));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(
+    h.calls.some(
+      ([url, options]) =>
+        url === `${endpoint}/extension/v1/connection` && options.method === 'DELETE',
+    ),
+    'the replaced Echo is asked to forget this browser',
+  );
+});
+test('an Echo-started connect from the linked Echo and library keeps the connection', async () => {
+  const h = await harness();
+  await h.api.saveLink({
+    state: 'connected',
+    endpoint,
+    libraryId: library,
+    credential: 'b'.repeat(64),
+  });
+  await h.api.beginPairing(endpoint, 'f'.repeat(64));
+  assert.equal(
+    h.calls.some(([url]) => url.endsWith('/pair')),
+    false,
+  );
+  assert.equal((await h.api.readLink()).credential, 'b'.repeat(64));
+});
+test('an expired request whose reservation reply was lost ends without reserving again', async () => {
+  const h = await harness();
+  const wire = h.fetch;
+  h.fetch = async (url, options) => {
+    if (url.endsWith('/pair')) throw new Error('lost');
+    return wire(url, options);
+  };
+  await assert.rejects(h.api.beginPairing(endpoint));
+  assert.equal((await h.api.readLink()).requestId, '');
+  const reservations = h.calls.filter(([url]) => url.endsWith('/pair')).length;
+  h.now += 601000;
+  assert.equal((await h.api.resumePairing()).phase, 'none');
+  assert.match((await h.api.pairingView()).notice, /expired/);
+  assert.equal(h.calls.filter(([url]) => url.endsWith('/pair')).length, reservations);
+  h.fetch = wire;
+  await h.api.beginPairing(endpoint);
+  const secrets = h.calls
+    .filter(([url]) => url.endsWith('/pair'))
+    .map(([, options]) => JSON.parse(options.body).claimSecret);
+  assert.notEqual(secrets.at(-1), secrets[0], 'Retry starts with a fresh secret');
+});
+test('a refused reservation ends the waiting state instead of retrying forever', async () => {
+  const h = await harness();
+  const wire = h.fetch;
+  h.fetch = async (url, options) => {
+    if (url.endsWith('/pair')) throw new Error('lost');
+    return wire(url, options);
+  };
+  await assert.rejects(h.api.beginPairing(endpoint));
+  h.fetch = async (url, options) =>
+    url.endsWith('/pair') ? reply({ error: 'conflict' }, 409) : wire(url, options);
+  assert.equal((await h.api.resumePairing()).phase, 'none');
+  assert.equal((await h.api.readLink()).state, 'none');
+});
+test('Cancel aborts a claim hanging on Echo instead of waiting behind it', async () => {
+  const h = await harness();
+  await h.api.beginPairing(endpoint);
+  h.fetch = (url, options) =>
+    url.endsWith('/claim')
+      ? new Promise((_, reject) =>
+          options.signal.addEventListener('abort', () => reject(Error('aborted'))),
+        )
+      : Promise.resolve(new Response(null, { status: 204 }));
+  const claim = h.api.resumePairing();
+  await new Promise((resolve) => setImmediate(resolve));
+  const started = Date.now();
+  assert.equal((await h.api.cancelPairing()).phase, 'none');
+  assert.ok(Date.now() - started < 1000);
+  await assert.rejects(claim);
+  assert.equal((await h.api.readLink()).state, 'none');
+});

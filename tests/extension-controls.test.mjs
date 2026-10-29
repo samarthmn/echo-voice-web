@@ -129,6 +129,15 @@ test('disconnect keeps the connection and audio when Echo cannot confirm revocat
   assert.equal(h.context.link.credential, 'synthetic-secret');
   assert.equal(h.context.records.size, 1);
 });
+test('a confirmed local disconnect forgets an unreachable Echo and keeps local audio', async () => {
+  const h = harness();
+  h.context.wire = async () => {
+    throw h.error(0);
+  };
+  await h.api.disconnect(true);
+  assert.equal(h.context.link.state, 'none');
+  assert.equal(h.context.records.size, 1);
+});
 test('successful or previously revoked disconnect clears the link and preserves local audio', async () => {
   for (const alreadyRevoked of [false, true]) {
     const h = harness();
@@ -455,6 +464,7 @@ test('popup connect shows waiting, then the not-found message with Retry, never 
 test('setup disconnect warns about pending audio, honors cancel and keeps the link when Echo is offline', async () => {
   const { element, document } = fakeElements(true);
   let confirm = false;
+  let forget = false;
   let warning = '';
   let offline = true;
   let paired = true;
@@ -473,6 +483,7 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
     },
     window: {
       confirm(message) {
+        if (/did not respond/.test(message)) return forget;
         warning = message;
         return confirm;
       },
@@ -485,6 +496,10 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
     calls.push(message);
     if (message.type === 'CONNECTION_STATUS') return { status: paired ? 'echo-offline' : 'none' };
     if (message.type === 'DISCONNECT') {
+      if (message.forgetLocally) {
+        paired = false;
+        return {};
+      }
       if (offline)
         throw new Error('Open Echo to disconnect this browser. Recordings stay saved here.');
       paired = false;
@@ -520,6 +535,18 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
   assert.match(errors.at(-1), /Open Echo to disconnect/);
   assert.equal(element('disconnect').hidden, false);
   assert.equal(element('status').textContent, '');
+  assert.equal(
+    calls.some((message) => message.forgetLocally),
+    false,
+    'declining the local-only forget keeps the link',
+  );
+  forget = true;
+  element('disconnect').listeners.click();
+  await settle();
+  assert.ok(calls.some((message) => message.type === 'DISCONNECT' && message.forgetLocally));
+  assert.match(element('status').textContent, /Disconnected/);
+  paired = true;
+  element('status').textContent = '';
   offline = false;
   element('disconnect').listeners.click();
   await settle();

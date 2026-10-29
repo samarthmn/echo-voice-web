@@ -107,6 +107,24 @@
           automatically. Export creates sequential WAV parts of at most 30 minutes.
         </p>
         <p id="locked-notice" class="warning" hidden></p>
+        <div id="legacy-unlock" class="notice" hidden>
+          <h3>Unlock older recordings</h3>
+          <p class="description">
+            Recordings made before this version were protected by the 24-word recovery phrase that
+            the extension showed you then. Enter it to unlock them here. Echo uses it once and never
+            saves it.
+          </p>
+          <label class="field"
+            >Old recovery phrase<textarea
+              id="legacy-phrase"
+              rows="3"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+            ></textarea>
+          </label>
+          <button id="legacy-unlock-submit" class="primary">Unlock older recordings</button>
+        </div>
         <div id="recordings"></div>
         <div id="exports" class="notice" hidden>
           <h3 id="export-title">Export audio</h3>

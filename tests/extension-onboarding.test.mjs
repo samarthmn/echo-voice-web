@@ -49,7 +49,13 @@ test('setup has three steps — Connect, Meeting sites, Microphone — and no re
   assert.ok(html.indexOf('id="connect"') < html.indexOf('id="providers"'));
   assert.ok(html.indexOf('id="endpoint"') > html.indexOf('id="advanced"'));
   assert.match(html, /Record call audio only/);
-  assert.doesNotMatch(html, /phrase|pairing code|confirm-library/i);
+  // The only phrase field is the migration unlock for pre-v3 recordings: hidden until such
+  // recordings exist, and outside the setup steps.
+  const legacy =
+    /<div id="legacy-unlock" class="notice" hidden>[\s\S]*?<\/textarea[\s\S]*?<\/div>/.exec(html);
+  assert.ok(legacy, 'legacy unlock starts hidden');
+  assert.ok(html.indexOf('id="legacy-unlock"') > html.indexOf('id="microphone-step"'));
+  assert.doesNotMatch(html.replace(legacy[0], ''), /phrase|pairing code|confirm-library/i);
   const popup = await readFile('extension/popup.html', 'utf8');
   assert.match(popup, /Recordings are saved in this browser until you connect/);
 });

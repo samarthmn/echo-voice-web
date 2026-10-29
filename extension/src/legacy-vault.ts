@@ -1,5 +1,7 @@
 // MIGRATION ONLY. Reads the former recovery-phrase vault (storage v2) so its recordings can
 // be rewrapped with the device key; never creates a vault. Delete once no v2 rows remain.
+import { mnemonicToEntropy } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { aad, decode, decryptPayload, Binding, Ciphertext } from './encryption';
 import { readMeta, writeMeta } from './vault-db';
 import { connectedPair } from './settings';
@@ -53,13 +55,13 @@ async function sharedKey(
     secret.fill(0);
   }
 }
+/** Import a vault's PKCS#8 identity and prove it matches the vault. Zeroes `bytes`. */
 async function importPrivateIdentity(
   descriptor: VaultDescriptor,
-  privateMaterial: string,
+  bytes: Uint8Array<ArrayBuffer>,
 ): Promise<CryptoKey> {
-  validateDescriptor(descriptor);
-  const bytes = decode(privateMaterial, 256);
   try {
+    validateDescriptor(descriptor);
     const privateKey = await crypto.subtle.importKey('pkcs8', bytes, curve, false, ['deriveBits']);
     // Verify that an authorized server returned this vault's identity, not a
     // stale or different library key. No private key is made extractable.
@@ -138,13 +140,60 @@ function identity(descriptor: VaultDescriptor): Promise<CryptoKey> {
   let key = identities.get(descriptor.vaultId);
   if (!key) {
     key = escrowedIdentity(descriptor).then((material) =>
-      importPrivateIdentity(descriptor, material),
+      importPrivateIdentity(descriptor, decode(material, 256)),
     );
     // A failed unlock is retried on the next migration pass.
     key.catch(() => identities.delete(descriptor.vaultId));
     identities.set(descriptor.vaultId, key);
   }
   return key;
+}
+// The former vault-crypto recovery key: HKDF over the 24-word phrase's BIP-39 entropy.
+async function recoveryKey(phrase: string, vaultId: string): Promise<CryptoKey> {
+  if (phrase.length > 1024) throw new Error('Check your recovery phrase.');
+  const normalized = phrase.trim().toLowerCase().split(/\s+/).join(' ');
+  if (normalized.split(' ').length !== 24) throw new Error('Enter all 24 recovery words.');
+  let entropy: Uint8Array<ArrayBuffer>;
+  try {
+    entropy = new Uint8Array(mnemonicToEntropy(normalized, wordlist));
+  } catch {
+    throw new Error('Check your recovery phrase.');
+  }
+  try {
+    return await hkdf(entropy, ['recovery', vaultId]);
+  } finally {
+    entropy.fill(0);
+  }
+}
+/**
+ * Unlock older recordings with the recovery phrase of the previous extension version, for
+ * profiles whose identity never reached Echo. The phrase and identity are never stored: the
+ * identity stays in this context's memory until migration rewraps the recordings.
+ */
+export async function unlockWithRecoveryPhrase(phrase: unknown): Promise<void> {
+  const descriptor = await readMeta<VaultDescriptor>('recording-vault');
+  if (!descriptor) throw new Error('No older recordings need a recovery phrase.');
+  validateDescriptor(descriptor);
+  if (typeof phrase !== 'string') throw new Error('Enter your old 24-word recovery phrase.');
+  const wrappingKey = await recoveryKey(phrase, descriptor.vaultId);
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = await decryptPayload(wrappingKey, descriptor.recovery, [
+      'private-identity',
+      descriptor.vaultId,
+      descriptor.publicKey,
+    ]);
+  } catch {
+    throw new Error(
+      'That recovery phrase does not unlock these recordings. Check the words; your saved audio has not changed.',
+    );
+  }
+  const key = importPrivateIdentity(descriptor, bytes);
+  identities.set(descriptor.vaultId, key);
+  key.catch(() => {
+    if (identities.get(descriptor.vaultId) === key) identities.delete(descriptor.vaultId);
+  });
+  await key;
 }
 /** Recover a v2 recording's raw 32-byte key from the vault identity. Caller zeroes it. */
 export async function legacyRecordingKey(

@@ -8,6 +8,7 @@ const fakeModules = {
   connection:
     'export async function connectionStatus(){return {status:"none"}};export async function disconnect(){};export async function livePreview(){}',
   'external-messages': 'export async function externalMessage(){return {}}',
+  'legacy-vault': 'export async function unlockWithRecoveryPhrase(){}',
   'library-actions':
     'export async function openEcho(){}; export async function deleteLocalRecording(){}',
   settings:
@@ -26,7 +27,8 @@ const built = await build({
       setup(builder) {
         builder.onResolve(
           {
-            filter: /^\.\/(settings|storage|library-actions|connection|pairing|external-messages)$/,
+            filter:
+              /^\.\/(settings|storage|library-actions|connection|pairing|external-messages|legacy-vault)$/,
           },
           (args) => ({ path: args.path.slice(2), namespace: 'mock' }),
         );

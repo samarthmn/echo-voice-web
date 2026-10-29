@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
+import { generateMnemonic, mnemonicToEntropy } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import {
   fixture,
   bundle,
@@ -10,14 +12,37 @@ import {
   endpoint,
   reply,
 } from './extension-test-helpers.mjs';
-const contents = `import * as journal from './extension/src/storage';import * as secrets from './extension/src/device-secrets';import * as settings from './extension/src/settings';import * as encryption from './extension/src/encryption';globalThis.api={...journal,...secrets,...settings,...encryption};`;
+const contents = `import * as journal from './extension/src/storage';import * as secrets from './extension/src/device-secrets';import * as settings from './extension/src/settings';import * as encryption from './extension/src/encryption';import {unlockWithRecoveryPhrase} from './extension/src/legacy-vault';globalThis.api={...journal,...secrets,...settings,...encryption,unlockWithRecoveryPhrase};`;
 async function harness() {
   const h = fixture();
   h.data = memoryDatabase(h);
   h.api = await bundle(h, contents);
   return h;
 }
-async function legacy(h, { session = true, receipt = false, migrating = false } = {}) {
+// The former vault-crypto recovery wrapping of the vault's private identity.
+async function recoveryEnvelope(api, phrase, vaultId, publicKey, privateBytes) {
+  const material = await webcrypto.subtle.importKey(
+    'raw',
+    mnemonicToEntropy(phrase, wordlist),
+    'HKDF',
+    false,
+    ['deriveKey'],
+  );
+  const key = await webcrypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new TextEncoder().encode('Echo recording vault v1'),
+      info: new TextEncoder().encode(JSON.stringify(['echo-vault', 1, 'recovery', vaultId])),
+    },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+  return api.encryptPayload(key, privateBytes, ['private-identity', vaultId, publicKey]);
+}
+async function legacy(h, { session = true, receipt = false, migrating = false, phrase } = {}) {
   const api = h.api;
   const identity = await webcrypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
     'deriveBits',
@@ -33,7 +58,16 @@ async function legacy(h, { session = true, receipt = false, migrating = false } 
   const publicKey = base64(await webcrypto.subtle.exportKey('raw', identity.publicKey));
   const ephemeralPublicKey = base64(await webcrypto.subtle.exportKey('raw', ephemeral.publicKey));
   const privateMaterial = base64(await webcrypto.subtle.exportKey('pkcs8', identity.privateKey));
-  const descriptor = { version: 1, vaultId, publicKey, recovery: {} };
+  const recovery = phrase
+    ? await recoveryEnvelope(
+        api,
+        phrase,
+        vaultId,
+        publicKey,
+        new Uint8Array(await webcrypto.subtle.exportKey('pkcs8', identity.privateKey)),
+      )
+    : {};
+  const descriptor = { version: 1, vaultId, publicKey, recovery };
   h.meta.set('recording-vault', descriptor);
   if (session) h.session.recordingVaultIdentity = { vaultId, privateMaterial };
   const shared = await webcrypto.subtle.deriveBits(
@@ -207,4 +241,35 @@ test('legacy receipts migrate without unlock to summary-only rows; receipts prun
   assert.equal(h.data.recordings.size, 1);
   await h.api.pruneReceipts(Date.now() + 8 * 86400000);
   assert.equal(h.data.recordings.size, 0);
+});
+test('the old recovery phrase unlocks recordings Echo never escrowed, without re-encrypting or storing it', async () => {
+  const h = await harness();
+  const phrase = generateMnemonic(wordlist, 256);
+  const old = await legacy(h, { session: false, phrase });
+  h.fetch = async () => new Response('{}', { status: 404 });
+  await h.api.migrateRecordings();
+  assert.equal(h.data.recordings.get(old.id).needsUnlock, true);
+  await assert.rejects(h.api.unlockWithRecoveryPhrase('word '.repeat(12)), /24 recovery words/);
+  await assert.rejects(
+    h.api.unlockWithRecoveryPhrase(generateMnemonic(wordlist, 256)),
+    /does not unlock/,
+  );
+  await h.api.migrateRecordings();
+  assert.equal(h.data.recordings.get(old.id).needsUnlock, true, 'a wrong phrase unlocks nothing');
+  // Pasted phrases may carry capitals and extra whitespace.
+  await h.api.unlockWithRecoveryPhrase(`  ${phrase.toUpperCase().split(' ').join('\n ')}  `);
+  await h.api.migrateRecordings();
+  const row = h.data.recordings.get(old.id);
+  assert.equal(row.version, 3);
+  assert.equal(row.needsUnlock, undefined);
+  assert.deepEqual(
+    h.data.chunks.get(JSON.stringify([old.id, 0])).encrypted,
+    old.encrypted,
+    'audio ciphertext is never rewritten',
+  );
+  assert.deepEqual(new Uint8Array((await h.api.getChunk(old.id, 0)).pcm), new Uint8Array(old.pcm));
+  const persisted = JSON.stringify([h.local, h.session, [...h.meta], [...h.data.meta]]);
+  // Base64 has no spaces, so any two consecutive words would be the phrase itself.
+  assert.ok(!persisted.includes(phrase.split(' ').slice(0, 2).join(' ')));
+  assert.ok(!persisted.includes(old.privateMaterial));
 });

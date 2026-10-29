@@ -44,6 +44,8 @@ export function connectionCard(onChange: () => Promise<void>) {
     connect.textContent =
       current === 'revoked' ? 'Connect again' : failure ? 'Retry' : 'Connect to Echo';
     element('show-echo').hidden = current !== 'waiting';
+    // Without a request id (its reservation reply was lost) there is no Echo tab to show.
+    element<HTMLButtonElement>('show-echo').disabled = !view.requestId;
     element('cancel-connect').hidden = current !== 'waiting';
   }
   async function pairing(message: { type: string; endpoint?: string }, button: HTMLButtonElement) {

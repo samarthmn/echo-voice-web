@@ -46,6 +46,7 @@ export function fixture() {
     Headers,
     Response,
     AbortSignal,
+    AbortController,
     TextEncoder,
     TextDecoder,
     Uint8Array,

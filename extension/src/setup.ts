@@ -91,7 +91,11 @@ async function refreshState() {
   connection.update(state.connection);
   const connected = state.connection.phase === 'connected';
   element('disconnect').hidden = !connected;
-  lockedNotice(state.recordings, connected, state.migrationError);
+  element('legacy-unlock').hidden = !lockedNotice(
+    state.recordings,
+    connected,
+    state.migrationError,
+  );
   pendingCount = state.recordings.filter((row) => !row.receipt && row.chunkCount).length;
   capturing = !!state.active;
   const micGranted = await microphonePermission();
@@ -203,7 +207,18 @@ element('disconnect').addEventListener('click', () => {
   )
     return;
   void action(async () => {
-    await request({ type: 'DISCONNECT' });
+    try {
+      await request({ type: 'DISCONNECT' });
+    } catch (error) {
+      // Echo moved, was removed or is not running: offer to forget the connection here only.
+      if (
+        !window.confirm(
+          `Echo did not respond, so it still lists this browser. Forget the connection in this browser anyway? You can remove this browser later in Echo's settings. Recordings stay saved here.`,
+        )
+      )
+        throw error;
+      await request({ type: 'DISCONNECT', forgetLocally: true });
+    }
     status('Disconnected from Echo. Recordings stay saved in this browser.');
     await refresh();
   }, element<HTMLButtonElement>('disconnect'));
@@ -214,6 +229,21 @@ element('retry').addEventListener('click', () => {
     status('Upload retry requested. Audio stays here until Echo confirms it.');
     await refresh();
   });
+});
+element('legacy-unlock-submit').addEventListener('click', () => {
+  const field = element<HTMLTextAreaElement>('legacy-phrase');
+  const phrase = field.value;
+  // Never keep the phrase on the page, even when it was wrong.
+  field.value = '';
+  void action(async () => {
+    const { locked } = await request({ type: 'UNLOCK_OLDER_RECORDINGS', phrase });
+    status(
+      locked
+        ? `${locked} older recording${locked === 1 ? ' is' : 's are'} still locked. They may use a different recovery phrase.`
+        : 'Older recordings unlocked. They upload to Echo when it is connected.',
+    );
+    await refresh();
+  }, element<HTMLButtonElement>('legacy-unlock-submit'));
 });
 async function beginExport(id: string) {
   // Lists carry summaries only; export opens the full recording with its device key.
@@ -290,6 +320,7 @@ window.addEventListener('pagehide', () => {
 });
 void refresh()
   .then(async () => {
+    if (location.hash === '#unlock') element('legacy-phrase').focus();
     const id = new URLSearchParams(location.hash.slice(1)).get('recording');
     if (id) await beginExport(id);
   })

@@ -1,8 +1,8 @@
 // Pairing v2: one POST /pair, one approval click in Echo, then a deterministic claim.
 import { unixSecondsToMilliseconds } from './core';
 import { readLink, saveLink, settings, Link } from './settings';
-import { discover } from './discovery';
-import { connectionAction } from './connection';
+import { discover, hello } from './discovery';
+import { connectionAction, forgetRemote } from './connection';
 import { jsonRequest, ProtocolError } from './protocol';
 type Waiting = Extract<Link, { state: 'waiting' }>;
 type ApprovalTab = { requestId: string; id: number; url: string };
@@ -13,9 +13,18 @@ export type PairingView = {
   notice?: string;
 };
 const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15_000;
+const EXPIRED = 'The connection request expired. Choose Connect to Echo to try again.';
 const BROWSER_NAME = 'Echo browser recorder';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let notice: string | undefined;
+// The pair/claim request in flight. Cancel aborts it instead of waiting behind it.
+let inFlight: AbortController | undefined;
+function requestSignal(): AbortSignal {
+  inFlight = new AbortController();
+  return AbortSignal.any([inFlight.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
+}
+const expired = (link: Waiting) => Date.now() >= link.expiresAt;
 let onConnected: () => void = () => {};
 /** Register the action that runs right after a claim succeeds (upload pending audio). */
 export function whenConnected(callback: () => void): void {
@@ -74,6 +83,7 @@ async function reserve(link: Waiting, intent?: string): Promise<Waiting> {
       claimSecret: link.claimSecret,
       ...(intent ? { intent } : {}),
     }),
+    signal: requestSignal(),
   });
   if (!uuid.test(body.requestId) || !['pending', 'approved'].includes(body.status))
     throw new Error('Echo returned an invalid connection request.');
@@ -85,9 +95,27 @@ async function reserve(link: Waiting, intent?: string): Promise<Waiting> {
   await saveLink(next);
   return next;
 }
+/**
+ * Reserve a request whose POST /pair reply never arrived. Expired or refused reservations end
+ * the waiting state, so the next Connect starts with a fresh secret instead of a dead request.
+ */
+async function reserved(link: Waiting, intent?: string): Promise<Waiting | undefined> {
+  if (link.requestId) return link;
+  if (expired(link)) {
+    await end(EXPIRED);
+    return undefined;
+  }
+  try {
+    return await reserve(link, intent);
+  } catch (error) {
+    if (!(error instanceof ProtocolError) || error.status < 400 || error.status === 429)
+      throw error;
+    await end('Echo did not accept the connection request. Choose Connect to Echo to try again.');
+    return undefined;
+  }
+}
 async function claim(link: Waiting): Promise<PairingView> {
-  if (Date.now() >= link.expiresAt)
-    return end('The connection request expired. Choose Connect to Echo to try again.');
+  if (expired(link)) return end(EXPIRED);
   try {
     const { installationId } = await settings();
     const body = await jsonRequest(link.endpoint, '/pair/claim', {
@@ -97,6 +125,7 @@ async function claim(link: Waiting): Promise<PairingView> {
         installationId,
         claimSecret: link.claimSecret,
       }),
+      signal: requestSignal(),
     });
     if (body.status === 'pending') return view(link);
     if (
@@ -137,18 +166,28 @@ function newRequest(endpoint: string): Waiting {
     expiresAt: Date.now() + REQUEST_LIFETIME_MS,
   };
 }
+/** True when the connected link is the Echo at `endpoint`, with the library that Echo serves now. */
+async function linkedTo(link: Extract<Link, { state: 'connected' }>, endpoint?: string) {
+  return (
+    !!endpoint &&
+    link.endpoint === endpoint &&
+    (await hello(endpoint))?.libraryId === link.libraryId
+  );
+}
 /**
  * Connect to Echo. `endpoint` is a manual (Advanced) or verified Echo origin; `intent` is
  * Echo's single-use approval for a connection Echo started, so no approval tab opens.
+ * An Echo-started connection replaces a link to a different Echo (moved port, other library).
  */
 export function beginPairing(endpoint?: string, intent?: string): Promise<PairingView> {
   return connectionAction(async () => {
     notice = undefined;
     let link = await readLink();
-    if (link.state === 'connected') return view(link);
+    const previous = link.state === 'connected' ? link : undefined;
+    if (previous && (!intent || (await linkedTo(previous, endpoint)))) return view(previous);
     const reusable =
       link.state === 'waiting' &&
-      Date.now() < link.expiresAt &&
+      !expired(link) &&
       !intent &&
       (!endpoint || link.endpoint === endpoint);
     if (!reusable) {
@@ -156,10 +195,13 @@ export function beginPairing(endpoint?: string, intent?: string): Promise<Pairin
       // Persist before POST so a lost reply retries with the same installation and secret.
       await saveLink(link);
     }
-    let waiting = link as Waiting;
-    if (!waiting.requestId) waiting = await reserve(waiting, intent);
+    const waiting = await reserved(link as Waiting, intent);
+    if (!waiting) return view({ state: 'none' });
     if (!intent) await showApprovalTab(waiting);
-    return claim(waiting);
+    const result = await claim(waiting);
+    // Best effort: the replaced Echo stops listing this browser if it is still running.
+    if (previous && result.phase === 'connected') void forgetRemote(previous);
+    return result;
   });
 }
 /** Claim a waiting request (1 s poll, alarm, or ECHO_APPROVED for `requestId`). */
@@ -167,7 +209,8 @@ export function resumePairing(requestId?: string): Promise<PairingView> {
   return connectionAction(async () => {
     const link = await readLink();
     if (link.state !== 'waiting' || (requestId && link.requestId !== requestId)) return view(link);
-    return link.requestId ? claim(link) : claim(await reserve(link));
+    const waiting = await reserved(link);
+    return waiting ? claim(waiting) : view({ state: 'none' });
   });
 }
 export function pairingView(): Promise<PairingView> {
@@ -180,19 +223,28 @@ export function showPairingApproval(): Promise<PairingView> {
     return view(link);
   });
 }
+/** Tell Echo the request is cancelled. Echo expires it anyway, so nobody waits for this. */
+async function withdraw(link: Waiting): Promise<void> {
+  const { installationId } = await settings();
+  await jsonRequest(link.endpoint, `/pair/${encodeURIComponent(link.requestId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ installationId, claimSecret: link.claimSecret }),
+    signal: AbortSignal.timeout(3_000),
+  });
+}
 export function cancelPairing(): Promise<PairingView> {
+  // A claim stuck on a hanging Echo would otherwise hold the queue for its whole timeout.
+  inFlight?.abort();
   return connectionAction(async () => {
     const link = await readLink();
     if (link.state !== 'waiting') return view(link);
+    const cancelled = await end('Connection cancelled.');
     if (link.requestId) {
-      const { installationId } = await settings();
-      // Echo expires the request on its own; never keep the user waiting on an offline server.
-      await jsonRequest(link.endpoint, `/pair/${encodeURIComponent(link.requestId)}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ installationId, claimSecret: link.claimSecret }),
-      }).catch((error) => console.warn('Echo: could not cancel the request in Echo.', error));
       await closeApprovalTab(link.requestId);
+      void withdraw(link).catch((error) =>
+        console.warn('Echo: could not cancel the request in Echo.', error),
+      );
     }
-    return end('Connection cancelled.');
+    return cancelled;
   });
 }

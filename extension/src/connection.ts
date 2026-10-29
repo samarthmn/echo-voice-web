@@ -56,15 +56,30 @@ export async function connectionStatus(): Promise<StatusReply> {
     return { status: 'echo-offline', endpoint: link.endpoint };
   }
 }
-/** Forget this browser in Echo, then locally. Echo must be reachable to revoke the credential. */
-export function disconnect(): Promise<void> {
+/** Ask an Echo this browser no longer uses to forget it. Best effort; never blocks the caller. */
+export async function forgetRemote(pair: Pair): Promise<void> {
+  await jsonRequest(
+    pair.endpoint,
+    '/connection',
+    { method: 'DELETE', signal: AbortSignal.timeout(3_000) },
+    pair.credential,
+  ).catch((error) =>
+    console.warn('Echo: the previous Echo did not confirm the disconnect.', error),
+  );
+}
+/**
+ * Forget this browser in Echo, then locally. Echo must confirm the revocation unless the user
+ * chose `forgetLocally` after Echo could not be reached (moved, removed or not running).
+ */
+export function disconnect(forgetLocally = false): Promise<void> {
   return connectionAction(async () => {
     const pair = await connectedPair();
     if (!pair) return;
     try {
       await jsonRequest(pair.endpoint, '/connection', { method: 'DELETE' }, pair.credential);
     } catch (error) {
-      if (!(error instanceof ProtocolError && error.status === 401))
+      const revoked = error instanceof ProtocolError && error.status === 401;
+      if (!revoked && !forgetLocally)
         throw new Error('Open Echo to disconnect this browser. Recordings stay saved here.');
     }
     await saveLink({ state: 'none' });

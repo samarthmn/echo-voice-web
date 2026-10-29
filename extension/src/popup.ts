@@ -76,7 +76,11 @@ async function refreshState() {
   prefs = settings;
   active = state.active;
   connection.update(state.connection);
-  lockedNotice(state.recordings, connection.status() === 'connected', state.migrationError);
+  element('unlock-older').hidden = !lockedNotice(
+    state.recordings,
+    connection.status() === 'connected',
+    state.migrationError,
+  );
   if (state.recoveryError) showError(new Error(state.recoveryError));
   try {
     micGranted =
@@ -174,6 +178,9 @@ async function refreshState() {
   );
   enableStart();
 }
+element('unlock-older').addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('setup.html#unlock') }).catch(showError);
+});
 for (const id of ['readiness-action', 'setup'])
   element(id).addEventListener('click', () => {
     chrome.runtime.openOptionsPage().catch(showError);

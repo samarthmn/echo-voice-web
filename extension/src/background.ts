@@ -32,6 +32,7 @@ import {
   PairingView,
 } from './pairing';
 import { captureChanged, renderBadge } from './badge';
+import { unlockWithRecoveryPhrase } from './legacy-vault';
 type Owner = {
   tabId: number;
   identity: string;
@@ -55,6 +56,7 @@ let closingOffscreen: Promise<void> | undefined;
 let gateQueue: Promise<void> = Promise.resolve();
 let gateTimer: ReturnType<typeof setInterval> | undefined;
 let claimTimer: ReturnType<typeof setTimeout> | undefined;
+let claiming = false;
 const observations = new Map<number, Observation>();
 function logFailure(task: string) {
   return (error: unknown) => console.warn(`Echo: ${task} failed.`, error);
@@ -393,6 +395,16 @@ async function requestUploads(reset: boolean): Promise<void> {
     : Number((await chrome.storage.session.get('uploadFailures')).uploadFailures) || 0;
   await send({ type: 'SYNC', failures });
 }
+/** Migration only: unlock recordings from before storage v3 with the old recovery phrase. */
+async function unlockOlderRecordings(phrase: unknown) {
+  await unlockWithRecoveryPhrase(phrase);
+  // A migration already running started without this identity; rewrap after it.
+  if (migrating) await migrating;
+  await migrateProtectedHistory();
+  const locked = (await allRecordings()).filter((row) => row.needsUnlock).length;
+  void requestUploads(true).catch(logFailure('transfer'));
+  return { locked };
+}
 /** Migrate, then upload pending audio. Recording itself never waits for this. */
 async function syncPending(reset: boolean): Promise<void> {
   await migrateProtectedHistory();
@@ -418,12 +430,25 @@ async function captureReported(message: any) {
     if (owner?.recordingId === message.endedRecordingId) await clearOwner();
   }
 }
-/** While a connection request waits for approval, claim it once a second (missed ECHO_APPROVED). */
+/**
+ * While a connection request waits for approval, claim it once a second (missed ECHO_APPROVED).
+ * At most one poll is scheduled or in flight, so a hanging Echo never queues claims ahead of Cancel.
+ */
 function scheduleClaim(view: PairingView): PairingView {
-  if (view.phase === 'waiting' && claimTimer === undefined)
+  if (view.phase === 'waiting' && claimTimer === undefined && !claiming)
     claimTimer = setTimeout(() => {
       claimTimer = undefined;
-      void claimOnce().then(scheduleClaim);
+      claiming = true;
+      void claimOnce().then(
+        (next) => {
+          claiming = false;
+          scheduleClaim(next);
+        },
+        (error) => {
+          claiming = false;
+          logFailure('connection check')(error);
+        },
+      );
     }, CLAIM_POLL_MS);
   return view;
 }
@@ -581,7 +606,8 @@ async function pageAction(message: any) {
     );
   if (message.type === 'PAIR_CANCEL') return cancelPairing();
   if (message.type === 'PAIR_SHOW_APPROVAL') return showPairingApproval().then(scheduleClaim);
-  if (message.type === 'DISCONNECT') return disconnect().then(() => ({}));
+  if (message.type === 'DISCONNECT')
+    return disconnect(message.forgetLocally === true).then(() => ({}));
   if (message.type === 'MIC_GRANTED')
     return saveSettings({ micGranted: message.granted === true }).then(() => ({}));
   if (message.type === 'PROVIDER_ENABLED' && PROVIDERS.includes(message.provider)) {
@@ -603,6 +629,7 @@ async function pageAction(message: any) {
   }
   if (message.type === 'LIVE_TEXT_DEFAULT')
     return saveSettings({ liveTranscription: message.enabled === true }).then(() => ({}));
+  if (message.type === 'UNLOCK_OLDER_RECORDINGS') return unlockOlderRecordings(message.phrase);
   if (message.type === 'SYNC') {
     await migrateProtectedHistory();
     void requestUploads(true).catch(logFailure('transfer'));
