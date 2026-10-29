@@ -55,7 +55,7 @@ mod tests {
 #[component]
 pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
     let mut connections = use_signal(|| Value::Null);
-    let mut installed = use_signal(|| None::<bool>);
+    let mut presence = use_signal(|| None::<Value>);
     let mut extension_path = use_signal(String::new);
     let mut busy = use_signal(|| false);
     let mut error = use_signal(String::new);
@@ -71,7 +71,7 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                 Err(e) => error.set(e),
             }
             let result = crate::api::evaluate("return await window.echoExtensionMessage({type:'ECHO_PRESENT',origin:location.origin});").await;
-            installed.set(Some(result.is_ok_and(|v| v["installed"] == true)));
+            presence.set(Some(result.unwrap_or(Value::Null)));
         }
     });
     crate::ui::use_poll_every(5000, move || {
@@ -80,6 +80,15 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
     let browsers = connections()["connections"]
         .as_array()
         .cloned()
+        .unwrap_or_default();
+    let browser = presence();
+    let status = browser
+        .as_ref()
+        .map(|v| text(v, "status"))
+        .unwrap_or_default();
+    let endpoint = browser
+        .as_ref()
+        .map(|v| text(v, "endpoint"))
         .unwrap_or_default();
     rsx! {
         section {
@@ -90,18 +99,21 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                     Icon { name: "video", size: 18 }
                     "Browser extension"
                 }
-                StatusBadge { tone: if browsers.is_empty() { BadgeTone::Neutral } else { BadgeTone::Success },
-                    if !browsers.is_empty() {
-                        "Connected"
-                    } else if installed().is_none() {
-                        "Checking…"
-                    } else {
-                        "Not connected"
+                StatusBadge { tone: if status == "connected" { BadgeTone::Success } else { BadgeTone::Neutral },
+                    match status.as_str() {
+                        "connected" => "Connected",
+                        "echo-offline" => "Echo offline",
+                        "waiting" => "Waiting for approval",
+                        _ if browser.is_none() => "Checking…",
+                        _ => "Not connected",
                     }
                 }
             }
             p { class: "small-muted", "Record meetings in Brave or Chrome and send them to Echo." }
-            if installed() == Some(false) {
+            if !endpoint.is_empty() {
+                p { class: "small-muted", "This browser: {endpoint}" }
+            }
+            if browser.as_ref().is_some_and(|v| v["installed"] != true) {
                 p { "Install the browser extension:" }
                 ol { class: "extension-install-steps",
                     li {
@@ -185,7 +197,9 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                     onclick: move |_| refresh += 1,
                     "Check again"
                 }
-            } else if installed() == Some(true) && browsers.is_empty() {
+            } else if browser.as_ref().is_some_and(|v| v["installed"] == true)
+                && matches!(status.as_str(), "none" | "revoked")
+            {
                 ActionButton {
                     kind: ButtonKind::Primary,
                     disabled: busy(),
