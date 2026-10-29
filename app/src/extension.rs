@@ -90,6 +90,14 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
         .as_ref()
         .map(|v| text(v, "endpoint"))
         .unwrap_or_default();
+    let origin = web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .unwrap_or_default();
+    let different_endpoint = matches!(status.as_str(), "connected" | "echo-offline")
+        && !endpoint.is_empty()
+        && !origin.is_empty()
+        && endpoint != origin;
+    let endpoint_host = endpoint.strip_prefix("http://").unwrap_or(&endpoint);
     rsx! {
         section {
             class: "panel extension-panel",
@@ -198,8 +206,13 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                     "Check again"
                 }
             } else if browser.as_ref().is_some_and(|v| v["installed"] == true)
-                && matches!(status.as_str(), "none" | "revoked")
+                && (matches!(status.as_str(), "none" | "revoked") || different_endpoint)
             {
+                if different_endpoint {
+                    p {
+                        "This browser is connected to Echo at {endpoint_host}. Connect it to this Echo instead?"
+                    }
+                }
                 ActionButton {
                     kind: ButtonKind::Primary,
                     disabled: busy(),
@@ -214,6 +227,13 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                                         json!({ "type" : "ECHO_CONNECT", "intent" : v["intent"] }),
                                     );
                                     match crate::api::evaluate(&script).await {
+                                        Ok(reply) if reply["status"] == "confirm-in-extension" => {
+                                            refresh += 1;
+                                            notify
+                                                .call(
+                                                    "Confirm in the Echo extension window that opens.".into(),
+                                                );
+                                        }
                                         Ok(reply) if reply["ok"] == true => {
                                             refresh += 1;
                                             notify.call("Browser connected to Echo.".into());
