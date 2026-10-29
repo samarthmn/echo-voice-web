@@ -7,6 +7,15 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+# Debug builds (dev.sh and the integration tests) are lightly optimized and optimize
+# dependencies fully: unoptimized AES-GCM, SQLCipher and JSON make encrypted audio,
+# export and import several times slower.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 opt-level = "s"
 lto = true
