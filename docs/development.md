@@ -15,6 +15,8 @@ There is no hot reload. After changing Rust UI or `web/` code, rerun `./scripts/
 ```bash
 ./scripts/check.sh          # fast: formatting, clippy, cargo test, prettier, typecheck, unit tests
 ./scripts/check.sh --all    # also release build, integration tests, e2e
+./scripts/check.sh --rust   # only the Rust half: rustfmt, clippy, cargo test
+./scripts/check.sh --app    # only the rest: prettier, typecheck, unit tests, builds, integration, e2e
 ```
 
 | Command                           | What it runs                                                                                                                                                                                                                                                                                                                   |
@@ -49,7 +51,12 @@ Packaging rebuilds, refuses symlinks and unexpected executables, and zips only t
 
 ## CI
 
-`.github/workflows/verify.yml` runs on pushes to `main` and on pull requests, on `macos-14`: Node 22, pnpm, stable Rust with the wasm target, `./scripts/setup.sh`, Playwright Chromium, then `./scripts/check.sh --all`.
+`.github/workflows/verify.yml` runs on pushes to `main` and on pull requests as two parallel `macos-14` jobs that together cover `./scripts/check.sh --all`:
+
+- **Rust lint and tests**: stable Rust with the wasm target, then `./scripts/check.sh --rust`.
+- **App build and browser tests**: Node 22, pnpm, stable Rust, a prebuilt `wasm-bindgen` matching `Cargo.lock`, `./scripts/setup.sh`, Playwright Chromium, then `./scripts/check.sh --app`.
+
+Both jobs keep their Rust build cache even when a run fails (`cache-on-failure`), so a red run still makes the next one fast. The cache is keyed on the Rust version, so the first run after a new stable Rust release rebuilds from scratch.
 
 ## Conventions
 

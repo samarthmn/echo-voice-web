@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -19,6 +20,26 @@ const errors = [],
   results = [];
 page.on('pageerror', (error) => errors.push(error.message));
 await mkdir(screenshots, { recursive: true });
+// Audit the "Ollama not running" state CI sees, even when a developer's Ollama is
+// listening on its usual port: point Echo at a closed loopback port for this run.
+async function patchSettings(body) {
+  const response = await fetch(`${base}/api/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  assert.equal(response.status, 200, `PATCH /api/settings: ${await response.text()}`);
+}
+const closedPort = await new Promise((resolve, reject) => {
+  const socket = createServer();
+  socket.once('error', reject);
+  socket.listen(0, '127.0.0.1', () => {
+    const { port } = socket.address();
+    socket.close(() => resolve(port));
+  });
+});
+const { ollamaUrl } = await (await fetch(`${base}/api/settings`)).json();
+await patchSettings({ ollamaUrl: `http://127.0.0.1:${closedPort}` });
 async function audit(name) {
   const overlay = await page.locator('[aria-modal="true"], .sidebar.open').count();
   await page.screenshot({ path: `${screenshots}/${name}.png`, fullPage: !overlay });
@@ -170,4 +191,5 @@ try {
 } finally {
   await writeFile(`${screenshots}/results.json`, JSON.stringify(results, null, 2));
   await browser.close();
+  await patchSettings({ ollamaUrl });
 }

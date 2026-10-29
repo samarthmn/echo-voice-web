@@ -12,12 +12,37 @@ concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  # Line tables keep panic locations while compiling and caching far less debug info.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+# The two jobs run in parallel; together they cover ./scripts/check.sh --all.
 jobs:
-  verify:
+  rust:
+    name: Rust lint and tests
     runs-on: macos-14
-    timeout-minutes: 60
-    env:
-      CARGO_TERM_COLOR: always
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep temporary files in the checkout
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tmp"
+          printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Failed runs still warm the cache, so the next run skips dependency builds.
+          cache-on-failure: true
+      - run: ./scripts/check.sh --rust
+
+  app:
+    name: App build and browser tests
+    runs-on: macos-14
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Keep temporary files in the checkout
@@ -32,8 +57,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Read the wasm-bindgen version from Cargo.lock
+        id: bindgen
+        run: |
+          version="$(awk '/name = "wasm-bindgen"/{getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      # A prebuilt binary instead of compiling wasm-bindgen-cli in setup.sh.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.bindgen.outputs.version }}
       - run: ./scripts/setup.sh
       - run: pnpm exec playwright install chromium
-      - run: ./scripts/check.sh --all
+      - run: ./scripts/check.sh --app
