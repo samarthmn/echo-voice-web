@@ -143,6 +143,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(error) => return Err(error.into()),
     };
+    tokio::spawn(extensions::cleanup_pairing_loop());
     tracing::info!("Echo Voice is ready at http://{}", bind);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let server = axum::serve(listener, router).with_graceful_shutdown(async {

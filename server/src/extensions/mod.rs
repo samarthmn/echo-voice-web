@@ -16,11 +16,9 @@ use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use uuid::Uuid;
 mod pairing;
+pub(crate) use pairing::cleanup_loop as cleanup_pairing_loop;
 mod vault;
-use pairing::{
-    approve, pair_activate, pair_begin, pair_cancel, pair_claim, pair_code, pair_request, reject,
-    request_metadata,
-};
+use pairing::{approve, cancel, claim, hello, intent, pair, reject, request_metadata};
 type Result<T> = std::result::Result<T, ApiError>;
 const RATE: u64 = 16000;
 const MAX_FRAMES: u64 = RATE * 8 * 3600;
@@ -63,7 +61,7 @@ pub(crate) fn init_schema(db: &Connection) -> Result<()> {
  CREATE TABLE IF NOT EXISTS extension_connections(installation_id TEXT PRIMARY KEY,name TEXT NOT NULL,origin TEXT NOT NULL,credential_hash TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS extension_recordings(recording_id TEXT PRIMARY KEY,installation_id TEXT NOT NULL,meeting_id TEXT NOT NULL UNIQUE,data TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS extension_chunks(recording_id TEXT NOT NULL,sequence INTEGER NOT NULL,frames INTEGER NOT NULL,digest TEXT NOT NULL,file TEXT NOT NULL,PRIMARY KEY(recording_id,sequence));")?;
-    pairing::migrate(db)?;
+    db.execute("DELETE FROM extension_pairing", [])?;
     vault::init_schema(db)?;
     db.execute(
         "INSERT OR IGNORE INTO extension_library VALUES(1,?)",
@@ -351,12 +349,11 @@ fn reply_error(e: ApiError) -> Response {
 pub fn extension_routes() -> Router {
     Router::new()
         .route("/connection", get(connection).delete(disconnect))
-        .route("/vault", get(vault::read).put(vault::save))
-        .route("/pairing/begin", post(pair_begin))
-        .route("/pairing/request", post(pair_request))
-        .route("/pairing/claim", post(pair_claim))
-        .route("/pairing/activate", post(pair_activate))
-        .route("/pairing/cancel", post(pair_cancel))
+        .route("/vault", get(vault::read).delete(vault::remove))
+        .route("/hello", get(hello))
+        .route("/pair", post(pair))
+        .route("/pair/claim", post(claim))
+        .route("/pair/{id}", delete(cancel))
         .route("/recordings/{id}", put(start).get(status))
         .route("/recordings/{id}/live", get(live_preview))
         .route("/recordings/{id}/chunks/{sequence}", put(chunk))
@@ -368,7 +365,7 @@ pub fn extension_routes() -> Router {
 pub fn workspace_routes() -> Router {
     Router::new()
         .route("/extensions/meetings/{id}/audio", get(meeting_audio))
-        .route("/extensions/pairing", post(pair_code))
+        .route("/extensions/intent", post(intent))
         .route("/extensions/connections", get(connections))
         .route("/extensions/requests/{id}", get(request_metadata))
         .route("/extensions/requests/{id}/approve", post(approve))
@@ -402,16 +399,15 @@ async fn disconnect(headers: HeaderMap) -> Result<Json<Value>> {
     })
     .await
 }
+/// List paired browsers, undecided requests for the approval sheet, and the unpacked extension folder.
 async fn connections() -> Result<Json<Value>> {
+    let extension_path = crate::paths::get()?.resource_root.join("extension/dist");
     store::run(move |db| {
-        let mut stmt =
-            db.prepare("SELECT installation_id,name,created_at FROM extension_connections")?;
-        let connections=stmt.query_map([],|r|Ok(json!({"installationId":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"createdAt":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        let mut stmt=db.prepare("SELECT request_id,installation_id,name,expires FROM extension_pairing WHERE state='pending' AND kind='manual' AND expires>?")?;
-        let requests=stmt.query_map([seconds()],|r|Ok(json!({"requestId":r.get::<_,String>(0)?,"installationId":r.get::<_,String>(1)?,"name":r.get::<_,String>(2)?,"expiresAt":r.get::<_,i64>(3)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        Ok(reply(
-            json!({"libraryId":library(db)?,"connections":connections,"requests":requests}),
-        ))
+        let mut stmt = db.prepare("SELECT installation_id,name,origin,created_at FROM extension_connections ORDER BY created_at")?;
+        let connections = stmt.query_map([], |r| Ok(json!({"installationId":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"origin":r.get::<_,String>(2)?,"createdAt":r.get::<_,String>(3)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut stmt = db.prepare("SELECT request_id,installation_id,name,origin,expires FROM extension_pairing WHERE state='pending' AND expires>? ORDER BY expires")?;
+        let pending = stmt.query_map([seconds()], |r| Ok(json!({"requestId":r.get::<_,String>(0)?,"installationId":r.get::<_,String>(1)?,"name":r.get::<_,String>(2)?,"origin":r.get::<_,String>(3)?,"expiresAt":r.get::<_,i64>(4)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        Ok(reply(json!({"libraryId":library(db)?,"connections":connections,"pending":pending,"extensionPath":extension_path.to_string_lossy()})))
     }).await
 }
 async fn revoke(Path(id): Path<String>) -> Result<Json<Value>> {

@@ -63,38 +63,35 @@ async fn json_request(
     .await;
     let v: Value = serde_json::from_slice(&bytes)
         .unwrap_or_else(|_| panic!("non-JSON {} {:?}", status, String::from_utf8_lossy(&bytes)));
-    if path.starts_with("/extension/") || status.is_success() {
+    if !matches!(
+        path,
+        "/extension/v1/hello"
+            | "/extension/v1/pair"
+            | "/extension/v1/pair/claim"
+            | "/api/extensions/intent"
+    ) && (path.starts_with("/extension/") || status.is_success())
+    {
         assert_eq!(v["protocolVersion"], 1);
     }
     (status, v)
 }
 async fn pair(app: &Router, installation: &str) -> (String, String, String) {
-    let (_, code) = json_request(
-        app,
-        "POST",
-        "/api/extensions/pairing",
-        "http://localhost:3000",
-        None,
-        json!({}),
-    )
-    .await;
-    let request = json!({"code":code["code"],"installationId":installation,"name":"Test browser"});
+    let secret = hash(Uuid::new_v4().to_string());
     let (status, pending) = json_request(
         app,
         "POST",
-        "/extension/v1/pairing/request",
+        "/extension/v1/pair",
         ORIGIN,
         None,
-        request,
+        json!({"claimSecret":secret,"installationId":installation,"name":"Test browser"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let claim =
-        json!({"code":code["code"],"installationId":installation,"requestId":pending["requestId"]});
+    let claim = json!({"claimSecret":secret,"installationId":installation,"requestId":pending["requestId"]});
     let (_, v) = json_request(
         app,
         "POST",
-        "/extension/v1/pairing/claim",
+        "/extension/v1/pair/claim",
         ORIGIN,
         None,
         claim.clone(),
@@ -115,26 +112,19 @@ async fn pair(app: &Router, installation: &str) -> (String, String, String) {
     let (status, claimed) = json_request(
         app,
         "POST",
-        "/extension/v1/pairing/claim",
+        "/extension/v1/pair/claim",
         ORIGIN,
         None,
         claim.clone(),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (_, retry) = json_request(
-        app,
-        "POST",
-        "/extension/v1/pairing/claim",
-        ORIGIN,
-        None,
-        claim,
-    )
-    .await;
+    let (_, retry) =
+        json_request(app, "POST", "/extension/v1/pair/claim", ORIGIN, None, claim).await;
     assert_eq!(retry["credential"], claimed["credential"]);
     (
         claimed["credential"].as_str().unwrap().into(),
-        code["code"].as_str().unwrap().into(),
+        secret,
         id.into(),
     )
 }
@@ -549,11 +539,11 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], ORIGIN);
-    let claim = json!({"code":code,"requestId":request,"installationId":install});
+    let claim = json!({"claimSecret":code,"requestId":request,"installationId":install});
     let (status, _) = json_request(
         &app,
         "POST",
-        "/extension/v1/pairing/claim",
+        "/extension/v1/pair/claim",
         "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         None,
         claim.clone(),
@@ -563,10 +553,10 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
     let (status, _) = json_request(
         &app,
         "POST",
-        "/extension/v1/pairing/request",
+        "/extension/v1/pair",
         ORIGIN,
         None,
-        json!({"code":code,"installationId":Uuid::new_v4().to_string(),"name":"Other"}),
+        json!({"claimSecret":code,"installationId":Uuid::new_v4().to_string(),"name":"Other"}),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -840,14 +830,14 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
     let (status, claimed) = json_request(
         &app,
         "POST",
-        "/extension/v1/pairing/claim",
+        "/extension/v1/pair/claim",
         ORIGIN,
         None,
         claim.clone(),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(claimed["credential"], token);
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(claimed["status"], "unknown");
     let (status, r) = json_request(&app, "GET", &path, ORIGIN, Some(&token), json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(r["nextSequence"], 1);
@@ -1006,33 +996,42 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
     let (status, _) = json_request(
         &app,
         "POST",
-        "/extension/v1/pairing/claim",
+        "/extension/v1/pair/claim",
         ORIGIN,
         None,
         claim,
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    // A claimed request keeps answering retries for ten minutes past expiry, then disappears.
     let expired_install = Uuid::new_v4().to_string();
-    let (_, expired_code, expired_request) = pair(&app, &expired_install).await;
-    store::with_db(|db| {
-        db.execute(
-            "UPDATE extension_pairing SET expires=? WHERE request_id=?",
-            params![seconds() - 1, expired_request],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-    let (status, _) = json_request(
-        &app,
-        "POST",
-        "/extension/v1/pairing/claim",
-        ORIGIN,
-        None,
-        json!({"code":expired_code,"requestId":expired_request,"installationId":expired_install}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (expired_token, expired_code, expired_request) = pair(&app, &expired_install).await;
+    let expired_claim = json!({"claimSecret":expired_code,"requestId":expired_request,"installationId":expired_install});
+    for (age, expected) in [(1, StatusCode::OK), (601, StatusCode::FORBIDDEN)] {
+        store::with_db(|db| {
+            db.execute(
+                "UPDATE extension_pairing SET expires=? WHERE request_id=?",
+                params![seconds() - age, expired_request],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let (status, v) = json_request(
+            &app,
+            "POST",
+            "/extension/v1/pair/claim",
+            ORIGIN,
+            None,
+            expired_claim.clone(),
+        )
+        .await;
+        assert_eq!(status, expected);
+        if expected == StatusCode::OK {
+            assert_eq!(v["credential"], expired_token);
+        } else {
+            assert_eq!(v["status"], "unknown");
+        }
+    }
     let (status, _, bytes) = send(
         &app,
         "PUT",
@@ -1460,4 +1459,358 @@ fn validated_loopback_hosts_and_ranges() {
     assert_eq!(audio_range(Some("bytes=44-"), 52).unwrap(), (44, 51, true));
     assert!(audio_range(Some("bytes=52-"), 52).is_err());
     assert!(audio_range(Some("bytes=0-1,4-5"), 52).is_err());
+}
+
+#[test]
+fn pairing_migration_preserves_legacy_vaults_and_connections() {
+    // Pre-v2 libraries carry the extra staged-credential columns and v1 vault escrow rows.
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE extension_pairing(code_hash TEXT PRIMARY KEY,expires INTEGER NOT NULL,request_id TEXT UNIQUE,installation_id TEXT,name TEXT,origin TEXT,state TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'manual',activation_required INTEGER NOT NULL DEFAULT 0,credential_hash TEXT); INSERT INTO extension_pairing VALUES('old',99999999999,'request','installation','Browser','origin','claimed','browser',1,'staged'); CREATE TABLE extension_vaults(installation_id TEXT PRIMARY KEY,vault_id TEXT NOT NULL,data TEXT NOT NULL); INSERT INTO extension_vaults VALUES('installation','vault','{}'); CREATE TABLE extension_connections(installation_id TEXT PRIMARY KEY,name TEXT NOT NULL,origin TEXT NOT NULL,credential_hash TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL); INSERT INTO extension_connections VALUES('installation','Browser','origin','hash','date');").unwrap();
+    init_schema(&db).unwrap();
+    for (table, expected) in [
+        ("extension_pairing", 0),
+        ("extension_vaults", 1),
+        ("extension_connections", 1),
+    ] {
+        let count: i64 = db
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, expected);
+    }
+    db.execute("INSERT INTO extension_pairing(code_hash,expires,request_id,installation_id,name,origin,state) VALUES('new',1,'id','installation','Browser','origin','pending')", []).unwrap();
+}
+
+#[tokio::test]
+async fn pairing_v2_discovery_decisions_intents_and_vault_migration() {
+    let _guard = store::TEST_LIBRARY_LOCK.lock().await;
+    let directory = crate::store::test_directory();
+    store::reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", directory.path());
+    crate::store::test_key();
+    store::init().unwrap();
+    let app = app();
+    let changes_before = store::with_db(|db| Ok(db.total_changes())).unwrap();
+    let (status, hello) =
+        json_request(&app, "GET", "/extension/v1/hello", ORIGIN, None, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(hello["protocolVersion"], 2);
+    assert_eq!(hello["service"], "echo-voice");
+    assert_eq!(
+        store::with_db(|db| Ok(db.total_changes())).unwrap(),
+        changes_before
+    );
+    store::with_db(|db| {
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM extension_pairing", [], |r| r
+                .get::<_, i64>(0))?,
+            0
+        );
+        Ok(())
+    })
+    .unwrap();
+    let installation = Uuid::new_v4().to_string();
+    let secret = hash("first secret");
+    let body = json!({"installationId":installation,"name":"Browser","claimSecret":secret});
+    let (_, first) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair",
+        ORIGIN,
+        None,
+        body.clone(),
+    )
+    .await;
+    let (_, same) = json_request(&app, "POST", "/extension/v1/pair", ORIGIN, None, body).await;
+    assert_eq!(first, same);
+    let (_, listing) = json_request(
+        &app,
+        "GET",
+        "/api/extensions/connections",
+        "http://localhost:3000",
+        None,
+        json!({}),
+    )
+    .await;
+    assert_eq!(first["status"], "pending");
+    assert_eq!(first["libraryId"], hello["libraryId"]);
+    assert_eq!(listing["pending"][0]["requestId"], first["requestId"]);
+    assert_eq!(listing["pending"][0]["origin"], ORIGIN);
+    let extension_path = crate::paths::get()
+        .unwrap()
+        .resource_root
+        .join("extension/dist");
+    assert_eq!(listing["extensionPath"].as_str(), extension_path.to_str());
+    assert!(std::path::Path::new(listing["extensionPath"].as_str().unwrap()).is_absolute());
+    let new_secret = hash("second secret");
+    let (_, second) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair",
+        ORIGIN,
+        None,
+        json!({"installationId":installation,"name":"Browser","claimSecret":new_secret}),
+    )
+    .await;
+    let (status, rejected) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        json!({"requestId":first["requestId"],"installationId":installation,"claimSecret":secret}),
+    )
+    .await;
+    assert_eq!(
+        (status, rejected["status"].as_str()),
+        (StatusCode::FORBIDDEN, Some("rejected"))
+    );
+    let id = second["requestId"].as_str().unwrap();
+    json_request(
+        &app,
+        "POST",
+        &format!("/api/extensions/requests/{id}/reject"),
+        "http://localhost:3000",
+        None,
+        json!({}),
+    )
+    .await;
+    let claim = json!({"requestId":id,"installationId":installation,"claimSecret":new_secret});
+    let (status, rejected) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        claim.clone(),
+    )
+    .await;
+    assert_eq!(
+        (status, rejected["status"].as_str()),
+        (StatusCode::FORBIDDEN, Some("rejected"))
+    );
+    store::with_db(|db| {
+        db.execute(
+            "UPDATE extension_pairing SET expires=? WHERE request_id=?",
+            params![seconds() - 1, id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let (status, expired) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair/claim",
+        ORIGIN,
+        None,
+        claim,
+    )
+    .await;
+    assert_eq!(
+        (status, expired["status"].as_str()),
+        (StatusCode::FORBIDDEN, Some("expired"))
+    );
+    let (_, intent) = json_request(
+        &app,
+        "POST",
+        "/api/extensions/intent",
+        "http://localhost:3000",
+        None,
+        json!({}),
+    )
+    .await;
+    let (_, approved) = json_request(&app,"POST","/extension/v1/pair",ORIGIN,None,json!({"installationId":installation,"name":"Browser","claimSecret":hash("third"),"intent":intent["intent"]})).await;
+    assert_eq!(approved["status"], "approved");
+    let (_, listing) = json_request(
+        &app,
+        "GET",
+        "/api/extensions/connections",
+        "http://localhost:3000",
+        None,
+        json!({}),
+    )
+    .await;
+    assert!(listing["pending"].as_array().unwrap().is_empty());
+    let (status, auto_claim) = json_request(&app, "POST", "/extension/v1/pair/claim", ORIGIN, None, json!({"requestId":approved["requestId"],"installationId":installation,"claimSecret":hash("third")})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(auto_claim["status"], "approved");
+    let credential = auto_claim["credential"].as_str().unwrap();
+    let (status, connection) = json_request(
+        &app,
+        "GET",
+        "/extension/v1/connection",
+        ORIGIN,
+        Some(credential),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(connection["installationId"], installation.as_str());
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/extension/v1/connection",
+        "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        Some(credential),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // Cancelling is idempotent and only honours the request's own secret.
+    let cancelled_secret = hash("cancelled");
+    let cancelled_install = Uuid::new_v4().to_string();
+    let (_, cancelled) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair",
+        ORIGIN,
+        None,
+        json!({"installationId":cancelled_install,"name":"Browser","claimSecret":cancelled_secret}),
+    )
+    .await;
+    let cancel_path = format!(
+        "/extension/v1/pair/{}",
+        cancelled["requestId"].as_str().unwrap()
+    );
+    let cancel_claim = json!({"requestId":cancelled["requestId"],"installationId":cancelled_install,"claimSecret":cancelled_secret});
+    for secret in [
+        hash("wrong"),
+        cancelled_secret.clone(),
+        cancelled_secret.clone(),
+    ] {
+        let body = json!({"installationId":cancelled_install,"claimSecret":secret});
+        let (status, _, _) = send(
+            &app,
+            "DELETE",
+            &cancel_path,
+            ORIGIN,
+            None,
+            serde_json::to_vec(&body).unwrap(),
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, v) = json_request(
+            &app,
+            "POST",
+            "/extension/v1/pair/claim",
+            ORIGIN,
+            None,
+            cancel_claim.clone(),
+        )
+        .await;
+        if secret == cancelled_secret {
+            assert_eq!(
+                (status, v["status"].as_str()),
+                (StatusCode::FORBIDDEN, Some("rejected"))
+            );
+        } else {
+            assert_eq!(
+                (status, v["status"].as_str()),
+                (StatusCode::OK, Some("pending"))
+            );
+        }
+    }
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/extension/v1/pair",
+        ORIGIN,
+        None,
+        json!({"installationId":cancelled_install,"name":"Browser","claimSecret":cancelled_secret}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, unused) = json_request(&app,"POST","/extension/v1/pair",ORIGIN,None,json!({"installationId":Uuid::new_v4().to_string(),"name":"Browser","claimSecret":hash("fourth"),"intent":intent["intent"]})).await;
+    assert_eq!(unused["status"], "pending");
+    let (_, intent) = json_request(
+        &app,
+        "POST",
+        "/api/extensions/intent",
+        "http://localhost:3000",
+        None,
+        json!({}),
+    )
+    .await;
+    super::pairing::expire_intents_for_test();
+    let (_, expired_intent) = json_request(&app,"POST","/extension/v1/pair","chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",None,json!({"installationId":Uuid::new_v4().to_string(),"name":"Browser","claimSecret":hash("fifth"),"intent":intent["intent"]})).await;
+    assert_eq!(expired_intent["status"], "pending");
+    let token = hash("legacy credential");
+    store::with_db(|db| {
+        db.execute(
+            "DELETE FROM extension_connections WHERE installation_id=?",
+            [&installation],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    store::with_db(|db| {
+        db.execute(
+            "INSERT INTO extension_connections VALUES(?,?,?,?,?)",
+            params![installation, "Legacy", ORIGIN, hash(&token), "date"],
+        )?;
+        db.execute(
+            "INSERT INTO extension_vaults VALUES(?,?,?)",
+            params![installation, Uuid::new_v4().to_string(), "{}"],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/extension/v1/connection",
+        ORIGIN,
+        Some(&token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/extension/v1/recordings/{}", Uuid::new_v4()),
+        ORIGIN,
+        Some(&token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = send(
+        &app,
+        "DELETE",
+        "/extension/v1/vault",
+        ORIGIN,
+        Some(&token),
+        vec![],
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    store::with_db(|db| {
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM extension_vaults", [], |r| r
+                .get::<_, i64>(0))?,
+            0
+        );
+        Ok(())
+    })
+    .unwrap();
+    for path in [
+        "/extension/v1/pairing/begin",
+        "/extension/v1/pairing/request",
+        "/extension/v1/pairing/claim",
+        "/extension/v1/pairing/activate",
+        "/extension/v1/pairing/cancel",
+        "/api/extensions/pairing",
+    ] {
+        let origin = if path.starts_with("/api") {
+            "http://localhost:3000"
+        } else {
+            ORIGIN
+        };
+        let (status, _, _) = send(&app, "POST", path, origin, None, b"{}".to_vec(), &[]).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+    store::reset_for_tests();
+    std::env::remove_var("ECHO_DATA_DIR");
 }
