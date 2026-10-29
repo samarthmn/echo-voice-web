@@ -1,3 +1,4 @@
+import { BUILD_ID } from './build';
 import { Provider, Recording, INTERRUPTION_DESCRIPTIONS } from './core';
 const PROVIDER_NAMES: Record<Provider, string> = {
   meet: 'Google Meet',
@@ -11,7 +12,21 @@ export function element<T extends HTMLElement = HTMLElement>(id: string): T {
 export async function request(message: { type: string } & Record<string, unknown>): Promise<any> {
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok) throw new Error(response?.error ?? 'Echo extension did not respond.');
+  if (message.type === 'STATE') reloadIfStale(response.value?.build);
   return response.value;
+}
+/**
+ * After an in-place update the browser can keep running the previous service worker while
+ * pages load the new code. Reload once per build so both sides match again.
+ */
+function reloadIfStale(running: unknown) {
+  if (running === BUILD_ID) return;
+  const key = 'echo-reloaded-for-build';
+  if (localStorage.getItem(key) === BUILD_ID)
+    throw new Error('Echo was updated. Reload it in your browser’s extensions page.');
+  localStorage.setItem(key, BUILD_ID);
+  chrome.runtime.reload();
+  throw new Error('Echo was updated and is restarting. Open it again in a moment.');
 }
 export function showError(error: unknown) {
   const node = element('error');

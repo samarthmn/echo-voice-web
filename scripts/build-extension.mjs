@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { cp, mkdir, readFile, lstat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, lstat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -34,6 +34,17 @@ export function extensionId(key) {
     .slice(0, 32)
     .replace(/[0-9a-f]/g, (n) => String.fromCharCode(97 + parseInt(n, 16)));
 }
+/** Content hash of the extension sources; pages compare it with the running service worker. */
+async function buildId() {
+  const hash = createHash('sha256');
+  for (const dir of ['extension', 'extension/src']) {
+    for (const name of (await readdir(path.join(project, dir))).sort()) {
+      if (!/\.(ts|html|css|json)$/.test(name)) continue;
+      hash.update(name).update(await readFile(path.join(project, dir, name)));
+    }
+  }
+  return hash.digest('hex').slice(0, 16);
+}
 export async function buildExtension({ outdir = path.join(project, 'extension', 'dist') } = {}) {
   await mkdir(outdir, { recursive: true });
   for (const name of ['', ...EXTENSION_FILES]) {
@@ -47,6 +58,7 @@ export async function buildExtension({ outdir = path.join(project, 'extension', 
   const manifest = JSON.parse(
     await readFile(path.join(project, 'extension', 'manifest.json'), 'utf8'),
   );
+  const define = { __ECHO_BUILD__: JSON.stringify(await buildId()) };
   await build({
     absWorkingDir: project,
     entryPoints: ['background', 'offscreen', 'popup', 'setup'].map(
@@ -59,6 +71,7 @@ export async function buildExtension({ outdir = path.join(project, 'extension', 
     target: 'chrome120',
     legalComments: 'none',
     minify: false,
+    define,
   });
   await build({
     absWorkingDir: project,
@@ -70,6 +83,7 @@ export async function buildExtension({ outdir = path.join(project, 'extension', 
     target: 'chrome120',
     legalComments: 'none',
     minify: false,
+    define,
   });
   for (const name of [
     'manifest.json',

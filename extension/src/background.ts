@@ -1,3 +1,4 @@
+import { BUILD_ID } from './build';
 import { externalMessage } from './external-messages';
 import {
   meetingFor,
@@ -467,6 +468,7 @@ async function state() {
     status?.error ??
     ((await chrome.storage.session.get('recorderError')).recorderError as string | undefined);
   return {
+    build: BUILD_ID,
     migrationError,
     connection: {
       ...scheduleClaim(await pairingView()),
