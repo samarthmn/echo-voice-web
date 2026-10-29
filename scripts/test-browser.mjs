@@ -4,6 +4,9 @@ import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { stopTestServer, removeTestDirectory } from '../tests/helpers/server-cleanup.mjs';
+import { resolveChromium } from './browser-path.mjs';
+
+const browserPath = await resolveChromium();
 
 const scratch = path.resolve('tmp');
 await mkdir(scratch, { recursive: true });
@@ -13,20 +16,44 @@ await mkdir(data);
 const artifacts = path.join(runRoot, 'artifacts');
 let passed = false;
 const socket = createServer();
-await new Promise((resolve, reject) => { socket.once('error', reject); socket.listen(0, '127.0.0.1', resolve); });
+await new Promise((resolve, reject) => {
+  socket.once('error', reject);
+  socket.listen(0, '127.0.0.1', resolve);
+});
 const port = socket.address().port;
-await new Promise(resolve => socket.close(resolve));
+await new Promise((resolve) => socket.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
-  env: { ...process.env, ECHO_TEST_MODE:'1', ECHO_TEST_STORAGE_KEY:Buffer.alloc(32,42).toString('base64'), ECHO_TEST_CHATGPT_RUNTIME: 'fixture', ECHO_CODEX_BIN: path.resolve('tests/fixtures/codex-helper.mjs'), TMPDIR: scratch, ECHO_DATA_DIR: data, ECHO_BIND: `127.0.0.1:${port}`, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' },
+  env: {
+    ...process.env,
+    ECHO_TEST_MODE: '1',
+    ECHO_TEST_STORAGE_KEY: Buffer.alloc(32, 42).toString('base64'),
+    ECHO_TEST_CHATGPT_RUNTIME: 'fixture',
+    ECHO_CODEX_BIN: path.resolve('tests/fixtures/codex-helper.mjs'),
+    TMPDIR: scratch,
+    ECHO_DATA_DIR: data,
+    ECHO_BIND: `127.0.0.1:${port}`,
+    GOOGLE_CLIENT_ID: '',
+    GOOGLE_CLIENT_SECRET: '',
+  },
   stdio: 'inherit',
 });
-let serverError, serverExited = false;
-server.once('error', error => { serverError = error; serverExited = true; });
-server.once('exit', () => { serverExited = true; });
+let serverError,
+  serverExited = false;
+server.once('error', (error) => {
+  serverError = error;
+  serverExited = true;
+});
+server.once('exit', () => {
+  serverExited = true;
+});
 function requireServer() {
-  if (serverError) throw new Error(`The isolated browser-test server could not start: ${serverError.message}`);
-  if (serverExited) throw new Error(`The isolated browser-test server exited (${server.exitCode ?? server.signalCode}). Refusing to use another workspace.`);
+  if (serverError)
+    throw new Error(`The isolated browser-test server could not start: ${serverError.message}`);
+  if (serverExited)
+    throw new Error(
+      `The isolated browser-test server exited (${server.exitCode ?? server.signalCode}). Refusing to use another workspace.`,
+    );
 }
 async function ready() {
   const deadline = Date.now() + 15000;
@@ -43,7 +70,9 @@ async function ready() {
     requireServer();
     if (storage) {
       if (typeof storage.path !== 'string' || path.resolve(storage.path) !== path.resolve(data)) {
-        throw new Error('The test port belongs to a different data folder. Refusing to run browser tests against it.');
+        throw new Error(
+          'The test port belongs to a different data folder. Refusing to run browser tests against it.',
+        );
       }
       return;
     }
@@ -54,17 +83,26 @@ async function ready() {
 async function run(script) {
   requireServer();
   await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script], { env: {
-      ...process.env, TMPDIR: scratch, ECHO_E2E_URL: base, ECHO_TEST_URL: base,
-      ECHO_WORKSPACE_TEST_ARTIFACTS: path.join(artifacts, 'workspace'),
-      ECHO_AUDIT_SCREENSHOTS: path.join(artifacts, 'accessibility'),
-      ECHO_E2E_SCREENSHOTS: path.join(artifacts, 'settings'),
-      ECHO_TEST_ARTIFACTS: path.join(artifacts, 'review'),
-      ECHO_CHATGPT_TEST_ARTIFACTS: path.join(artifacts, 'review-chatgpt'),
-      ECHO_CONNECTION_TEST_ARTIFACTS: path.join(artifacts, 'chatgpt-connection'),
-    }, stdio: 'inherit' });
+    const child = spawn(process.execPath, [script], {
+      env: {
+        ...process.env,
+        TMPDIR: scratch,
+        CHROMIUM_PATH: browserPath,
+        ECHO_E2E_URL: base,
+        ECHO_TEST_URL: base,
+        ECHO_WORKSPACE_TEST_ARTIFACTS: path.join(artifacts, 'workspace'),
+        ECHO_AUDIT_SCREENSHOTS: path.join(artifacts, 'accessibility'),
+        ECHO_E2E_SCREENSHOTS: path.join(artifacts, 'settings'),
+        ECHO_TEST_ARTIFACTS: path.join(artifacts, 'review'),
+        ECHO_CHATGPT_TEST_ARTIFACTS: path.join(artifacts, 'review-chatgpt'),
+        ECHO_CONNECTION_TEST_ARTIFACTS: path.join(artifacts, 'chatgpt-connection'),
+      },
+      stdio: 'inherit',
+    });
     child.once('error', reject);
-    child.once('exit', code => code === 0 ? resolve() : reject(new Error(`${script} failed (${code})`)));
+    child.once('exit', (code) =>
+      code === 0 ? resolve() : reject(new Error(`${script} failed (${code})`)),
+    );
   });
   requireServer();
 }
@@ -93,6 +131,9 @@ try {
     'tests/chatgpt-connection.e2e.mjs',
     'tests/calendar-connection.e2e.mjs',
     'tests/onboarding.e2e.mjs',
-  ]) await run(script);
+  ])
+    await run(script);
   passed = true;
-} finally { await shutdown(); }
+} finally {
+  await shutdown();
+}

@@ -1,0 +1,7 @@
+nodeLinker: hoisted
+overrides:
+  sharp: ^0.35.4
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: false

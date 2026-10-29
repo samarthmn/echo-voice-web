@@ -1,1 +1,101 @@
-.extension-connection{max-width:660px;margin:auto;padding:48px 24px}.connection-brand{display:inline-flex;align-items:center;gap:12px;font-size:25px;font-weight:600;margin-bottom:28px}.connection-card{padding:32px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}.connection-card p{margin:18px 0;font-size:14px}.connection-card h1{font-size:30px}.connection-actions{display:flex;gap:12px;margin:24px 0}.connection-actions .button{font-size:14px;min-height:44px;padding:12px 24px}.connection-card details{border-top:1px solid var(--line);padding-top:20px;margin-top:24px;font-size:13px}.connection-card summary{cursor:pointer}.connection-card summary:focus-visible{outline:3px solid var(--focus);outline-offset:4px}.connection-card dt{color:var(--muted);margin-top:16px}.connection-card dd{margin:6px 0;overflow-wrap:anywhere}.connection-footer{font-size:12px;margin-top:22px}.connection-card #error{color:var(--danger);background:var(--danger-soft);padding:14px;border-radius:8px;line-height:1.6}.connection-card #status{color:var(--ink)}.connection-card li{margin:16px 0;line-height:1.75}.connection-card ol{padding-left:22px}[hidden]{display:none!important}@media(max-width:420px){.extension-connection{padding:24px 16px}.connection-card{padding:22px 18px}.connection-card h1{font-size:26px}.connection-actions{flex-wrap:wrap}.connection-actions .button{flex:1}.connection-card code{overflow-wrap:anywhere}}
+.extension-connection {
+  max-width: 660px;
+  margin: auto;
+  padding: 48px 24px;
+}
+.connection-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 25px;
+  font-weight: 600;
+  margin-bottom: 28px;
+}
+.connection-card {
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.connection-card p {
+  margin: 18px 0;
+  font-size: 14px;
+}
+.connection-card h1 {
+  font-size: 30px;
+}
+.connection-actions {
+  display: flex;
+  gap: 12px;
+  margin: 24px 0;
+}
+.connection-actions .button {
+  font-size: 14px;
+  min-height: 44px;
+  padding: 12px 24px;
+}
+.connection-card details {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  margin-top: 24px;
+  font-size: 13px;
+}
+.connection-card summary {
+  cursor: pointer;
+}
+.connection-card summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+.connection-card dt {
+  color: var(--muted);
+  margin-top: 16px;
+}
+.connection-card dd {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.connection-footer {
+  font-size: 12px;
+  margin-top: 22px;
+}
+.connection-card #error {
+  color: var(--danger);
+  background: var(--danger-soft);
+  padding: 14px;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+.connection-card #status {
+  color: var(--ink);
+}
+.connection-card li {
+  margin: 16px 0;
+  line-height: 1.75;
+}
+.connection-card ol {
+  padding-left: 22px;
+}
+[hidden] {
+  display: none !important;
+}
+@media (max-width: 420px) {
+  .extension-connection {
+    padding: 24px 16px;
+  }
+  .connection-card {
+    padding: 22px 18px;
+  }
+  .connection-card h1 {
+    font-size: 26px;
+  }
+  .connection-actions {
+    flex-wrap: wrap;
+  }
+  .connection-actions .button {
+    flex: 1;
+  }
+  .connection-card code {
+    overflow-wrap: anywhere;
+  }
+}

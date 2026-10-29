@@ -13,7 +13,7 @@ Record conversations, turn them into text, and create meeting notes. Echo keeps 
 - **Protect or move your recordings:** read [backup and recovery](docs/storage-and-recovery.md).
 - **Build or contribute:** use the [developer guide](docs/development.md).
 
-Current qualification targets are Brave and Chrome on Apple Silicon macOS 14+ and Ubuntu 24.04 x64. Each browser and meeting service needs its own test evidence. Check the [qualification matrix](docs/extension-qualification.md) before relying on a particular browser or meeting service.
+Current qualification targets are Brave and Chrome on Apple Silicon macOS 14+. Each browser and meeting service needs its own test evidence.
 
 ## Set up Echo
 
@@ -89,4 +89,4 @@ Contact [Samarth](mailto:samarth.m.n@gmail.com) with your OS, browser, build ver
 
 Echo uses Dioxus/Rust WebAssembly, Axum, SQLCipher and encrypted audio storage, browser/native speech engines, and a Manifest V3 TypeScript extension. See [build and test instructions](docs/development.md), [architecture](docs/architecture.md) and the [documentation index](docs/README.md).
 
-The [feature map](docs/feature-coverage.md) and [qualification record](docs/extension-qualification.md) describe limits. Earlier review evidence applies to its stated build; it does not establish that this preview or every platform has passed.
+Earlier review evidence applies to its stated build; it does not establish that this preview or every platform has passed.

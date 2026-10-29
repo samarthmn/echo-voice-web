@@ -1,10 +1,211 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Echo extension setup</title><link rel="stylesheet" href="design-tokens.css"><link rel="stylesheet" href="ui.css"><script type="module" src="setup.js"></script></head>
-<body class="setup"><header><img src="icons/echo.svg" alt="" width="38" height="38"><div><strong>Echo</strong><span>Browser extension</span></div></header><main><h1>Extension setup</h1><p class="description intro">Record the meeting you’ve already joined. Audio stays on this device until your Echo library safely saves it.</p><div id="error" class="error" role="alert" hidden></div><p id="status" role="status" class="notice" hidden></p>
-<details class="card setup-step" id="vault-step" open><summary><strong>1 · Protect saved recordings</strong><span id="vault-summary">Save your recovery phrase</span></summary><div class="step-content"><p class="description">Audio, meeting details and saved transcripts are encrypted on this device. Echo unlocks your authorized browser while it is running. After a browser restart without Echo, your recovery phrase opens saved history. New recording still works offline.</p><button id="vault-create" class="primary">Create recovery phrase</button><div id="vault-phrase-panel" class="notice" hidden><h2>Save these 24 words</h2><p>Keep a copy somewhere private, outside this browser. These words are shown once. If Echo is unavailable, losing them means losing access to your saved audio.</p><ol id="vault-phrase" class="recovery-words"></ol><button id="vault-saved" class="secondary">I have saved the words</button></div><div id="vault-confirm-panel" hidden><p class="description">Confirm three words from your saved copy.</p><div id="vault-checks"></div><button id="vault-confirm" class="primary">Protect recordings</button><button id="vault-restart" class="quiet">Create a new phrase</button></div><p id="vault-status" class="description" role="status"></p><div id="vault-unlock-panel" hidden><label class="field">Your saved 24-word recovery phrase<textarea id="vault-recovery" rows="3" autocomplete="off" spellcheck="false" autocapitalize="none"></textarea></label><button id="vault-unlock" class="secondary">Unlock saved history</button><button id="vault-retry" class="quiet">Try Echo again</button></div></div></details>
-<details class="card setup-step" id="connect-step" open><summary><strong>2 · Connect Echo</strong><span id="connect-summary">Save recordings to your local library</span></summary><div class="step-content"><p class="description">Open the Echo app, then connect this browser. Approve the connection once in Echo.</p><div class="actions"><button id="connect" class="primary">Connect to Echo</button><button id="offline" class="secondary">Record without Echo</button></div><p id="pairing-status" class="description" role="status"></p><div class="actions"><button id="open-approval" class="secondary" hidden>Open approval page</button><button id="cancel-pairing" class="quiet" hidden>Cancel connection</button></div><div id="library-confirm" class="notice" hidden><p id="library-confirm-description">Saved recordings keep their original library. Confirm the destination for new and unassigned recordings before connecting.</p><button id="confirm-library" class="secondary">Confirm this library</button><button id="cancel-library" class="quiet">Keep current connection</button></div><p id="connection-status" role="status" class="description">Checking Echo connection</p><button id="disconnect" class="secondary" hidden>Disconnect from Echo</button><details id="advanced"><summary>Advanced connection settings</summary><label class="field">Local Echo address<input id="endpoint" type="url" value="http://localhost:3000" autocomplete="off" spellcheck="false"></label><label class="field">Browser name<input id="name" type="text" value="Echo browser extension" maxlength="100"></label><p class="footnote">For code pairing, create a code in Echo Settings → Browser extension. Older Echo versions require this flow; update Echo for reliable interrupted-connection recovery.</p><label class="field">Pairing code<input id="code" type="text" autocomplete="off" spellcheck="false" maxlength="128"></label><div class="actions"><button id="request" class="secondary">Send pairing code</button><button id="claim" class="quiet">Check approval</button></div><p id="paired" class="footnote"></p></details></div></details>
-<details class="card setup-step" id="provider-step" open><summary><strong>3 · Choose your meeting service</strong><span id="provider-summary">Enable the service you use</span></summary><div class="step-content"><div id="providers"></div><p class="footnote">Access is requested only for the service you enable. Unrecognized, stale or pre-join meeting controls exclude your microphone.</p></div></details>
-<details class="card setup-step" id="microphone-step" open><summary><strong>4 · Include your microphone?</strong><span id="mic-summary">Your choice</span></summary><div class="step-content"><p class="description">Include your voice only while your meeting microphone is on, or record just the call audio.</p><div class="actions"><button id="microphone" class="secondary">Allow microphone</button><button id="call-only" class="secondary">Record call audio only</button></div><p id="mic-status" class="description" role="status"></p></div></details>
-<section class="notice" id="ready" hidden><h2>Ready to record</h2><p>Return to your meeting tab, open Echo in the toolbar, confirm participant consent and press Start. Setup never starts a recording.</p><p>Ready to transcribe when Echo is open and a speech model is installed. Recording works offline too.</p></section>
-<section class="card"><div class="section-heading"><h2>Local recordings &amp; recovery</h2><button id="retry" class="quiet">Retry transfer</button></div><p class="description">Interrupted recordings preserve their committed audio. Recording never restarts automatically. Export creates sequential WAV parts of at most 30 minutes.</p><div id="recordings"></div><div id="exports" class="notice" hidden><h3 id="export-title">Export audio</h3><p id="export-progress"></p><a id="download-part" class="primary" hidden>Download part</a><button id="next-part" class="secondary" hidden>Prepare next part</button><p class="footnote">Keep WAV parts in order. Audio pauses are documented in the accompanying timeline file.</p><a id="download-timeline" class="quiet" hidden>Download timeline</a></div></section>
-<section class="privacy"><h2>Recording privacy and limits</h2><p>Start requires your click and participant consent. This extension captures audio from the chosen meeting tab and an optional microphone. It never uses your camera, reads browser account credentials, joins meetings automatically, or sends audio to a cloud speech service.</p><p>Connection credentials are encrypted with a browser device key. This does not protect an unlocked browser or a stolen browser profile from someone who can run that browser. Exported WAV and timeline files are readable files; save them somewhere private.</p><p>Limits: eight hours per recording, 2 GiB of pending audio, five seconds of saving backlog. Audio that has not been confirmed in Echo is never automatically deleted.</p></section></main></body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Echo extension setup</title>
+    <link rel="stylesheet" href="design-tokens.css" />
+    <link rel="stylesheet" href="ui.css" />
+    <script type="module" src="setup.js"></script>
+  </head>
+  <body class="setup">
+    <header>
+      <img src="icons/echo.svg" alt="" width="38" height="38" />
+      <div><strong>Echo</strong><span>Browser extension</span></div>
+    </header>
+    <main>
+      <h1>Extension setup</h1>
+      <p class="description intro">
+        Record the meeting you’ve already joined. Audio stays on this device until your Echo library
+        safely saves it.
+      </p>
+      <div id="error" class="error" role="alert" hidden></div>
+      <p id="status" role="status" class="notice" hidden></p>
+      <details class="card setup-step" id="vault-step" open>
+        <summary>
+          <strong>1 · Protect saved recordings</strong
+          ><span id="vault-summary">Save your recovery phrase</span>
+        </summary>
+        <div class="step-content">
+          <p class="description">
+            Audio, meeting details and saved transcripts are encrypted on this device. Echo unlocks
+            your authorized browser while it is running. After a browser restart without Echo, your
+            recovery phrase opens saved history. New recording still works offline.
+          </p>
+          <button id="vault-create" class="primary">Create recovery phrase</button>
+          <div id="vault-phrase-panel" class="notice" hidden>
+            <h2>Save these 24 words</h2>
+            <p>
+              Keep a copy somewhere private, outside this browser. These words are shown once. If
+              Echo is unavailable, losing them means losing access to your saved audio.
+            </p>
+            <ol id="vault-phrase" class="recovery-words"></ol>
+            <button id="vault-saved" class="secondary">I have saved the words</button>
+          </div>
+          <div id="vault-confirm-panel" hidden>
+            <p class="description">Confirm three words from your saved copy.</p>
+            <div id="vault-checks"></div>
+            <button id="vault-confirm" class="primary">Protect recordings</button
+            ><button id="vault-restart" class="quiet">Create a new phrase</button>
+          </div>
+          <p id="vault-status" class="description" role="status"></p>
+          <div id="vault-unlock-panel" hidden>
+            <label class="field"
+              >Your saved 24-word recovery phrase<textarea
+                id="vault-recovery"
+                rows="3"
+                autocomplete="off"
+                spellcheck="false"
+                autocapitalize="none"
+              ></textarea></label
+            ><button id="vault-unlock" class="secondary">Unlock saved history</button
+            ><button id="vault-retry" class="quiet">Try Echo again</button>
+          </div>
+        </div>
+      </details>
+      <details class="card setup-step" id="connect-step" open>
+        <summary>
+          <strong>2 · Connect Echo</strong
+          ><span id="connect-summary">Save recordings to your local library</span>
+        </summary>
+        <div class="step-content">
+          <p class="description">
+            Open the Echo app, then connect this browser. Approve the connection once in Echo.
+          </p>
+          <div class="actions">
+            <button id="connect" class="primary">Connect to Echo</button
+            ><button id="offline" class="secondary">Record without Echo</button>
+          </div>
+          <p id="pairing-status" class="description" role="status"></p>
+          <div class="actions">
+            <button id="open-approval" class="secondary" hidden>Open approval page</button
+            ><button id="cancel-pairing" class="quiet" hidden>Cancel connection</button>
+          </div>
+          <div id="library-confirm" class="notice" hidden>
+            <p id="library-confirm-description">
+              Saved recordings keep their original library. Confirm the destination for new and
+              unassigned recordings before connecting.
+            </p>
+            <button id="confirm-library" class="secondary">Confirm this library</button
+            ><button id="cancel-library" class="quiet">Keep current connection</button>
+          </div>
+          <p id="connection-status" role="status" class="description">Checking Echo connection</p>
+          <button id="disconnect" class="secondary" hidden>Disconnect from Echo</button>
+          <details id="advanced">
+            <summary>Advanced connection settings</summary>
+            <label class="field"
+              >Local Echo address<input
+                id="endpoint"
+                type="url"
+                value="http://localhost:3000"
+                autocomplete="off"
+                spellcheck="false" /></label
+            ><label class="field"
+              >Browser name<input
+                id="name"
+                type="text"
+                value="Echo browser extension"
+                maxlength="100"
+            /></label>
+            <p class="footnote">
+              For code pairing, create a code in Echo Settings → Browser extension. Older Echo
+              versions require this flow; update Echo for reliable interrupted-connection recovery.
+            </p>
+            <label class="field"
+              >Pairing code<input
+                id="code"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="128"
+            /></label>
+            <div class="actions">
+              <button id="request" class="secondary">Send pairing code</button
+              ><button id="claim" class="quiet">Check approval</button>
+            </div>
+            <p id="paired" class="footnote"></p>
+          </details>
+        </div>
+      </details>
+      <details class="card setup-step" id="provider-step" open>
+        <summary>
+          <strong>3 · Choose your meeting service</strong
+          ><span id="provider-summary">Enable the service you use</span>
+        </summary>
+        <div class="step-content">
+          <div id="providers"></div>
+          <p class="footnote">
+            Access is requested only for the service you enable. Unrecognized, stale or pre-join
+            meeting controls exclude your microphone.
+          </p>
+        </div>
+      </details>
+      <details class="card setup-step" id="microphone-step" open>
+        <summary>
+          <strong>4 · Include your microphone?</strong><span id="mic-summary">Your choice</span>
+        </summary>
+        <div class="step-content">
+          <p class="description">
+            Include your voice only while your meeting microphone is on, or record just the call
+            audio.
+          </p>
+          <div class="actions">
+            <button id="microphone" class="secondary">Allow microphone</button
+            ><button id="call-only" class="secondary">Record call audio only</button>
+          </div>
+          <p id="mic-status" class="description" role="status"></p>
+        </div>
+      </details>
+      <section class="notice" id="ready" hidden>
+        <h2>Ready to record</h2>
+        <p>
+          Return to your meeting tab, open Echo in the toolbar, confirm participant consent and
+          press Start. Setup never starts a recording.
+        </p>
+        <p>
+          Ready to transcribe when Echo is open and a speech model is installed. Recording works
+          offline too.
+        </p>
+      </section>
+      <section class="card">
+        <div class="section-heading">
+          <h2>Local recordings &amp; recovery</h2>
+          <button id="retry" class="quiet">Retry transfer</button>
+        </div>
+        <p class="description">
+          Interrupted recordings preserve their committed audio. Recording never restarts
+          automatically. Export creates sequential WAV parts of at most 30 minutes.
+        </p>
+        <div id="recordings"></div>
+        <div id="exports" class="notice" hidden>
+          <h3 id="export-title">Export audio</h3>
+          <p id="export-progress"></p>
+          <a id="download-part" class="primary" hidden>Download part</a
+          ><button id="next-part" class="secondary" hidden>Prepare next part</button>
+          <p class="footnote">
+            Keep WAV parts in order. Audio pauses are documented in the accompanying timeline file.
+          </p>
+          <a id="download-timeline" class="quiet" hidden>Download timeline</a>
+        </div>
+      </section>
+      <section class="privacy">
+        <h2>Recording privacy and limits</h2>
+        <p>
+          Start requires your click and participant consent. This extension captures audio from the
+          chosen meeting tab and an optional microphone. It never uses your camera, reads browser
+          account credentials, joins meetings automatically, or sends audio to a cloud speech
+          service.
+        </p>
+        <p>
+          Connection credentials are encrypted with a browser device key. This does not protect an
+          unlocked browser or a stolen browser profile from someone who can run that browser.
+          Exported WAV and timeline files are readable files; save them somewhere private.
+        </p>
+        <p>
+          Limits: eight hours per recording, 2 GiB of pending audio, five seconds of saving backlog.
+          Audio that has not been confirmed in Echo is never automatically deleted.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

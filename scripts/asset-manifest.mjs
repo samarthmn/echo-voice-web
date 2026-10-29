@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 export async function writeAssetManifest(publicRoot = resolve('public')) {
   const versions = {};
   async function collect(directory) {
-    for (const entry of await readdir(directory, { withFileTypes: true }).catch(error => {
+    for (const entry of await readdir(directory, { withFileTypes: true }).catch((error) => {
       if (error.code === 'ENOENT') return [];
       throw error;
     })) {
@@ -15,7 +15,9 @@ export async function writeAssetManifest(publicRoot = resolve('public')) {
       if (entry.isDirectory()) await collect(path);
       else if (/\.(?:js|mjs|wasm|css)$/.test(entry.name)) {
         const url = '/' + relative(publicRoot, path).split('\\').join('/');
-        versions[url] = createHash('sha256').update(await readFile(path)).digest('hex');
+        versions[url] = createHash('sha256')
+          .update(await readFile(path))
+          .digest('hex');
       }
     }
   }

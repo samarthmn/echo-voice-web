@@ -1,1 +1,89 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Start recording with Echo</title><link rel="stylesheet" href="/design-tokens.css"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/extension-connect.css"></head><body><main class="extension-connection"><a class="connection-brand" href="/"><img src="/favicon.svg" width="38" height="38" alt="">Echo</a><section class="connection-card"><p class="eyebrow">BROWSER EXTENSION</p><h1>Record your next meeting</h1><p>Use the meeting you already joined in Brave or Chrome. Keep Echo’s local server running to save recordings to your library.</p><ol><li><strong>Protect saved recordings.</strong> In extension Setup, create and privately save the recovery phrase, then confirm the requested words. It is separate from the Echo library phrase.</li><li><strong>Connect Echo.</strong> Open the extension from your browser toolbar. Choose <strong>Connect to Echo</strong>, then approve the connection on the Echo page that opens.</li><li><strong>Choose your meeting service.</strong> Enable Google Meet, Zoom Web or Microsoft Teams Web in extension setup. Your browser asks for access only to that service.</li><li><strong>Choose your audio.</strong> Allow microphone access to include your voice, or choose <strong>Record call audio only</strong>. Your microphone is excluded whenever meeting controls are muted or cannot be verified.</li><li><strong>Start in your meeting tab.</strong> Return to the meeting, open Echo in the toolbar, confirm participant consent and press Start. Closing the popup does not stop recording.</li><li><strong>Stop and save.</strong> Choose Stop &amp; save. Audio stays in the browser until Echo confirms its complete copy. Open the recording in Echo to transcribe it.</li></ol><p>Recording works offline. Choose <strong>Record without Echo</strong> in setup; connect later or export saved audio from Local recordings &amp; recovery. After a browser restart without Echo, enter your extension recovery phrase to unlock older recordings. Optional live text needs an open Echo workspace and an installed Turbo model.</p><details><summary>Connection help</summary><p><strong>Echo unavailable?</strong> Start Echo’s local server, then choose Connect to Echo again. If Echo uses another local address, enter it under Advanced in extension setup.</p><p><strong>Older Echo version?</strong> Update Echo for automatic connection recovery, or create a pairing code in Echo Settings → Browser extension and enter it under Advanced. Approve the request in Echo.</p><p>Transfer or export pending audio before uninstalling the extension or deleting your browser profile.</p></details><details><summary>Developer installation</summary><p>The extension is not in the Chrome Web Store yet. For source builds, run <code>npm run build:extension</code>, open your browser’s extensions page, enable Developer mode, choose Load unpacked and select <code>extension/dist</code> from the checkout.</p><p>See <code>docs/browser-extension.md</code> for development setup and recovery, and <code>docs/extension-qualification.md</code> for the tested browser and meeting combinations.</p></details><p><a class="button button-secondary" href="/">Open Echo</a></p></section></main></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Start recording with Echo</title>
+    <link rel="stylesheet" href="/design-tokens.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/extension-connect.css" />
+  </head>
+  <body>
+    <main class="extension-connection">
+      <a class="connection-brand" href="/"
+        ><img src="/favicon.svg" width="38" height="38" alt="" />Echo</a
+      >
+      <section class="connection-card">
+        <p class="eyebrow">BROWSER EXTENSION</p>
+        <h1>Record your next meeting</h1>
+        <p>
+          Use the meeting you already joined in Brave or Chrome. Keep Echo’s local server running to
+          save recordings to your library.
+        </p>
+        <ol>
+          <li>
+            <strong>Protect saved recordings.</strong> In extension Setup, create and privately save
+            the recovery phrase, then confirm the requested words. It is separate from the Echo
+            library phrase.
+          </li>
+          <li>
+            <strong>Connect Echo.</strong> Open the extension from your browser toolbar. Choose
+            <strong>Connect to Echo</strong>, then approve the connection on the Echo page that
+            opens.
+          </li>
+          <li>
+            <strong>Choose your meeting service.</strong> Enable Google Meet, Zoom Web or Microsoft
+            Teams Web in extension setup. Your browser asks for access only to that service.
+          </li>
+          <li>
+            <strong>Choose your audio.</strong> Allow microphone access to include your voice, or
+            choose <strong>Record call audio only</strong>. Your microphone is excluded whenever
+            meeting controls are muted or cannot be verified.
+          </li>
+          <li>
+            <strong>Start in your meeting tab.</strong> Return to the meeting, open Echo in the
+            toolbar, confirm participant consent and press Start. Closing the popup does not stop
+            recording.
+          </li>
+          <li>
+            <strong>Stop and save.</strong> Choose Stop &amp; save. Audio stays in the browser until
+            Echo confirms its complete copy. Open the recording in Echo to transcribe it.
+          </li>
+        </ol>
+        <p>
+          Recording works offline. Choose <strong>Record without Echo</strong> in setup; connect
+          later or export saved audio from Local recordings &amp; recovery. After a browser restart
+          without Echo, enter your extension recovery phrase to unlock older recordings. Optional
+          live text needs an open Echo workspace and an installed Turbo model.
+        </p>
+        <details>
+          <summary>Connection help</summary>
+          <p>
+            <strong>Echo unavailable?</strong> Start Echo’s local server, then choose Connect to
+            Echo again. If Echo uses another local address, enter it under Advanced in extension
+            setup.
+          </p>
+          <p>
+            <strong>Older Echo version?</strong> Update Echo for automatic connection recovery, or
+            create a pairing code in Echo Settings → Browser extension and enter it under Advanced.
+            Approve the request in Echo.
+          </p>
+          <p>
+            Transfer or export pending audio before uninstalling the extension or deleting your
+            browser profile.
+          </p>
+        </details>
+        <details>
+          <summary>Developer installation</summary>
+          <p>
+            The extension is not in the Chrome Web Store yet. For source builds, run
+            <code>pnpm build:extension</code>, open your browser’s extensions page, enable Developer
+            mode, choose Load unpacked and select <code>extension/dist</code> from the checkout.
+          </p>
+          <p>See <code>docs/browser-extension.md</code> for development setup and recovery.</p>
+        </details>
+        <p><a class="button button-secondary" href="/">Open Echo</a></p>
+      </section>
+    </main>
+  </body>
+</html>

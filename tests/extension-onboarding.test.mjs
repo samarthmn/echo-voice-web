@@ -1,29 +1,229 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
-import {build} from 'esbuild';
+import { readFile } from 'node:fs/promises';
+import { build } from 'esbuild';
 import vm from 'node:vm';
 
-test('setup starts with Connect and retains advanced manual connection and offline choice',async()=>{
- const html=await readFile('extension/setup.html','utf8');assert.match(html,/Connect to Echo/);assert.match(html,/Record without Echo/);assert.match(html,/<details[^>]*id="advanced"/);assert.ok(html.indexOf('id="connect"')<html.indexOf('id="providers"'));assert.match(html,/Record call audio only/);
+test('setup starts with Connect and retains advanced manual connection and offline choice', async () => {
+  const html = await readFile('extension/setup.html', 'utf8');
+  assert.match(html, /Connect to Echo/);
+  assert.match(html, /Record without Echo/);
+  assert.match(html, /<details[^>]*id="advanced"/);
+  assert.ok(html.indexOf('id="connect"') < html.indexOf('id="providers"'));
+  assert.match(html, /Record call audio only/);
 });
-test('approval page never approves on load, safely renders labels, and requires a click',async()=>{
- const buildResult=await build({entryPoints:['web/extension-connect.js'],bundle:true,write:false,format:'iife'});
- const elements=new Map();const element=id=>{if(!elements.has(id))elements.set(id,{hidden:false,disabled:false,textContent:'',listeners:{},addEventListener(name,fn){this.listeners[name]=fn;}});return elements.get(id);};
- const calls=[];const requestId='11111111-1111-4111-8111-111111111111';const context={URLSearchParams,location:{hash:`#request=${requestId}&return=https://example.invalid`},document:{getElementById:element},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({requestId,installationId:'installation',libraryId:'library',name:'<img src=x onerror=alert(1)>',origin:'chrome-extension://poonbmodjfijfbfiopememgfijahgbag',status:options?.method==='POST'?'approved':'pending',expiresAt:Math.floor(Date.now()/1000)+300})};},setInterval:()=>{},clearInterval:()=>{},Date};
- vm.runInNewContext(buildResult.outputFiles[0].text,context);await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,1);assert.ok(!calls[0].options?.method||calls[0].options.method==='GET');assert.equal(element('installation-name').textContent,'<img src=x onerror=alert(1)>');await element('approve').listeners.click();assert.equal(calls.length,2);assert.equal(calls[1].url,`/api/extensions/requests/${requestId}/approve`);assert.equal(calls[1].options.method,'POST');assert.match(element('status').textContent,/Return to the extension/);
+test('approval page never approves on load, safely renders labels, and requires a click', async () => {
+  const buildResult = await build({
+    entryPoints: ['web/extension-connect.js'],
+    bundle: true,
+    write: false,
+    format: 'iife',
+  });
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id))
+      elements.set(id, {
+        hidden: false,
+        disabled: false,
+        textContent: '',
+        listeners: {},
+        addEventListener(name, fn) {
+          this.listeners[name] = fn;
+        },
+      });
+    return elements.get(id);
+  };
+  const calls = [];
+  const requestId = '11111111-1111-4111-8111-111111111111';
+  const context = {
+    URLSearchParams,
+    location: { hash: `#request=${requestId}&return=https://example.invalid` },
+    document: { getElementById: element },
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          requestId,
+          installationId: 'installation',
+          libraryId: 'library',
+          name: '<img src=x onerror=alert(1)>',
+          origin: 'chrome-extension://poonbmodjfijfbfiopememgfijahgbag',
+          status: options?.method === 'POST' ? 'approved' : 'pending',
+          expiresAt: Math.floor(Date.now() / 1000) + 300,
+        }),
+      };
+    },
+    setInterval: () => {},
+    clearInterval: () => {},
+    Date,
+  };
+  vm.runInNewContext(buildResult.outputFiles[0].text, context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 1);
+  assert.ok(!calls[0].options?.method || calls[0].options.method === 'GET');
+  assert.equal(element('installation-name').textContent, '<img src=x onerror=alert(1)>');
+  await element('approve').listeners.click();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, `/api/extensions/requests/${requestId}/approve`);
+  assert.equal(calls[1].options.method, 'POST');
+  assert.match(element('status').textContent, /Return to the extension/);
 });
-test('popup checks actual host and microphone permission before enabling Start',async()=>{
- const elements=new Map();const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',value:'',checked:false,hidden:false,listeners:{},append(){},addEventListener(name,fn){this.listeners[name]=fn;}});return elements.get(id);};
- let hostGranted=false;let micPermission='denied';let interval;const result=await build({entryPoints:['extension/src/popup.ts'],bundle:true,write:false,format:'iife',plugins:[{name:'ui',setup(b){b.onResolve({filter:/^\.\/ui$/},()=>({path:'ui',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const element=globalThis.element;export const request=async()=>({settings:{enabledProviders:['meet'],micGranted:true},active:null,recordings:[]});export const renderRecordings=()=>{};export const showError=error=>{throw error};export const action=fn=>fn();export const duration=()=>'';`}));}}]});
- vm.runInNewContext(result.outputFiles[0].text,{URL,element,setInterval:fn=>{interval=fn;},document:{createElement:()=>({})},chrome:{tabs:{query:async()=>[{id:1,url:'https://meet.google.com/abc-defg-hij'}]},permissions:{contains:async()=>hostGranted}},navigator:{permissions:{query:async()=>({state:micPermission})},mediaDevices:{enumerateDevices:async()=>[]}}});
- await new Promise(resolve=>setImmediate(resolve));element('consent').checked=true;element('consent').listeners.change();assert.equal(element('start').disabled,true);
- hostGranted=true;interval();await new Promise(resolve=>setImmediate(resolve));element('mic').checked=true;element('mic').listeners.change();assert.equal(element('start').disabled,true,'saved micGranted does not override revoked permission');element('mic').checked=false;element('mic').listeners.change();assert.equal(element('start').disabled,false);
+test('popup checks actual host and microphone permission before enabling Start', async () => {
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id))
+      elements.set(id, {
+        textContent: '',
+        value: '',
+        checked: false,
+        hidden: false,
+        listeners: {},
+        append() {},
+        addEventListener(name, fn) {
+          this.listeners[name] = fn;
+        },
+      });
+    return elements.get(id);
+  };
+  let hostGranted = false;
+  let micPermission = 'denied';
+  let interval;
+  const result = await build({
+    entryPoints: ['extension/src/popup.ts'],
+    bundle: true,
+    write: false,
+    format: 'iife',
+    plugins: [
+      {
+        name: 'ui',
+        setup(b) {
+          b.onResolve({ filter: /^\.\/ui$/ }, () => ({ path: 'ui', namespace: 'mock' }));
+          b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({
+            contents: `export const element=globalThis.element;export const request=async()=>({settings:{enabledProviders:['meet'],micGranted:true},active:null,recordings:[]});export const renderRecordings=()=>{};export const showError=error=>{throw error};export const action=fn=>fn();export const duration=()=>'';`,
+          }));
+        },
+      },
+    ],
+  });
+  vm.runInNewContext(result.outputFiles[0].text, {
+    URL,
+    element,
+    setInterval: (fn) => {
+      interval = fn;
+    },
+    document: { createElement: () => ({}) },
+    chrome: {
+      tabs: { query: async () => [{ id: 1, url: 'https://meet.google.com/abc-defg-hij' }] },
+      permissions: { contains: async () => hostGranted },
+    },
+    navigator: {
+      permissions: { query: async () => ({ state: micPermission }) },
+      mediaDevices: { enumerateDevices: async () => [] },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  element('consent').checked = true;
+  element('consent').listeners.change();
+  assert.equal(element('start').disabled, true);
+  hostGranted = true;
+  interval();
+  await new Promise((resolve) => setImmediate(resolve));
+  element('mic').checked = true;
+  element('mic').listeners.change();
+  assert.equal(
+    element('start').disabled,
+    true,
+    'saved micGranted does not override revoked permission',
+  );
+  element('mic').checked = false;
+  element('mic').listeners.change();
+  assert.equal(element('start').disabled, false);
 });
-test('setup submits Cancel immediately while a pairing status poll is waiting',async()=>{
- const elements=new Map();const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',value:'',hidden:false,open:true,listeners:{},append(){},contains(){return false},addEventListener(name,fn){this.listeners[name]=fn;}});return elements.get(id);};
- const calls=[];let release;const held=new Promise(resolve=>{release=resolve;});const requestId='11111111-1111-4111-8111-111111111111';let phase='pending';
- const result=await build({entryPoints:['extension/src/setup.ts'],bundle:true,write:false,format:'iife',plugins:[{name:'setup-ui',setup(b){b.onResolve({filter:/^\.\/(ui|storage)$/},args=>({path:args.path,namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:args.path.endsWith('/ui')?'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=fn=>fn();export const renderRecordings=()=>{};':'export const allRecordings=async()=>[];export const recording=async()=>undefined;export async function* exportParts(){}'}));}}]});
- const context={URLSearchParams,location:{hash:''},element,setInterval(){},window:{addEventListener(){}},document:{createElement:()=>({append(){},setAttribute(){},addEventListener(){}})},navigator:{permissions:{query:async()=>({state:'denied'})}},chrome:{storage:{local:{get:async()=>({})}},permissions:{contains:async()=>false}},request:async message=>{calls.push(message.type);if(message.type==='PAIR_STATUS'){await held;return {requestId,phase};}if(message.type==='PAIR_CANCEL'){phase='cancelled';return {requestId,phase};}if(message.type==='CONNECTION_STATUS')return {status:'not-connected'};return {settings:{endpoint:'http://localhost:3000',enabledProviders:[],micGranted:false},recordings:[],pairing:{requestId,phase}};}};
- vm.runInNewContext(result.outputFiles[0].text,context);await new Promise(resolve=>setImmediate(resolve));element('cancel-pairing').listeners.click();await new Promise(resolve=>setImmediate(resolve));assert.ok(calls.includes('PAIR_CANCEL'),'Cancel must not wait for the held status request');release();await new Promise(resolve=>setImmediate(resolve));
+test('setup submits Cancel immediately while a pairing status poll is waiting', async () => {
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id))
+      elements.set(id, {
+        textContent: '',
+        value: '',
+        hidden: false,
+        open: true,
+        listeners: {},
+        append() {},
+        contains() {
+          return false;
+        },
+        addEventListener(name, fn) {
+          this.listeners[name] = fn;
+        },
+      });
+    return elements.get(id);
+  };
+  const calls = [];
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const requestId = '11111111-1111-4111-8111-111111111111';
+  let phase = 'pending';
+  const result = await build({
+    entryPoints: ['extension/src/setup.ts'],
+    bundle: true,
+    write: false,
+    format: 'iife',
+    plugins: [
+      {
+        name: 'setup-ui',
+        setup(b) {
+          b.onResolve({ filter: /^\.\/(ui|storage)$/ }, (args) => ({
+            path: args.path,
+            namespace: 'mock',
+          }));
+          b.onLoad({ filter: /.*/, namespace: 'mock' }, (args) => ({
+            contents: args.path.endsWith('/ui')
+              ? 'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=fn=>fn();export const renderRecordings=()=>{};'
+              : 'export const allRecordings=async()=>[];export const recording=async()=>undefined;export async function* exportParts(){}',
+          }));
+        },
+      },
+    ],
+  });
+  const context = {
+    URLSearchParams,
+    location: { hash: '' },
+    element,
+    setInterval() {},
+    window: { addEventListener() {} },
+    document: { createElement: () => ({ append() {}, setAttribute() {}, addEventListener() {} }) },
+    navigator: { permissions: { query: async () => ({ state: 'denied' }) } },
+    chrome: {
+      storage: { local: { get: async () => ({}) } },
+      permissions: { contains: async () => false },
+    },
+    request: async (message) => {
+      calls.push(message.type);
+      if (message.type === 'PAIR_STATUS') {
+        await held;
+        return { requestId, phase };
+      }
+      if (message.type === 'PAIR_CANCEL') {
+        phase = 'cancelled';
+        return { requestId, phase };
+      }
+      if (message.type === 'CONNECTION_STATUS') return { status: 'not-connected' };
+      return {
+        settings: { endpoint: 'http://localhost:3000', enabledProviders: [], micGranted: false },
+        recordings: [],
+        pairing: { requestId, phase },
+      };
+    },
+  };
+  vm.runInNewContext(result.outputFiles[0].text, context);
+  await new Promise((resolve) => setImmediate(resolve));
+  element('cancel-pairing').listeners.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(calls.includes('PAIR_CANCEL'), 'Cancel must not wait for the held status request');
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
 });
