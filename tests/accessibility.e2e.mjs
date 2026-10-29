@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-const base = process.env.ECHO_E2E_URL || 'http://127.0.0.1:3000';
+const base = process.env.ECHO_E2E_URL || 'http://localhost:3000';
 const screenshots = process.env.ECHO_AUDIT_SCREENSHOTS || path.resolve('tmp/echo-accessibility');
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',

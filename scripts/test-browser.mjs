@@ -22,7 +22,7 @@ await new Promise((resolve, reject) => {
 });
 const port = socket.address().port;
 await new Promise((resolve) => socket.close(resolve));
-const base = `http://127.0.0.1:${port}`;
+const base = `http://localhost:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
   env: {
     ...process.env,
@@ -94,8 +94,6 @@ async function run(script) {
         ECHO_AUDIT_SCREENSHOTS: path.join(artifacts, 'accessibility'),
         ECHO_E2E_SCREENSHOTS: path.join(artifacts, 'settings'),
         ECHO_TEST_ARTIFACTS: path.join(artifacts, 'review'),
-        ECHO_CHATGPT_TEST_ARTIFACTS: path.join(artifacts, 'review-chatgpt'),
-        ECHO_CONNECTION_TEST_ARTIFACTS: path.join(artifacts, 'chatgpt-connection'),
       },
       stdio: 'inherit',
     });
@@ -127,8 +125,6 @@ try {
     'tests/accessibility.e2e.mjs',
     'tests/settings.e2e.mjs',
     'tests/review.e2e.mjs',
-    'tests/review-chatgpt.e2e.mjs',
-    'tests/chatgpt-connection.e2e.mjs',
     'tests/calendar-connection.e2e.mjs',
     'tests/extension-connect.e2e.mjs',
     'tests/onboarding.e2e.mjs',

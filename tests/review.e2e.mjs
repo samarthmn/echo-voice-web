@@ -1,7 +1,7 @@
 /**
  * Real REST + Dioxus review checks, using an isolated running server.
  * ECHO_DATA_DIR="$PWD/tmp/echo-review-data" ECHO_BIND=127.0.0.1:3013 target/debug/echo-server
- * ECHO_TEST_URL=http://127.0.0.1:3013 node tests/review.e2e.mjs
+ * ECHO_TEST_URL=http://localhost:3013 node tests/review.e2e.mjs
  * Build current WASM/assets first. This test creates and removes only its own fixture.
  */
 import assert from 'node:assert/strict';
@@ -10,7 +10,7 @@ import { mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-const base = process.env.ECHO_TEST_URL || 'http://127.0.0.1:3013';
+const base = process.env.ECHO_TEST_URL || 'http://localhost:3013';
 const artifacts = process.env.ECHO_TEST_ARTIFACTS || path.resolve('tmp/echo-review-e2e');
 const request = async (path, method = 'GET', body) => {
   const response = await fetch(`${base}/api${path}`, {

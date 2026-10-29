@@ -1,6 +1,6 @@
 # Echo
 
-Echo is a single-user meeting recorder and transcriber that runs entirely on your Mac. A local server keeps an encrypted library; transcription runs on-device with Whisper; a Brave/Chrome extension records meeting tabs (Meet, Zoom web, Teams web) and uploads them to the server. Notes come from local Ollama or, optionally, ChatGPT.
+Echo is a single-user meeting recorder and transcriber that runs entirely on your Mac. A local server keeps an encrypted library; transcription runs on-device with Whisper; a Brave/Chrome extension records meeting tabs (Meet, Zoom web, Teams web) and uploads them to the server. Notes come from local Ollama. ChatGPT notes are currently disabled in the UI.
 
 ## Requirements
 

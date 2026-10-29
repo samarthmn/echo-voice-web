@@ -19,7 +19,7 @@ const binary = resolve(project, process.env.ECHO_TEST_BINARY || 'target/debug/ec
 await access(binary);
 await access(resolve(project, 'public/js/bridge.js'));
 const port = Number(process.env.ECHO_TEST_PORT || 3012);
-const origin = `http://127.0.0.1:${port}`;
+const origin = `http://localhost:${port}`;
 await mkdir(resolve(project, 'tmp'), { recursive: true });
 const dataDirectory = await mkdtemp(resolve(project, 'tmp', 'echo-recorder-e2e-'));
 const server = spawn(binary, [], {

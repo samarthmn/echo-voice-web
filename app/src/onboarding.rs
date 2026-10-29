@@ -62,13 +62,11 @@ pub fn FirstTranscript(
     });
     let download_status = use_memo(move || text(&download(), "status"));
     let notes_model = use_memo(move || text(&settings(), "notesModel"));
-    let notes_provider = use_memo(move || text(&settings(), "notesProvider"));
     let capabilities = use_resource(move || {
         let _ = refresh();
         let _ = selected_model();
         let _ = download_status();
         let notes_model = notes_model();
-        let notes_provider = notes_provider();
         async move {
             // Capability probes. No microphone request, model download, account login,
             // or inference is started by opening Overview. Optional notes never block it.
@@ -83,13 +81,12 @@ pub fn FirstTranscript(
                 const recordingReady = Boolean(isSecureContext && navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined' && microphone?.state !== 'denied');
                 const [downloadedModels, notes] = await Promise.all([
                     bounded(window.echoInference.getDownloadedModels()).catch(() => null),
-                    {notes_provider} === 'chatgpt' ? null : fetch('/api/notes', {{signal:AbortSignal.timeout(5000)}}).then(r => r.ok ? r.json() : null).catch(() => null)
+                    fetch('/api/notes', {{signal:AbortSignal.timeout(5000)}}).then(r => r.ok ? r.json() : null).catch(() => null)
                 ]);
                 return {{recordingReady, microphonePermission:microphone?.state ?? 'unknown',
                     models:window.echoInference.models, downloadedModels,
                     notesReady:notes ? Boolean(notes.available && notes.models?.includes({notes_model})) : null}};
                 "#,
-                notes_provider = serde_json::json!(notes_provider),
                 notes_model = serde_json::json!(notes_model),
             ))
             .await

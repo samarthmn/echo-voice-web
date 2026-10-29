@@ -7,8 +7,8 @@ import { decodeBackup } from './helpers/encrypted-backup.mjs';
 
 // Run against a fresh local data directory, for example:
 // ECHO_DATA_DIR="$PWD/tmp/echo-settings-e2e" ECHO_BIND=127.0.0.1:3011 ./target/debug/echo-server
-// ECHO_E2E_URL=http://127.0.0.1:3011 node tests/settings.e2e.mjs
-const baseURL = process.env.ECHO_E2E_URL || 'http://127.0.0.1:3011';
+// ECHO_E2E_URL=http://localhost:3011 node tests/settings.e2e.mjs
+const baseURL = process.env.ECHO_E2E_URL || 'http://localhost:3011';
 const screenshotDir =
   process.env.ECHO_E2E_SCREENSHOTS || path.resolve('tmp/echo-settings-screenshots');
 
@@ -135,92 +135,45 @@ test(
       });
 
       await t.test(
-        'ChatGPT notes are an explicit saved preference and older settings default to local',
+        'Notes model choices follow Ollama and legacy cloud preferences save locally',
         async () => {
-          const generationRequests = [];
-          const trackRequests = (request) => {
-            if (request.method() === 'POST' && new URL(request.url()).pathname !== '/api/settings')
-              generationRequests.push(request.url());
-          };
-          page.on('request', trackRequests);
-          const providerSelect = page.getByRole('combobox', { name: /Default notes provider/ });
-          await expect(providerSelect).toHaveValue('ollama');
-          const originalOllamaModel = await page.getByPlaceholder('qwen2.5:3b').inputValue();
-          await providerSelect.selectOption('chatgpt');
-          await expect(page.getByRole('heading', { name: 'ChatGPT' })).toBeVisible();
-          await expect(
-            page.getByText(
-              'When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content.',
-            ),
-          ).toBeVisible();
-          await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveCount(0);
-          await page
-            .getByRole('textbox', { name: 'Your name', exact: true })
-            .fill('Draft survives setup');
-          await page.getByRole('button', { name: 'Set up ChatGPT', exact: true }).click();
-          await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible();
-          await page.getByRole('button', { name: 'Settings', exact: true }).click();
-          await expect(providerSelect).toHaveValue('chatgpt');
-          await expect(page.getByRole('textbox', { name: 'Your name', exact: true })).toHaveValue(
-            'Draft survives setup',
-          );
-          assert.equal(
-            (await (await context.request.get(`${baseURL}/api/settings`)).json()).notesProvider,
-            'ollama',
-            'Setup navigation preserves a draft without saving it implicitly',
-          );
-          await page.getByRole('button', { name: 'Vocabulary', exact: true }).click();
-          await page.getByRole('button', { name: 'General', exact: true }).click();
-          await expect(providerSelect).toHaveValue('chatgpt');
-          await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
-          await expect(providerSelect).toHaveValue('ollama');
-          await expect(page.getByRole('textbox', { name: 'Your name', exact: true })).toHaveValue(
-            initialSettings.name,
-          );
-          await providerSelect.selectOption('chatgpt');
-          await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-          await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
-          const saved = await (await context.request.get(`${baseURL}/api/settings`)).json();
-          assert.equal(saved.notesProvider, 'chatgpt');
-          assert.equal(saved.chatgptModel, '');
-          assert.equal(saved.notesModel, originalOllamaModel);
-          await page.reload();
-          await page.getByRole('button', { name: 'Settings', exact: true }).click();
-          await expect(page.getByRole('combobox', { name: /Default notes provider/ })).toHaveValue(
-            'chatgpt',
-          );
-          await expect(page.getByText('Account default', { exact: true })).toBeVisible();
-          assert.deepEqual(
-            generationRequests,
-            [],
-            'Changing or restoring this preference must not send meeting content.',
-          );
-          await page
-            .getByRole('combobox', { name: /Default notes provider/ })
-            .selectOption('ollama');
-          await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveValue(originalOllamaModel);
-          await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-          await expect(page.getByText('Changes saved', { exact: true })).toBeVisible();
+          let status = { available: false, models: [] };
+          await page.route('**/api/notes', (route) => route.fulfill({ json: status }));
           await page.route('**/api/settings', async (route) => {
             if (route.request().method() !== 'GET') return route.continue();
             const response = await route.fetch();
-            const legacy = await response.json();
-            delete legacy.notesProvider;
-            delete legacy.chatgptModel;
-            await route.fulfill({ response, json: legacy });
+            const settings = await response.json();
+            settings.notesProvider = 'chatgpt';
+            settings.notesModel = 'missing:latest';
+            await route.fulfill({ response, json: settings });
           });
           await page.reload();
           await page.getByRole('button', { name: 'Settings', exact: true }).click();
-          await expect(page.getByRole('combobox', { name: /Default notes provider/ })).toHaveValue(
-            'ollama',
-          );
-          await expect(page.getByPlaceholder('qwen2.5:3b')).toHaveValue(originalOllamaModel);
-          // The save bar appears only for unsaved changes or briefly after a save, not on load.
-          await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toHaveCount(
-            0,
-          );
+          const provider = page.getByRole('combobox', { name: /Default notes provider/ });
+          const model = page.getByRole('combobox', { name: 'Default local notes model' });
+          await expect(provider).toHaveValue('ollama');
+          await expect(provider.locator('option')).toHaveCount(1);
+          await expect(model).toBeDisabled();
+          await expect(model).toContainText('Start Ollama to choose a model');
+          status = { available: true, models: [] };
+          await page.getByRole('button', { name: 'Check connection', exact: true }).click();
+          await expect(page.getByText(/No models installed yet/)).toBeVisible();
+          status = { available: true, models: ['fixture:latest'] };
+          // Remount the settings panel to refresh its status.
+          await page.getByRole('button', { name: 'Vocabulary', exact: true }).click();
+          await page.getByRole('button', { name: 'General', exact: true }).click();
+          await expect(model).toContainText('missing:latest (not installed)');
+          await expect(model).toContainText('fixture:latest (installed)');
+          await model.selectOption('fixture:latest');
+          await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+          await expect
+            .poll(
+              async () =>
+                (await (await context.request.get(`${baseURL}/api/settings`)).json()).notesProvider,
+            )
+            .toBe('ollama');
           await page.unroute('**/api/settings');
-          page.off('request', trackRequests);
+          await page.unroute('**/api/notes');
         },
       );
 

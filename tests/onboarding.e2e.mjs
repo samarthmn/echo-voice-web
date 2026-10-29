@@ -20,7 +20,7 @@ await new Promise((resolve, reject) => {
 });
 const port = socket.address().port;
 await new Promise((resolve) => socket.close(resolve));
-const base = `http://127.0.0.1:${port}`;
+const base = `http://localhost:${port}`;
 const child = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
   cwd: project,
   env: {
@@ -99,7 +99,6 @@ try {
     }
     if (url.pathname === '/api/meetings') return reply({ meetings: library });
     if (url.pathname === '/api/notes') return reply({ available: false, models: [] });
-    if (url.pathname === '/api/chatgpt') return reply({ installed: false, connected: false });
     if (url.pathname === '/api/integrations/status')
       return reply({ google: { connected: false, configured: false } });
     if (url.pathname.startsWith('/api/') && request.method() !== 'GET') {

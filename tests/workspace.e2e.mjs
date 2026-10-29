@@ -16,7 +16,7 @@ await new Promise((resolve, reject) => {
 });
 const port = socket.address().port;
 await new Promise((resolve) => socket.close(resolve));
-const base = `http://127.0.0.1:${port}`;
+const base = `http://localhost:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || 'target/debug/echo-server', [], {
   cwd: root,
   env: {

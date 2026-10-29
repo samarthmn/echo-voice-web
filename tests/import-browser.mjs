@@ -14,7 +14,7 @@ await new Promise((resolve) => reservation.listen(0, '127.0.0.1', resolve));
 const freePort = reservation.address().port;
 await new Promise((resolve) => reservation.close(resolve));
 const port = process.env.ECHO_IMPORT_TEST_PORT || String(freePort);
-const origin = `http://127.0.0.1:${port}`;
+const origin = `http://localhost:${port}`;
 const server = spawn(process.env.ECHO_TEST_BINARY || './target/debug/echo-server', [], {
   env: {
     ...process.env,

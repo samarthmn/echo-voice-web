@@ -423,18 +423,6 @@ pub fn MeetingReview(
     }
 }
 
-/// Refresh account readiness before presenting optional cloud generation controls.
-async fn refresh_chatgpt(mut account: Signal<Value>, mut loading: Signal<bool>) {
-    if loading() {
-        return;
-    }
-    loading.set(true);
-    account.set(match api::get("/chatgpt").await {
-        Ok(value) => value,
-        Err(error) => json!({"connected":false,"error":error}),
-    });
-    loading.set(false);
-}
 /// Label the provider that produced a saved notes version.
 fn notes_source(notes: &Value) -> &'static str {
     if text(notes, "provider") == "chatgpt" {
@@ -480,24 +468,7 @@ fn NotesPane(
     let transcript = current(&value, "transcripts", "activeTranscriptId");
     let mut busy = use_signal(|| false);
     let mut draft = use_signal(|| Value::Null);
-    let mut provider = use_signal(|| "ollama".to_string());
-    let mut provider_touched = use_signal(|| false);
-    let mut chatgpt_model = use_signal(String::new);
-    let account = use_signal(|| Value::Null);
-    let account_loading = use_signal(|| false);
     let demo = is_demo(&value);
-    use_future(move || async move {
-        if demo {
-            return;
-        }
-        if let Ok(settings) = api::get("/settings").await {
-            chatgpt_model.set(text(&settings, "chatgptModel"));
-            if !provider_touched() && text(&settings, "notesProvider") == "chatgpt" {
-                provider.set("chatgpt".into());
-                refresh_chatgpt(account, account_loading).await;
-            }
-        }
-    });
     let generating = !generating_notes.is_empty();
     let locked = demo || is_active(&value) || busy() || generating;
     let editing = !draft().is_null();
@@ -506,14 +477,9 @@ fn NotesPane(
     let stale = !notes.is_null()
         && !transcript.is_null()
         && notes["transcriptVersionId"] != transcript["id"];
-    let cloud_selected = provider() == "chatgpt";
-    let account_connected = account()["connected"].as_bool().unwrap_or(false);
-    let account_busy = account()["busy"].as_bool().unwrap_or(false);
-    let account_email = text(&account()["account"], "email");
-    let account_error = text(&account(), "error");
     let source_label = notes_source(&notes);
     let usage_label = notes_usage(&notes);
-    let request_generation = move |cloud_consent: bool| {
+    let generate = move |_| {
         if is_demo(&meeting())
             || is_active(&meeting())
             || busy()
@@ -522,106 +488,13 @@ fn NotesPane(
         {
             return;
         }
-        let selected = provider();
-        if selected == "chatgpt"
-            && (!cloud_consent
-                || !account()["connected"].as_bool().unwrap_or(false)
-                || account()["busy"].as_bool().unwrap_or(false))
-        {
-            return;
-        }
-        js("document.getElementById('review-chatgpt-dialog')?.close()".into());
-        let mut body = json!({"meetingId":text(&meeting(), "id"),"provider":selected,"cloudConsent":cloud_consent});
-        if selected == "chatgpt" && !chatgpt_model().trim().is_empty() {
-            body["model"] = json!(chatgpt_model().trim());
-        }
-        // App owns the request so navigating away cannot cancel this job's UI lifecycle.
+        let body = json!({"meetingId":text(&meeting(), "id"), "provider":"ollama"});
         js(format!(
             "window.dispatchEvent(new CustomEvent('echo-notes-request',{{detail:{body}}}))"
         ));
     };
-    let generate = move |_| {
-        if provider() == "chatgpt" {
-            js("document.getElementById('review-chatgpt-dialog').showModal();document.getElementById('review-chatgpt-cancel').focus()".into());
-            spawn(refresh_chatgpt(account, account_loading));
-        } else {
-            request_generation(false);
-        }
-    };
     rsx! {
         section { class: "review-notes", aria_label: "Meeting notes",
-            if !demo && !editing {
-                div { class: "review-notes-options",
-                    div { class: "review-notes-provider",
-                        label { r#for: "review-notes-provider", "Create notes with" }
-                        select {
-                            id: "review-notes-provider",
-                            class: "input",
-                            value: "{provider}",
-                            disabled: locked,
-                            onchange: move |event| {
-                                let selected = event.value();
-                                provider_touched.set(true);
-                                provider.set(selected.clone());
-                                if selected == "chatgpt" {
-                                    spawn(refresh_chatgpt(account, account_loading));
-                                }
-                            },
-                            option { value: "ollama", "Local · Ollama" }
-                            option { value: "chatgpt", "ChatGPT · OpenAI" }
-                        }
-                    }
-                    div { class: "review-notes-provider-info",
-                        if cloud_selected {
-                            p {
-                                "Sends the transcript to OpenAI after confirmation. Audio stays on this device."
-                            }
-                            div {
-                                class: "review-provider-account",
-                                role: "status",
-                                if account_loading() {
-                                    span { "Checking your ChatGPT connection…" }
-                                } else if account_connected {
-                                    span { class: "review-provider-connected",
-                                        Icon { name: "check", size: 13 }
-                                        if account_email.is_empty() {
-                                            "ChatGPT connected"
-                                        } else {
-                                            "{account_email}"
-                                        }
-                                    }
-                                    if account_busy {
-                                        span { "Another ChatGPT request is running." }
-                                    }
-                                } else if !account_error.is_empty() {
-                                    span { "Connection status unavailable." }
-                                    button {
-                                        class: "review-provider-link",
-                                        onclick: move |_| {
-                                            spawn(refresh_chatgpt(account, account_loading));
-                                        },
-                                        "Retry connection"
-                                        Icon { name: "refresh", size: 13 }
-                                    }
-                                } else {
-                                    span { "ChatGPT is not connected." }
-                                    button {
-                                        class: "review-provider-link",
-                                        onclick: move |_| js("window.dispatchEvent(new Event('echo-open-models'))".into()),
-                                        "Connect in Models"
-                                        Icon { name: "arrow", size: 13 }
-                                    }
-                                }
-                            }
-                            if !account_error.is_empty() {
-                                p { class: "review-provider-error", "{account_error}" }
-                            }
-                        } else {
-                            p { "Transcript stays on this device." }
-                        }
-                    }
-                }
-            }
             if notes.is_null() {
                 div { class: "review-empty",
                     span { class: "review-empty-icon",
@@ -660,8 +533,6 @@ fn NotesPane(
                         Icon { name: "shield", size: 13 }
                         if transcript.is_null() {
                             "Speech recognition runs locally in your browser."
-                        } else if cloud_selected {
-                            "Uses your ChatGPT account through Codex, subject to your plan’s usage limits."
                         } else {
                             "Requires a running local Ollama model. Configure it in Settings."
                         }
@@ -739,13 +610,7 @@ fn NotesPane(
                         span { class: "review-spin",
                             Icon { name: "refresh", size: 16 }
                         }
-                        span {
-                            if generating_notes == "chatgpt" {
-                                "Generating notes with ChatGPT…"
-                            } else {
-                                "Generating notes locally…"
-                            }
-                        }
+                        span { "Generating notes locally…" }
                     }
                 }
                 if stale {
@@ -961,92 +826,7 @@ fn NotesPane(
                     }
                 }
             }
-            dialog {
-                id: "review-chatgpt-dialog",
-                class: "review-dialog review-cloud-dialog",
-                aria_labelledby: "review-chatgpt-title",
-                aria_describedby: "review-chatgpt-description",
-                div { class: "review-dialog-icon",
-                    Icon { name: "sparkles", size: 23 }
-                }
-                span { class: "review-eyebrow", "OPTIONAL CLOUD PROCESSING" }
-                h2 { id: "review-chatgpt-title", "Create notes with ChatGPT?" }
-                p { id: "review-chatgpt-description",
-                    "Echo will send this meeting’s transcript, including speaker labels and spoken text, to OpenAI through your connected ChatGPT account."
-                }
-                div { class: "review-cloud-facts",
-                    p {
-                        Icon { name: "shield", size: 16 }
-                        span {
-                            "Your original audio is not sent. The resulting notes are saved in your local library."
-                        }
-                    }
-                    p {
-                        Icon { name: "clock", size: 16 }
-                        span {
-                            "Uses Codex usage included with your ChatGPT plan, subject to your plan’s limits. Availability and limits depend on your account."
-                        }
-                    }
-                }
-                div { class: "review-cloud-status", role: "status",
-                    if account_loading() {
-                        "Checking your ChatGPT connection…"
-                    } else if account_connected {
-                        Icon { name: "check", size: 14 }
-                        if account_email.is_empty() {
-                            "ChatGPT connected"
-                        } else {
-                            "Connected as {account_email}"
-                        }
-                    } else if !account_error.is_empty() {
-                        "Connection status unavailable."
-                    } else {
-                        "Connect your ChatGPT account in Models to continue."
-                    }
-                }
-                if account_busy {
-                    p { class: "review-provider-error",
-                        "Another ChatGPT request is running. Wait for it to finish, then try again."
-                    }
-                }
-                if !account_error.is_empty() {
-                    p { class: "review-provider-error", "{account_error}" }
-                }
-                div { class: "review-dialog-actions",
-                    ActionButton {
-                        id: "review-chatgpt-cancel",
-                        kind: ButtonKind::Secondary,
-                        onclick: move |_| js("document.getElementById('review-chatgpt-dialog').close()".into()),
-                        "Cancel"
-                    }
-                    if !account_loading() && !account_connected && !account_error.is_empty() {
-                        ActionButton {
-                            kind: ButtonKind::Primary,
-                            onclick: move |_| {
-                                spawn(refresh_chatgpt(account, account_loading));
-                            },
-                            "Retry connection"
-                        }
-                    } else if !account_loading() && !account_connected {
-                        ActionButton {
-                            kind: ButtonKind::Primary,
-                            onclick: move |_| js(
-                                "document.getElementById('review-chatgpt-dialog').close();window.dispatchEvent(new Event('echo-open-models'))"
-                                    .into(),
-                            ),
-                            "Connect in Models"
-                        }
-                    } else {
-                        ActionButton {
-                            kind: ButtonKind::Primary,
-                            disabled: locked || account_loading() || !account_connected || account_busy,
-                            onclick: move |_| request_generation(true),
-                            Icon { name: "sparkles", size: 15 }
-                            "Generate with ChatGPT"
-                        }
-                    }
-                }
-            }
+
         }
     }
 }
@@ -1932,15 +1712,13 @@ fn DetailsPane(
                                 }
                             }
                         }
-                        label {
+                        div {
                             "Local notes model"
-                            input {
-                                class: "input",
-                                value: "{notes}",
-                                maxlength: "100",
+                            crate::notes_model::NotesModelSelect {
+                                label: "Local notes model",
+                                value: notes(),
                                 disabled: locked,
-                                placeholder: "qwen2.5:3b",
-                                oninput: move |event| notes.set(event.value()),
+                                onchange: move |model| notes.set(model),
                             }
                         }
                         ActionButton {

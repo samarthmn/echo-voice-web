@@ -152,12 +152,6 @@ fn GeneralSettings(
         }
     });
     let changed = draft() != settings();
-    let notes_provider = if text(&draft(), "notesProvider") == "chatgpt" {
-        "chatgpt"
-    } else {
-        "ollama"
-    };
-    let chatgpt_model = text(&draft(), "chatgptModel");
     rsx! {
         form {
             class: if changed || saving() || saved() { "settings-form has-unsaved" } else { "settings-form" },
@@ -169,7 +163,9 @@ fn GeneralSettings(
                 saving.set(true);
                 error.set(String::new());
                 spawn(async move {
-                    match patch("/settings", draft()).await {
+                    let mut payload = draft();
+                    payload["notesProvider"] = json!("ollama");
+                    match patch("/settings", payload).await {
                         Ok(updated) => {
                             draft.set(updated.clone());
                             on_change.call(updated);
@@ -299,88 +295,24 @@ fn GeneralSettings(
                     }
                     label { class: "settings-field",
                         span { "Default notes provider" }
-                        select {
-                            class: "input",
-                            value: notes_provider,
-                            "aria-describedby": "settings-provider-help",
-                            onchange: move |e| {
-                                let provider = e.value();
-                                draft.write()["notesProvider"] = json!(provider);
-                                if draft()["chatgptModel"].is_null() {
-                                    draft.write()["chatgptModel"] = json!("");
-                                }
-                            },
-                            option {
-                                value: "ollama",
-                                selected: notes_provider == "ollama",
-                                "Ollama · Local"
-                            }
-                            option {
-                                value: "chatgpt",
-                                selected: notes_provider == "chatgpt",
-                                "ChatGPT · Optional cloud"
-                            }
+                        select { class: "input", value: "ollama",
+                            option { value: "ollama", "Ollama · Local" }
                         }
                         small { id: "settings-provider-help",
                             "Applies when you request notes. Recording and transcription remain local."
                         }
                     }
                 }
-                if notes_provider == "chatgpt" {
-                    div { class: "settings-provider-card",
-                        div { class: "settings-provider-heading",
-                            span { class: "settings-provider-icon",
-                                Icon { name: "sparkles", size: 19 }
-                            }
-                            div {
-                                h3 { "ChatGPT" }
-                                span { "Optional cloud processing" }
-                            }
+                div { class: "settings-local-notes-field",
+                    div { class: "settings-field",
+                        span { "Default local notes model" }
+                        crate::notes_model::NotesModelSelect {
+                            label: "Default local notes model",
+                            value: text(&draft(), "notesModel"),
+                            disabled: false,
+                            onchange: move |value| draft.write()["notesModel"] = json!(value),
                         }
-                        p {
-                            "When you request ChatGPT notes, the meeting’s active transcript, including speaker labels, and instructions are sent to OpenAI. Your audio is not uploaded, and saving this preference sends no meeting content."
-                        }
-                        p { class: "settings-provider-allowance",
-                            "Sign in through the official Codex flow with an eligible ChatGPT plan. Requests use your plan’s Codex allowance, not API credits. No API key is needed."
-                        }
-                        div { class: "settings-provider-bottom",
-                            div {
-                                span { "ChatGPT model" }
-                                strong {
-                                    if chatgpt_model.is_empty() {
-                                        "Account default"
-                                    } else {
-                                        "{chatgpt_model}"
-                                    }
-                                }
-                                small {
-                                    "Choose from your account’s available models in Models → ChatGPT."
-                                }
-                            }
-                            ActionButton {
-                                button_type: "button",
-                                kind: ButtonKind::Secondary,
-                                onclick: move |_| open_chatgpt_models(),
-                                "Set up ChatGPT"
-                                Icon { name: "arrow-right", size: 15 }
-                            }
-                        }
-                    }
-                } else {
-                    div { class: "settings-local-notes-field",
-                        label { class: "settings-field",
-                            span { "Default local notes model" }
-                            input {
-                                class: "input",
-                                value: text(&draft(), "notesModel"),
-                                maxlength: 120,
-                                placeholder: "qwen2.5:3b",
-                                oninput: move |e| draft.write()["notesModel"] = json!(e.value()),
-                            }
-                            small {
-                                "The name of a model installed in your local Ollama library. Notes are generated on this computer."
-                            }
-                        }
+                        small { "Notes are generated on this computer." }
                     }
                 }
                 div { class: "settings-toggle-row",
@@ -405,26 +337,24 @@ fn GeneralSettings(
                         "Final transcription runs after recording. Browser meetings can also show live text. Select a speaker label in the final transcript to rename it."
                     }
                 }
-                if notes_provider == "ollama" {
-                    details { class: "settings-advanced",
-                        summary {
-                            "Local notes connection"
-                            Icon { name: "chevron-down", size: 16 }
-                        }
-                        div {
-                            label { class: "settings-field",
-                                span { "Ollama address" }
-                                input {
-                                    class: "input",
-                                    r#type: "url",
-                                    value: text(&draft(), "ollamaUrl"),
-                                    placeholder: "http://127.0.0.1:11434",
-                                    required: true,
-                                    oninput: move |e| draft.write()["ollamaUrl"] = json!(e.value()),
-                                }
-                                small {
-                                    "Only a service running on this computer is supported. Ollama is optional; recording and transcription work without it."
-                                }
+                details { class: "settings-advanced",
+                    summary {
+                        "Local notes connection"
+                        Icon { name: "chevron-down", size: 16 }
+                    }
+                    div {
+                        label { class: "settings-field",
+                            span { "Ollama address" }
+                            input {
+                                class: "input",
+                                r#type: "url",
+                                value: text(&draft(), "ollamaUrl"),
+                                placeholder: "http://127.0.0.1:11434",
+                                required: true,
+                                oninput: move |e| draft.write()["ollamaUrl"] = json!(e.value()),
+                            }
+                            small {
+                                "Only a service running on this computer is supported. Ollama is optional; recording and transcription work without it."
                             }
                         }
                     }
@@ -475,13 +405,6 @@ fn GeneralSettings(
             }
         }
     }
-}
-
-/// Navigate to account setup from the provider preference.
-fn open_chatgpt_models() {
-    let _ = document::eval(
-        "window.dispatchEvent(new CustomEvent('echo-open-models',{detail:{provider:'chatgpt'}}))",
-    );
 }
 
 /// Close the editor and restore focus to its originating vocabulary action.

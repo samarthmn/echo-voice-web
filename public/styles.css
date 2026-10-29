@@ -3146,3 +3146,33 @@ button:hover:not(:disabled) {
   padding-left: 22px;
   line-height: 1.7;
 }
+
+.model-section-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -8px 0 25px;
+}
+.model-section-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--accent-text);
+}
+.model-section-links a:hover {
+  background: var(--purple-soft);
+  border-color: var(--line);
+}
+
+/* Caption above a control that carries its own accessible name. */
+.field-caption {
+  margin: 16px 0 6px;
+  font-weight: 600;
+  color: var(--ink);
+}

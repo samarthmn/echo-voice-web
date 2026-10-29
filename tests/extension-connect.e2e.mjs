@@ -1,6 +1,6 @@
 import { chromium, expect } from '@playwright/test';
 
-const base = process.env.ECHO_E2E_URL || 'http://127.0.0.1:3100';
+const base = process.env.ECHO_E2E_URL || 'http://localhost:3100';
 const requestId = '11111111-1111-4111-8111-111111111111';
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH,

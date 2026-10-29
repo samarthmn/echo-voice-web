@@ -2,8 +2,8 @@ mod api;
 mod calendar;
 mod extension;
 use extension::ExtensionRecordingStatus;
-mod chatgpt;
 mod models;
+mod notes_model;
 mod onboarding;
 mod privacy;
 mod review;
@@ -349,7 +349,6 @@ fn App() -> Element {
                 "echo-open-models" => {
                     page.set("models".into());
                     mobile_nav.set(false);
-                    let _=document::eval("setTimeout(()=>document.getElementById('chatgpt-connection')?.scrollIntoView({block:'start',behavior:'smooth'}),100)");
                 }
                 "echo-upload-progress" => {
                     let detail = event["detail"].clone();
