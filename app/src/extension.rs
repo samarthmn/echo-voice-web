@@ -6,6 +6,24 @@ use crate::{
 use dioxus::prelude::*;
 use serde_json::{json, Value};
 
+fn canonical_origin(origin: &str) -> String {
+    let Some((scheme, authority)) = origin.trim_end_matches('/').split_once("://") else {
+        return origin.to_string();
+    };
+    let authority = authority.to_ascii_lowercase();
+    let host = if authority == "127.0.0.1" || authority == "[::1]" {
+        "localhost".to_string()
+    } else if let Some(port) = authority
+        .strip_prefix("127.0.0.1:")
+        .or_else(|| authority.strip_prefix("[::1]:"))
+    {
+        format!("localhost:{port}")
+    } else {
+        authority
+    };
+    format!("{}://{host}", scheme.to_ascii_lowercase())
+}
+
 fn acknowledged_action(before_poll: &Value, pending: &Value, snapshot: &Value) -> Option<String> {
     if pending.is_null()
         || before_poll != pending
@@ -93,10 +111,18 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
     let origin = web_sys::window()
         .and_then(|window| window.location().origin().ok())
         .unwrap_or_default();
+    let paired_library = browser
+        .as_ref()
+        .map(|v| text(v, "libraryId"))
+        .unwrap_or_default();
+    let current_library = text(&connections(), "libraryId");
     let different_endpoint = matches!(status.as_str(), "connected" | "echo-offline")
-        && !endpoint.is_empty()
-        && !origin.is_empty()
-        && endpoint != origin;
+        && ((!endpoint.is_empty()
+            && !origin.is_empty()
+            && canonical_origin(&endpoint) != canonical_origin(&origin))
+            || (!paired_library.is_empty()
+                && !current_library.is_empty()
+                && paired_library != current_library));
     let endpoint_host = endpoint.strip_prefix("http://").unwrap_or(&endpoint);
     rsx! {
         section {

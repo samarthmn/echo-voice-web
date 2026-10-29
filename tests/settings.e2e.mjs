@@ -159,11 +159,14 @@ test(
           await page.getByRole('button', { name: 'Check connection', exact: true }).click();
           await expect(page.getByText(/No models installed yet/)).toBeVisible();
           status = { available: true, models: ['fixture:latest'] };
-          // Remount the settings panel to refresh its status.
-          await page.getByRole('button', { name: 'Vocabulary', exact: true }).click();
-          await page.getByRole('button', { name: 'General', exact: true }).click();
+          await page.getByRole('button', { name: 'Refresh installed models' }).click();
           await expect(model).toContainText('missing:latest (not installed)');
+          await expect(model).toHaveValue('missing:latest');
           await expect(model).toContainText('fixture:latest (installed)');
+          status = { available: true, models: ['fixture:latest', 'missing:latest'] };
+          await page.getByRole('button', { name: 'Refresh installed models' }).click();
+          await expect(model).toContainText('missing:latest (installed)');
+          await expect(model).toHaveValue('missing:latest');
           await model.selectOption('fixture:latest');
           await page.getByRole('button', { name: 'Save changes', exact: true }).click();
           await expect
@@ -176,6 +179,72 @@ test(
           await page.unroute('**/api/notes');
         },
       );
+
+      await t.test('saving a new Ollama address refreshes models without remounting', async () => {
+        let savedAddress = 'http://old-ollama:11434';
+        let notesRequests = 0;
+        let savedSettings;
+        await page.route('**/api/settings', async (route) => {
+          if (route.request().method() === 'PATCH') {
+            savedSettings = route.request().postDataJSON();
+            savedAddress = savedSettings.ollamaUrl;
+          } else {
+            savedSettings = await (await route.fetch()).json();
+          }
+          savedSettings.ollamaUrl = savedAddress;
+          savedSettings.notesModel = 'saved:latest';
+          await route.fulfill({ json: savedSettings });
+        });
+        await page.route('**/api/notes', async (route) => {
+          notesRequests++;
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          await route.fulfill({
+            json: {
+              available: true,
+              models: savedAddress.includes('old-ollama')
+                ? ['first:latest', 'saved:latest']
+                : ['new:latest', 'saved:latest'],
+            },
+          });
+        });
+        await page.reload();
+        await page.getByRole('button', { name: 'Settings', exact: true }).click();
+        const model = page.getByRole('combobox', { name: 'Default local notes model' });
+        await expect(model).toContainText('first:latest (installed)');
+        await expect(model).toHaveValue('saved:latest');
+        const beforeSave = notesRequests;
+        await page.getByText('Local notes connection', { exact: true }).click();
+        await page.getByRole('textbox', { name: 'Ollama address' }).fill('http://new-ollama:11434');
+        await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+        await expect(model).toContainText('new:latest (installed)');
+        await expect(model).not.toContainText('first:latest');
+        await expect(model).toHaveValue('saved:latest');
+        assert.ok(notesRequests > beforeSave);
+        await page.unroute('**/api/settings');
+        await page.unroute('**/api/notes');
+      });
+
+      await t.test('localhost recognizes an IP-paired extension', async () => {
+        await page.route('**/api/extensions/connections', (route) =>
+          route.fulfill({ json: { connections: [], libraryId: 'library-1' } }),
+        );
+        await page.evaluate(() => {
+          window.echoExtensionMessage = async () => ({
+            installed: true,
+            status: 'connected',
+            endpoint: `http://127.0.0.1:${location.port}`,
+            libraryId: 'library-1',
+          });
+        });
+        await page.getByRole('button', { name: 'Browser extension', exact: true }).click();
+        const panel = page.getByRole('region', { name: 'Browser extension connection' });
+        await expect(panel.getByText('Connected', { exact: true })).toBeVisible();
+        await expect(panel.getByText(/Connect it to this Echo instead/)).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: 'Connect browser extension' })).toHaveCount(
+          0,
+        );
+        await page.unroute('**/api/extensions/connections');
+      });
 
       await t.test(
         'vocabulary editing, filtering, toggling, import validation and export',

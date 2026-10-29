@@ -310,6 +310,7 @@ fn GeneralSettings(
                             label: "Default local notes model",
                             value: text(&draft(), "notesModel"),
                             disabled: false,
+                            refresh_key: text(&settings(), "ollamaUrl"),
                             onchange: move |value| draft.write()["notesModel"] = json!(value),
                         }
                         small { "Notes are generated on this computer." }

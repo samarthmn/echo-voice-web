@@ -16,6 +16,7 @@ pub fn NotesModelSelect(
     use_resource(use_reactive((&refresh_key,), move |(_key,)| {
         let _ = refresh();
         async move {
+            status.set(Value::Null);
             status.set(get("/notes").await.unwrap_or(Value::Null));
         }
     }));
@@ -33,24 +34,34 @@ pub fn NotesModelSelect(
     let missing = available && !value.is_empty() && !models.contains(&value);
     rsx! {
         div {
-            select {
-                class: "input",
-                "aria-label": "{label}",
-                disabled: disabled || !available || no_models,
-                value: if available && !value.is_empty() { value.clone() } else { String::new() },
-                onchange: move |event| onchange.call(event.value()),
-                if !available {
-                    option { value: "", "Start Ollama to choose a model" }
-                } else if no_models && !missing {
-                    option { value: "", "No models installed yet" }
-                } else if value.is_empty() {
-                    option { value: "", "Choose an installed model" }
+            div { style: "display: flex; align-items: center; gap: 8px;",
+                select {
+                    class: "input",
+                    "aria-label": "{label}",
+                    disabled: disabled || !available || no_models,
+                    value: if available && !value.is_empty() { value.clone() } else { String::new() },
+                    onchange: move |event| onchange.call(event.value()),
+                    if !available {
+                        option { value: "", selected: true, "Start Ollama to choose a model" }
+                    } else if no_models && !missing {
+                        option { value: "", selected: true, "No models installed yet" }
+                    } else if value.is_empty() {
+                        option { value: "", selected: true, "Choose an installed model" }
+                    }
+                    if missing {
+                        option { value: "{value}", selected: true, "{value} (not installed)" }
+                    }
+                    for model in models {
+                        option { value: "{model}", selected: model == value, "{model} (installed)" }
+                    }
                 }
-                if missing {
-                    option { value: "{value}", "{value} (not installed)" }
-                }
-                for model in models {
-                    option { value: "{model}", "{model} (installed)" }
+                button {
+                    r#type: "button",
+                    class: "icon-button",
+                    "aria-label": "Refresh installed models",
+                    title: "Refresh installed models",
+                    onclick: move |_| refresh += 1,
+                    crate::Icon { name: "refresh", size: 16 }
                 }
             }
             if !available {
