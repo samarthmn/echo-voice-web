@@ -1,6 +1,5 @@
 import {
   Recording,
-  Settings,
   MAX_BACKLOG_FRAMES,
   MAX_FRAMES,
   MAX_PENDING_BYTES,
@@ -17,7 +16,6 @@ import {
   updateRecording,
 } from './storage';
 import { transferPending } from './protocol';
-declare const chrome: any;
 type Capture = {
   id: string;
   title: string;
@@ -70,6 +68,7 @@ const activeStatus = () =>
         paused: !!active.pausedAt,
       }
     : null;
+export type ActiveStatus = NonNullable<ReturnType<typeof activeStatus>>;
 const publish = (endedRecordingId?: string) =>
   chrome.runtime
     .sendMessage({
@@ -79,14 +78,6 @@ const publish = (endedRecordingId?: string) =>
       active: activeStatus(),
     })
     .catch(() => {});
-async function trustedSettings(): Promise<Settings> {
-  const response = await chrome.runtime.sendMessage({
-    target: 'background',
-    type: 'TRUSTED_SETTINGS',
-  });
-  if (!response?.ok) throw new Error('Trusted recorder settings are unavailable.');
-  return response.value;
-}
 function microphoneFailure(error: unknown): string {
   const name = (error as { name?: string } | null)?.name;
   const retry = ' Or explicitly choose tab audio only before starting.';
@@ -113,7 +104,7 @@ function microphoneFailure(error: unknown): string {
   );
 }
 async function sync() {
-  await transferPending(await trustedSettings(), control, () => publish());
+  await transferPending(control, () => publish());
 }
 function cleanup(capture: Capture) {
   capture.worklet.disconnect();
@@ -149,7 +140,7 @@ async function flush(capture: Capture, type: string) {
     const timer = setTimeout(() => {
       capture.waiters.delete(requestId);
       reject(new Error('Audio capture did not finish its local flush.'));
-    }, 3000);
+    }, 3_000);
     capture.waiters.set(requestId, () => {
       clearTimeout(timer);
       resolve();

@@ -7,24 +7,27 @@
     "build:assets": "node scripts/build-assets.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "package:extension": "node scripts/package-extension.mjs",
-    "test": "node --test tests/asset-manifest.test.mjs tests/automatic-transcription.test.mjs tests/diarization.test.mjs tests/extension-capture.test.mjs tests/extension-controls.test.mjs tests/extension-interruption.test.mjs tests/extension-library.test.mjs tests/extension-live.test.mjs tests/extension-onboarding.test.mjs tests/extension-pairing-runtime.test.mjs tests/extension-runtime.test.mjs tests/extension-settings.test.mjs tests/extension-vault-session.test.mjs tests/extension-vault.test.mjs tests/extension-workspace.test.mjs tests/inference-live.test.mjs tests/inference.test.mjs tests/native-speech-client.test.mjs tests/native-speech.test.mjs tests/processing-heartbeat.test.mjs tests/recorder.test.mjs tests/runtime-options.test.mjs tests/server-cleanup.test.mjs tests/speech-errors.test.mjs tests/theme.test.mjs tests/whisper-alignment.test.mjs tests/workspace.test.mjs",
+    "test": "node --test tests/asset-manifest.test.mjs tests/automatic-transcription.test.mjs tests/diarization.test.mjs tests/extension-capture.test.mjs tests/extension-controls.test.mjs tests/extension-interruption.test.mjs tests/extension-library.test.mjs tests/extension-live.test.mjs tests/extension-onboarding.test.mjs tests/extension-pairing-runtime.test.mjs tests/extension-runtime.test.mjs tests/extension-settings.test.mjs tests/extension-storage-v3.test.mjs tests/extension-workspace.test.mjs tests/inference-live.test.mjs tests/inference.test.mjs tests/native-speech-client.test.mjs tests/native-speech.test.mjs tests/processing-heartbeat.test.mjs tests/recorder.test.mjs tests/runtime-options.test.mjs tests/server-cleanup.test.mjs tests/speech-errors.test.mjs tests/theme.test.mjs tests/whisper-alignment.test.mjs tests/workspace.test.mjs",
     "test:speakers": "node scripts/smoke-speakers.mjs",
-    "test:integration": "node --test tests/chatgpt-protocol.test.mjs tests/extension-browser.test.mjs tests/extension-layout.test.mjs tests/extension-pairing.test.mjs tests/extension-storage-protection.test.mjs tests/google-oauth-web.test.mjs tests/protected-storage.test.mjs tests/release-key-policy.test.mjs tests/rest.test.mjs tests/server-lifecycle.test.mjs",
+    "test:integration": "node --test tests/chatgpt-protocol.test.mjs tests/extension-browser.test.mjs tests/extension-layout.test.mjs tests/extension-storage-protection.test.mjs tests/google-oauth-web.test.mjs tests/protected-storage.test.mjs tests/release-key-policy.test.mjs tests/rest.test.mjs tests/server-lifecycle.test.mjs",
     "test:e2e": "node scripts/test-browser.mjs",
     "format": "prettier --write \"extension/src/**/*.ts\" \"extension/*.html\" \"web/**/*.js\" \"scripts/**/*.mjs\" \"tests/**/*.mjs\" \"public/*.html\" \"public/*.css\"",
-    "format:check": "prettier --check \"extension/src/**/*.ts\" \"extension/*.html\" \"web/**/*.js\" \"scripts/**/*.mjs\" \"tests/**/*.mjs\" \"public/*.html\" \"public/*.css\""
+    "format:check": "prettier --check \"extension/src/**/*.ts\" \"extension/*.html\" \"web/**/*.js\" \"scripts/**/*.mjs\" \"tests/**/*.mjs\" \"public/*.html\" \"public/*.css\"",
+    "typecheck": "tsc -p extension"
   },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",
+    "@openai/codex": "0.160.0",
     "@scure/bip39": "2.2.0",
-    "onnxruntime-node": "1.21.0",
-    "@openai/codex": "0.160.0"
+    "onnxruntime-node": "1.21.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.55.0",
+    "@types/chrome": "0.3.7",
     "esbuild": "^0.25.0",
-    "prettier": "3.6.2"
+    "prettier": "3.6.2",
+    "typescript": "7.0.2"
   },
   "packageManager": "pnpm@12.11.2",
   "engines": {

@@ -202,6 +202,13 @@ test('AudioWorklet keeps stale microphone out even when delayed gates arrive', a
     'worklet itself stops at five seconds even if its host event loop is blocked',
   );
 });
+// The connected pair every transfer in these tests uses; revocation clears it.
+globalThis.pair = {
+  endpoint: 'http://localhost:3000',
+  libraryId: 'library-1',
+  credential: 'token',
+};
+const fakeSettings = `export async function connectedPair(){return globalThis.pair};export async function revokeCredential(){globalThis.pair=undefined}`;
 async function protocolHarness() {
   const fakeStorage = `export async function allRecordings(){return [...globalThis.records.values()]}; export async function recording(id){return globalThis.records.get(id)}; export async function updateRecording(id,patch){const next={...globalThis.records.get(id),...patch};globalThis.records.set(id,next);return next};export async function getChunk(id,sequence){return globalThis.chunks.get(id+':'+sequence)};export async function retainReceiptAndRemovePCM(id,receipt){const row=globalThis.records.get(id);globalThis.records.set(id,{...row,receipt,transferState:'saved-echo'});globalThis.chunks.delete(id+':0')}`;
   const outfile = path.join(scratch, 'protocol.mjs');
@@ -215,14 +222,16 @@ async function protocolHarness() {
       {
         name: 'fake-journal',
         setup(builder) {
-          builder.onResolve({ filter: /^\.\/(storage|recording-lock)$/ }, (args) => ({
+          builder.onResolve({ filter: /^\.\/(storage|recording-lock|settings)$/ }, (args) => ({
             path: args.path,
             namespace: 'fake',
           }));
           builder.onLoad({ filter: /.*/, namespace: 'fake' }, (args) => ({
             contents: args.path.endsWith('recording-lock')
               ? 'export const withRecordingLock=(_id,work)=>work();'
-              : fakeStorage,
+              : args.path.endsWith('settings')
+                ? fakeSettings
+                : fakeStorage,
             loader: 'js',
           }));
         },
@@ -370,7 +379,6 @@ test('wrong-library and chunk conflicts preserve the complete local prefix', asy
             }),
           );
     await protocol.transferPending(
-      { pairs: { 'library-1': pair }, activeLibraryId: 'library-1' },
       async () => {},
       () => {},
     );
@@ -437,91 +445,83 @@ test('bounded transfer turns retain unfinished audio and complete only after the
     globalThis.fetch = originalFetch;
   }
 });
-test('an unreachable active library cannot starve another library’s durable recording', async () => {
-  const offline = {
-    recordingId: 'offline-active',
-    libraryId: 'offline-library',
-    chunkCount: 1,
-    totalFrames: 1,
-    captureState: 'recording',
+test('unassigned and other-library recordings upload to the connected library; offline Echo backs off', async () => {
+  const base = { chunkCount: 1, totalFrames: 1, captureState: 'stopped', gaps: [] };
+  const unassigned = {
+    ...base,
+    recordingId: 'unassigned',
+    libraryId: null,
     createdAt: '2026-10-05T00:00:01Z',
   };
-  const healthy = {
-    recordingId: 'healthy-pending',
-    libraryId: 'healthy-library',
-    chunkCount: 1,
-    totalFrames: 1,
-    captureState: 'stopped',
-    gaps: [],
+  const elsewhere = {
+    ...base,
+    recordingId: 'elsewhere',
+    libraryId: 'old-library',
     createdAt: '2026-10-05T00:00:00Z',
   };
   globalThis.records = new Map([
-    [offline.recordingId, offline],
-    [healthy.recordingId, healthy],
+    [unassigned.recordingId, unassigned],
+    [elsewhere.recordingId, elsewhere],
   ]);
   globalThis.chunks = new Map(
-    [offline, healthy].map((row) => [
+    [unassigned, elsewhere].map((row) => [
       row.recordingId + ':0',
       { pcm: new ArrayBuffer(2), frames: 1, sha256: 'd'.repeat(64) },
     ]),
   );
   let now = 1000000;
-  let complete = false;
-  let nextSequence = 0;
+  let online = false;
+  let requests = 0;
+  const state = new Map();
   const originalFetch = globalThis.fetch;
   const originalNow = Date.now;
   Date.now = () => now;
   globalThis.fetch = async (url) => {
-    if (url.startsWith('http://localhost:3999')) {
-      now += 15000;
-      throw new Error('unreachable');
-    }
-    if (url.includes('/chunks/')) nextSequence = 1;
-    if (url.endsWith('/complete')) complete = true;
+    requests++;
+    if (!online) throw new Error('unreachable');
+    const recordingId = /\/recordings\/([^/]+)/.exec(url)?.[1];
+    const current = state.get(recordingId) ?? { nextSequence: 0, complete: false };
+    if (url.includes('/chunks/')) current.nextSequence = 1;
+    if (url.endsWith('/complete')) current.complete = true;
+    if (recordingId) state.set(recordingId, current);
     return new Response(
       JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: 2,
         appVersion: '0.1.0',
         storageProtectionVersion: 1,
         recordingReceiptVersion: 1,
-        recordingId: healthy.recordingId,
-        libraryId: healthy.libraryId,
-        meetingId: 'healthy-meeting',
-        status: complete ? 'complete' : 'receiving',
-        nextSequence,
-        totalFrames: nextSequence,
+        recordingId,
+        libraryId: 'library-1',
+        meetingId: `meeting-${recordingId}`,
+        status: current.complete ? 'complete' : 'receiving',
+        nextSequence: current.nextSequence,
+        totalFrames: current.nextSequence,
       }),
     );
   };
   try {
-    const prefs = {
-      activeLibraryId: offline.libraryId,
-      pairs: {
-        [offline.libraryId]: {
-          libraryId: offline.libraryId,
-          endpoint: 'http://localhost:3999',
-          credential: 'offline',
-        },
-        [healthy.libraryId]: {
-          libraryId: healthy.libraryId,
-          endpoint: 'http://localhost:3000',
-          credential: 'healthy',
-        },
-      },
-    };
     await protocol.transferPending(
-      prefs,
       async () => {},
       () => {},
     );
-    assert.equal(globalThis.records.get(healthy.recordingId).receipt, undefined);
+    assert.equal(requests, 1, 'one failed request backs off instead of retrying every row');
+    assert.equal(globalThis.records.get(unassigned.recordingId).transferState, 'saved-local');
     await protocol.transferPending(
-      prefs,
       async () => {},
       () => {},
     );
-    assert.ok(globalThis.records.get(healthy.recordingId).receipt);
-    assert.ok(globalThis.chunks.has(offline.recordingId + ':0'));
+    assert.equal(requests, 1, 'no requests during the backoff');
+    now += 11000;
+    online = true;
+    await protocol.transferPending(
+      async () => {},
+      () => {},
+    );
+    for (const id of [unassigned.recordingId, elsewhere.recordingId]) {
+      const row = globalThis.records.get(id);
+      assert.equal(row.libraryId, 'library-1');
+      assert.equal(row.receipt.libraryId, 'library-1');
+    }
   } finally {
     Date.now = originalNow;
     globalThis.fetch = originalFetch;
@@ -579,7 +579,9 @@ test('manifest uses scoped MV3 permissions, a stable identity and no content cre
     'unlimitedStorage',
     'alarms',
   ]);
-  assert.equal(manifest.externally_connectable, undefined);
+  assert.deepEqual(manifest.externally_connectable, {
+    matches: ['http://localhost/*', 'http://127.0.0.1/*'],
+  });
   assert.equal(manifest.web_accessible_resources, undefined);
   assert.equal(manifest.content_scripts, undefined);
   assert.ok(!JSON.stringify(manifest).includes('<all_urls>'));

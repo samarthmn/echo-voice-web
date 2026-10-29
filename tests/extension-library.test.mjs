@@ -15,14 +15,7 @@ const row = () => ({
   chunkCount: 1,
   receipt: undefined,
 });
-const prefs = () => ({
-  activeLibraryId: newLibrary,
-  endpoint: 'http://localhost:3999',
-  pairs: {
-    [oldLibrary]: { libraryId: oldLibrary, endpoint: 'http://localhost:3001' },
-    [newLibrary]: { libraryId: newLibrary, endpoint: 'http://localhost:3999' },
-  },
-});
+const oldPair = () => ({ libraryId: oldLibrary, endpoint: 'http://localhost:3001' });
 function locks() {
   const queues = new Map();
   return {
@@ -53,7 +46,7 @@ const actionsBuild = await build({
         }));
         b.onLoad({ filter: /.*/, namespace: 'mock' }, (args) => ({
           contents: args.path.endsWith('settings')
-            ? 'export const settings=async()=>globalThis.prefs;'
+            ? 'export const connectedPair=async()=>globalThis.pair;'
             : 'export const recording=async id=>globalThis.rows.get(id);export const deleteRecording=async id=>{globalThis.deleted.push(id);globalThis.rows.delete(id)};',
         }));
       },
@@ -64,7 +57,7 @@ function actionsHarness() {
   const context = {
     URL,
     navigator: { locks: locks() },
-    prefs: prefs(),
+    pair: oldPair(),
     rows: new Map([[id, row()]]),
     deleted: [],
     opened: [],
@@ -73,7 +66,7 @@ function actionsHarness() {
   vm.runInNewContext(actionsBuild.outputFiles[0].text, context);
   return context;
 }
-test('receipt opens only its original library, never the current paired destination', async () => {
+test('receipt opens only its original library, never another connected library', async () => {
   const h = actionsHarness();
   h.rows.get(id).receipt = { libraryId: oldLibrary, meetingId: meeting };
   await h.api.openEcho(id);
@@ -81,21 +74,21 @@ test('receipt opens only its original library, never the current paired destinat
   assert.equal(url.origin, 'http://localhost:3001');
   assert.equal(url.searchParams.get('library'), oldLibrary);
   assert.equal(url.searchParams.get('meeting'), meeting);
-  delete h.prefs.pairs[oldLibrary];
+  h.pair = { libraryId: newLibrary, endpoint: 'http://localhost:3999' };
   await assert.rejects(h.api.openEcho(id), /different Echo library/);
   assert.equal(h.opened.length, 1);
 });
 test('Echo links reject unsafe endpoints and malformed or cross-library receipts', () => {
   const h = actionsHarness();
   const value = { ...row(), receipt: { libraryId: oldLibrary, meetingId: meeting } };
-  h.prefs.pairs[oldLibrary].endpoint = 'https://example.invalid';
-  assert.throws(() => h.api.echoURL(h.prefs, value), /exact local Echo address/);
-  h.prefs.pairs[oldLibrary].endpoint = 'http://localhost:3001';
+  h.pair.endpoint = 'https://example.invalid';
+  assert.throws(() => h.api.echoURL(h.pair, value), /exact local Echo address/);
+  h.pair.endpoint = 'http://localhost:3001';
   value.receipt.meetingId = '../settings';
-  assert.throws(() => h.api.echoURL(h.prefs, value), /invalid Echo receipt/);
+  assert.throws(() => h.api.echoURL(h.pair, value), /invalid Echo receipt/);
   value.receipt.meetingId = meeting;
   value.libraryId = newLibrary;
-  assert.throws(() => h.api.echoURL(h.prefs, value), /invalid Echo receipt/);
+  assert.throws(() => h.api.echoURL(h.pair, value), /invalid Echo receipt/);
 });
 test('local deletion requires explicit confirmation and rejects the active recording', async () => {
   const h = actionsHarness();
@@ -137,10 +130,14 @@ test('a queued transfer re-reads the journal after deletion and cannot recreate 
       {
         name: 'transfer-journal',
         setup(b) {
-          b.onResolve({ filter: /^\.\/storage$/ }, () => ({ path: 'storage', namespace: 'mock' }));
-          b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({
-            contents:
-              'export const recording=async id=>globalThis.rows.get(id);export const allRecordings=async()=>[];export const getChunk=async()=>{throw Error("unexpected chunk")};export const updateRecording=async()=>{throw Error("unexpected update")};export const retainReceiptAndRemovePCM=async()=>{throw Error("unexpected receipt")};',
+          b.onResolve({ filter: /^\.\/(storage|settings)$/ }, (args) => ({
+            path: args.path,
+            namespace: 'mock',
+          }));
+          b.onLoad({ filter: /.*/, namespace: 'mock' }, (args) => ({
+            contents: args.path.endsWith('settings')
+              ? 'export const connectedPair=async()=>undefined;export const revokeCredential=async()=>{};'
+              : 'export const recording=async id=>globalThis.rows.get(id);export const allRecordings=async()=>[];export const getChunk=async()=>{throw Error("unexpected chunk")};export const updateRecording=async()=>{throw Error("unexpected update")};export const retainReceiptAndRemovePCM=async()=>{throw Error("unexpected receipt")};',
           }));
         },
       },
@@ -167,7 +164,7 @@ test('a queued transfer re-reads the journal after deletion and cannot recreate 
       }),
   );
   await Promise.resolve();
-  const transfer = context.protocol.transferOne(row(), prefs().pairs[oldLibrary], async () => {});
+  const transfer = context.protocol.transferOne(row(), oldPair(), async () => {});
   release();
   await deletion;
   await transfer;

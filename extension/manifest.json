@@ -14,11 +14,7 @@
     "unlimitedStorage",
     "alarms"
   ],
-  "host_permissions": [
-    "http://localhost/*",
-    "http://127.0.0.1/*",
-    "http://[::1]/*"
-  ],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "http://[::1]/*"],
   "optional_host_permissions": [
     "https://meet.google.com/*",
     "https://*.zoom.us/*",
@@ -48,5 +44,8 @@
   "options_page": "setup.html",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://localhost:* http://127.0.0.1:* http://[::1]:*"
+  },
+  "externally_connectable": {
+    "matches": ["http://localhost/*", "http://127.0.0.1/*"]
   }
 }

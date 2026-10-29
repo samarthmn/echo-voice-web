@@ -12,7 +12,7 @@ const executablePath =
 const bundle = await build({
   stdin: {
     contents:
-      "import * as journal from './extension/src/storage.ts';import * as vault from './extension/src/vault-manager.ts';import * as secrets from './extension/src/device-secrets.ts';import * as settings from './extension/src/settings.ts';globalThis.testAPI={journal,vault,secrets,settings};",
+      "import * as journal from './extension/src/storage.ts';import * as settings from './extension/src/settings.ts';globalThis.testAPI={journal,settings};",
     resolveDir: project,
     loader: 'ts',
   },
@@ -53,15 +53,6 @@ async function testPage(context, output) {
   await page.evaluate(bundle.outputFiles[0].text);
   return page;
 }
-async function setup(page) {
-  return page.evaluate(async () => {
-    const made = await testAPI.vault.beginVaultSetup();
-    await testAPI.vault.confirmVaultSetup(
-      made.positions.map((position) => made.phrase.split(' ')[position - 1]),
-    );
-    return made.phrase;
-  });
-}
 async function dump(page) {
   return page.evaluate(async () => {
     const db = await testAPI.journal.database();
@@ -79,7 +70,7 @@ async function dump(page) {
     };
   });
 }
-test('encrypted browser journal survives restart, locks history, captures offline, and recovers without plaintext credentials', async () => {
+test('device-key journal survives restart, records offline, and never stores plaintext metadata or credentials', async () => {
   await mkdir(scratch, { recursive: true });
   const output = await buildExtension({ outdir: path.join(scratch, 'extension') });
   await writeFile(
@@ -91,7 +82,6 @@ test('encrypted browser journal survives restart, locks history, captures offlin
   try {
     context = await launch(output, profile);
     let page = await testPage(context, output);
-    const phrase = await setup(page);
     const id = crypto.randomUUID();
     await page.evaluate(async (value) => {
       await testAPI.journal.createRecording(value);
@@ -102,40 +92,23 @@ test('encrypted browser journal survives restart, locks history, captures offlin
         }),
       ]);
       await testAPI.journal.updateRecording(value.recordingId, { captureState: 'stopped' });
-      await testAPI.settings.saveSettings({
-        pairs: {
-          library: {
-            libraryId: 'library',
-            credential: 'secret-auth-credential',
-            endpoint: 'http://localhost:1',
-          },
-        },
+      await testAPI.settings.saveLink({
+        state: 'connected',
+        libraryId: '22222222-2222-4222-8222-222222222222',
+        credential: 'secret-auth-credential',
+        endpoint: 'http://localhost:1',
       });
     }, row(id));
     const raw = await dump(page);
-    assert.equal(raw.rows[0].version, 2);
+    assert.equal(raw.rows[0].version, 3);
+    assert.equal(raw.rows[0].keyContext, 'device');
     assert.equal(raw.rows[0].title, undefined);
+    assert.equal(raw.rows[0].chunkCount, 1);
     assert.equal(raw.chunks[0].pcm, undefined);
-    assert.equal(raw.local.settings.pairs, undefined);
     assert.ok(!JSON.stringify(raw).includes('Confidential'));
+    assert.ok(!JSON.stringify(raw).includes('secret=meeting'));
     assert.ok(!JSON.stringify(raw).includes('secret-auth-credential'));
-    assert.ok(!JSON.stringify(raw).includes(phrase));
-    const before = await page.evaluate(
-      async (id) => ({
-        title: (await testAPI.journal.recording(id)).title,
-        count: (await testAPI.journal.recording(id)).chunkCount,
-        frames: (await testAPI.journal.recording(id)).totalFrames,
-        pcm: [...new Uint8Array((await testAPI.journal.getChunk(id, 0)).pcm)],
-      }),
-      id,
-    );
-    assert.deepEqual(before, {
-      title: 'Confidential renamed meeting',
-      count: 1,
-      frames: 2,
-      pcm: [1, 2, 3, 4],
-    });
-    const ownership = await page.evaluate(async (id) => {
+    const tampered = await page.evaluate(async (id) => {
       const db = await testAPI.journal.database();
       const original = await new Promise((resolve) => {
         const request = db.transaction('recordings').objectStore('recordings').get(id);
@@ -148,71 +121,40 @@ test('encrypted browser journal survives restart, locks history, captures offlin
           tx.oncomplete = resolve;
           tx.onerror = reject;
         });
-      const failures = [];
-      for (const patch of [
-        { libraryId: 'another-paired-library' },
-        {
-          receipt: {
-            libraryId: 'another-paired-library',
-            meetingId: 'forged-meeting',
-            verifiedAt: '',
-          },
-        },
-      ]) {
-        await put({ ...original, ...patch });
-        failures.push(
-          await testAPI.journal.recording(id).then(
-            () => null,
-            (error) => error.message,
-          ),
-        );
-        const listed = (await testAPI.journal.allRecordings())[0];
-        failures.push(listed.locked);
-      }
+      await put({ ...original, libraryId: 'another-library' });
+      const error = await testAPI.journal.recording(id).then(
+        () => null,
+        (error) => error.message,
+      );
       await put(original);
-      return { failures, retained: !!(await testAPI.journal.getChunk(id, 0)) };
+      return { error, retained: !!(await testAPI.journal.getChunk(id, 0)) };
     }, id);
-    assert.match(ownership.failures[0], /integrity check/);
-    assert.equal(ownership.failures[1], true);
-    assert.match(ownership.failures[2], /integrity check/);
-    assert.equal(ownership.failures[3], true);
-    assert.equal(ownership.retained, true);
+    assert.match(tampered.error, /integrity check/);
+    assert.equal(tampered.retained, true);
     await context.close();
     context = await launch(output, profile);
     page = await testPage(context, output);
-    const locked = await page.evaluate(
+    const restarted = await page.evaluate(
       async (id) => ({
-        status: await testAPI.vault.vaultStatus(),
-        rows: await testAPI.journal.allRecordings(),
-        error: await testAPI.journal.getChunk(id, 0).then(
-          () => null,
-          (error) => error.message,
-        ),
-        credential: (await testAPI.settings.settings()).pairs.library.credential,
+        title: (await testAPI.journal.recording(id)).title,
+        listed: (await testAPI.journal.allRecordings())[0],
+        pcm: [...new Uint8Array((await testAPI.journal.getChunk(id, 0)).pcm)],
+        credential: (await testAPI.settings.readLink()).credential,
       }),
       id,
     );
-    assert.equal(locked.status.unlocked, false);
-    assert.equal(locked.rows[0].locked, true);
-    assert.equal(locked.rows[0].title, 'Locked recording');
-    assert.match(locked.error, /recovery phrase/);
-    assert.equal(locked.credential, 'secret-auth-credential');
+    assert.equal(restarted.title, 'Confidential renamed meeting');
+    assert.equal(restarted.listed.title, '', 'lists never decrypt metadata');
+    assert.equal(restarted.listed.locked, false);
+    assert.deepEqual(restarted.pcm, [1, 2, 3, 4]);
+    assert.equal(restarted.credential, 'secret-auth-credential');
     const offline = crypto.randomUUID();
     await page.evaluate(async (value) => {
       await testAPI.journal.createRecording(value);
       await testAPI.journal.appendChunk(value.recordingId, 0, new Uint8Array([5, 6]).buffer);
       await testAPI.journal.updateRecording(value.recordingId, { captureState: 'stopped' });
     }, row(offline));
-    const wrong = await page.evaluate(async () =>
-      testAPI.vault.recoverVault('wrong phrase').then(
-        () => null,
-        (error) => error.message,
-      ),
-    );
-    assert.match(wrong, /Check the recovery phrase/);
-    assert.equal((await dump(page)).chunks.length, 2);
-    await page.evaluate((phrase) => testAPI.vault.recoverVault(phrase), phrase);
-    const recovered = await page.evaluate(
+    const exported = await page.evaluate(
       async (ids) => {
         const result = [];
         for (const id of ids) {
@@ -225,9 +167,9 @@ test('encrypted browser journal survives restart, locks history, captures offlin
       },
       [id, offline],
     );
-    assert.deepEqual(recovered[0][0].slice(44), [1, 2, 3, 4]);
-    assert.deepEqual(recovered[1][0].slice(44), [5, 6]);
-    const tampered = await page.evaluate(async (id) => {
+    assert.deepEqual(exported[0][0].slice(44), [1, 2, 3, 4]);
+    assert.deepEqual(exported[1][0].slice(44), [5, 6]);
+    const corrupted = await page.evaluate(async (id) => {
       const db = await testAPI.journal.database();
       const current = await new Promise((resolve) => {
         const request = db.transaction('chunks').objectStore('chunks').get([id, 0]);
@@ -249,8 +191,8 @@ test('encrypted browser journal survives restart, locks history, captures offlin
       );
       return { error, count: (await testAPI.journal.recording(id)).chunkCount };
     }, id);
-    assert.equal(tampered.error, 'OperationError');
-    assert.equal(tampered.count, 1);
+    assert.equal(corrupted.error, 'OperationError');
+    assert.equal(corrupted.count, 1);
     assert.equal((await dump(page)).chunks.length, 2);
     await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
     const safe = await page.evaluate(async () => {
@@ -258,8 +200,7 @@ test('encrypted browser journal survives restart, locks history, captures offlin
       return JSON.stringify(state);
     });
     assert.ok(!safe.includes('secret-auth-credential'));
-    assert.ok(!safe.includes('privateMaterial'));
-    assert.ok(!safe.includes(phrase));
+    assert.ok(!safe.includes('Confidential'));
   } finally {
     await context?.close();
     await rm(scratch, { recursive: true, force: true, maxRetries: 3 });
@@ -277,7 +218,6 @@ test('v1 plaintext migration is resumable after asynchronous encryption failure 
   try {
     context = await launch(output, path.join(root, 'profile'));
     const page = await testPage(context, output);
-    await setup(page);
     const id = crypto.randomUUID();
     await page.evaluate(async (value) => {
       const pcm = new Uint8Array([10, 20, 30, 40]).buffer;

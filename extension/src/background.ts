@@ -1,3 +1,4 @@
+import { externalMessage } from './external-messages';
 import {
   meetingFor,
   microphoneAllowed,
@@ -6,30 +7,27 @@ import {
   validObservation,
   InterruptionReason,
 } from './core';
-import { allRecordings, migrateRecordings, protectionMigrationPending } from './storage';
+import { allRecordings, migrateRecordings } from './storage';
 import {
-  beginVaultSetup,
-  confirmVaultSetup,
-  recoverVault,
-  vaultStatus,
-  syncVaultWithEcho,
-  lockVault,
-  trustedVaultIdentity,
-} from './vault-manager';
-import { settings, saveSettings } from './settings';
+  settings,
+  saveSettings,
+  readLink,
+  revokeCredential,
+  connectedPair,
+  wasRevoked,
+} from './settings';
+import type { ActiveStatus } from './offscreen';
+import type { ConnectionView } from './status-labels';
 import { openEcho, deleteLocalRecording } from './library-actions';
-import { connectionAction, connectionStatus, livePreview } from './connection';
+import { connectionStatus, disconnect, livePreview } from './connection';
 import {
   beginPairing,
   resumePairing,
   cancelPairing,
-  confirmPairingLibrary,
-  openPairingApproval,
-  requestManualPairing,
+  showPairingApproval,
   pairingView,
-  disconnectPairing,
+  whenConnected,
 } from './pairing';
-declare const chrome: any;
 type Owner = {
   tabId: number;
   identity: string;
@@ -76,7 +74,9 @@ async function send(message: any) {
 }
 async function restoreOwner() {
   if (!owner) {
-    const saved = (await chrome.storage.session.get('captureOwner')).captureOwner;
+    const saved = (await chrome.storage.session.get('captureOwner')).captureOwner as
+      | Owner
+      | undefined;
     if (!owner) owner = saved;
   }
 }
@@ -85,7 +85,7 @@ async function clearOwner(expectedRecordingId?: string) {
   owner = undefined;
   await chrome.storage.session.remove('captureOwner');
 }
-async function setBadge(active: any) {
+async function setBadge(active: ActiveStatus | null) {
   const rows = await allRecordings();
   const attention = rows.some(
     (row) =>
@@ -141,7 +141,7 @@ async function stopOwner(reason: InterruptionReason) {
   if (!owner) return;
   const capturedOwner = owner;
   capturedOwner.departing = true;
-  await gate().catch(() => {});
+  await gate().catch(logFailure('microphone gate'));
   if (owner !== capturedOwner) return;
   const id = capturedOwner.recordingId;
   await send({
@@ -156,7 +156,7 @@ async function stopOwner(reason: InterruptionReason) {
 async function verifyOwnerDocument(tabId: number) {
   await restoreOwner();
   const capturedOwner = owner;
-  if (capturedOwner?.tabId !== tabId) return;
+  if (!capturedOwner || capturedOwner.tabId !== tabId) return;
   // InjectionResult.documentId comes from Chrome, without reading meeting content.
   // Loading may belong to a subframe or same-document navigation; it is not proof
   // that the original meeting document was replaced.
@@ -192,11 +192,11 @@ async function start(message: any) {
     if (message.consent !== true)
       throw new Error('Confirm that meeting participants consent before starting.');
     const tab = await chrome.tabs.get(message.tabId);
+    if (tab.id === undefined) throw new Error('Meeting tab is unavailable.');
+    const tabId = tab.id;
     const meeting = meetingFor(tab.url ?? '');
     if (!meeting)
       throw new Error('Open a supported Google Meet, Zoom Web or Teams Web meeting tab.');
-    if (!(await vaultStatus()).ready)
-      throw new Error('Save your recovery phrase in Setup before recording.');
     const prefs = await settings();
     if (!prefs.enabledProviders.includes(meeting.provider))
       throw new Error('Enable this meeting provider in Echo extension setup.');
@@ -210,15 +210,15 @@ async function start(message: any) {
         .slice(0, 200) || 'Meeting';
     await offscreen();
     const injected = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: tabId },
       files: ['content.js'],
     });
     const documentId = injected.find((frame: any) => frame.frameId === 0)?.documentId;
     if (typeof documentId !== 'string')
       throw new Error('The meeting document could not be verified. Retry from your meeting tab.');
-    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
     const recordingId = crypto.randomUUID();
-    owner = { tabId: tab.id, identity: meeting.identity, recordingId, documentId, gateRevision: 0 };
+    owner = { tabId: tabId, identity: meeting.identity, recordingId, documentId, gateRevision: 0 };
     await chrome.storage.session.set({ captureOwner: owner });
     try {
       const micDeviceId =
@@ -240,13 +240,13 @@ async function start(message: any) {
           sampleRate: 16000,
           channels: 1,
           createdAt: new Date().toISOString(),
-          libraryId: prefs.activeLibraryId,
+          libraryId: (await connectedPair())?.libraryId ?? null,
         },
       });
       if (
         !owner ||
         owner.recordingId !== recordingId ||
-        meetingFor((await chrome.tabs.get(tab.id)).url ?? '')?.identity !== meeting.identity
+        meetingFor((await chrome.tabs.get(tabId)).url ?? '')?.identity !== meeting.identity
       ) {
         await send({
           type: 'CONTROL',
@@ -272,27 +272,32 @@ async function start(message: any) {
 }
 let migrating: Promise<void> | undefined;
 let migrationError: string | undefined;
-function migrateProtectedHistory() {
-  if (!migrating)
-    migrating = (async () => {
-      if ((await vaultStatus()).unlocked && (await protectionMigrationPending())) {
-        await migrateRecordings();
-        migrationError = undefined;
-      }
-    })()
-      .catch((error) => {
-        migrationError = (error as Error).message;
-      })
-      .finally(() => {
-        migrating = undefined;
-      });
+function migrateProtectedHistory(): Promise<void> {
+  migrating ??= migrateRecordings()
+    .then(() => {
+      migrationError = undefined;
+    })
+    .catch((error) => {
+      console.error('Echo: saved recordings could not be migrated.', error);
+      migrationError = (error as Error).message;
+    })
+    .finally(() => {
+      migrating = undefined;
+    });
   return migrating;
 }
+/** Migrate, then upload pending audio. Recording itself never waits for this. */
+async function syncPending(): Promise<void> {
+  await migrateProtectedHistory();
+  if ((await allRecordings()).some((row) => !row.receipt && row.chunkCount))
+    await send({ type: 'SYNC' });
+}
+function logFailure(task: string) {
+  return (error: unknown) => console.warn(`Echo: ${task} failed.`, error);
+}
 async function state() {
-  await syncVaultWithEcho();
-  void migrateProtectedHistory();
   const prefs = await settings();
-  let active = null;
+  let active: ActiveStatus | null = null;
   let recoveryError: string | undefined;
   if (await hasOffscreen()) {
     const status = await send({ type: 'STATUS' });
@@ -300,16 +305,9 @@ async function state() {
     recoveryError = status.error;
   }
   return {
-    vault: {
-      ...(await vaultStatus()),
-      migrationPending: await protectionMigrationPending(),
-      migrationError,
-    },
-    pairing: await pairingView(),
+    migrationError,
+    connection: { ...(await pairingView()), revoked: await wasRevoked() } satisfies ConnectionView,
     settings: {
-      endpoint: prefs.endpoint,
-      installationId: prefs.installationId,
-      activeLibraryId: prefs.activeLibraryId,
       enabledProviders: prefs.enabledProviders,
       micGranted: prefs.micGranted,
       micDeviceId: prefs.micDeviceId,
@@ -319,7 +317,8 @@ async function state() {
     recordings: await allRecordings(),
   };
 }
-chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) => {
+export type ExtensionState = Awaited<ReturnType<typeof state>>;
+chrome.runtime.onMessage.addListener((message: any, sender, respond) => {
   if (sender.id !== chrome.runtime.id) return false;
   const documentURL = typeof sender.url === 'string' ? sender.url.split(/[?#]/)[0] : '';
   const trustedPage = [
@@ -327,16 +326,19 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
     chrome.runtime.getURL('setup.html'),
   ].includes(documentURL);
   if (sender.tab && !trustedPage) {
+    const tabId = sender.tab.id;
     if (
       !['MUTE_OBSERVATION', 'MEETING_PAGEHIDE'].includes(message.type) ||
       sender.frameId !== 0 ||
       !sender.documentId ||
       !validObservation(message) ||
-      sender.url !== message.url
+      sender.url !== message.url ||
+      tabId === undefined
     )
       return false;
-    const previous = observations.get(sender.tab.id);
-    if (previous?.documentId === sender.documentId && message.seq <= previous.seq) return false;
+    const previous = observations.get(tabId);
+    if (previous && previous.documentId === sender.documentId && message.seq <= previous.seq)
+      return false;
     const now = Date.now();
     const fresh =
       Number.isFinite(message.observedAt) &&
@@ -348,16 +350,16 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
       documentId: sender.documentId,
       receivedAt: fresh ? message.observedAt : now,
     };
-    observations.set(sender.tab.id, received);
+    observations.set(tabId, received);
     const run = async () => {
       await restoreOwner();
       if (message.type === 'MEETING_PAGEHIDE') {
-        if (owner?.tabId === sender.tab.id && owner.documentId === sender.documentId)
+        if (owner && owner.tabId === tabId && owner.documentId === sender.documentId)
           await stopOwner('document-changed');
         return;
       }
-      if (observations.get(sender.tab.id) !== received) return;
-      if (owner?.tabId === sender.tab.id) {
+      if (observations.get(tabId) !== received) return;
+      if (owner && owner.tabId === tabId) {
         if (owner.documentId && owner.documentId !== sender.documentId) {
           await stopOwner('document-changed');
           return;
@@ -375,28 +377,22 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
           await chrome.storage.session.set({ captureOwner: owner });
         }
       }
-      if (observations.get(sender.tab.id) !== received) return;
+      if (observations.get(tabId) !== received) return;
       await gate();
     };
-    run().catch(() => {});
+    run().catch(logFailure('meeting observation'));
     return false;
   }
   if (message.target === 'offscreen') return false;
   if (
     sender.url === chrome.runtime.getURL('offscreen.html') &&
-    message.type === 'TRUSTED_VAULT_IDENTITY'
+    ['TRUSTED_LINK', 'TRUSTED_REVOKE'].includes(message.type)
   ) {
-    trustedVaultIdentity().then(
-      (value) => respond({ ok: true, value }),
-      (error) => respond({ ok: false, error: (error as Error).message }),
-    );
-    return true;
-  }
-  if (
-    sender.url === chrome.runtime.getURL('offscreen.html') &&
-    message.type === 'TRUSTED_SETTINGS'
-  ) {
-    settings().then(
+    const work =
+      message.type === 'TRUSTED_LINK'
+        ? readLink()
+        : revokeCredential(message.credential, message.endpoint);
+    work.then(
       (value) => respond({ ok: true, value }),
       (error) => respond({ ok: false, error: (error as Error).message }),
     );
@@ -414,27 +410,6 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
   const run = async () => {
     if (message.type === 'STATE') return state();
     if (message.type === 'CONNECTION_STATUS') return connectionStatus();
-    if (message.type === 'DISCONNECT') {
-      const value = await disconnectPairing(message.confirmed === true);
-      await lockVault();
-      return value;
-    }
-    if (message.type === 'VAULT_BEGIN') return beginVaultSetup();
-    if (message.type === 'VAULT_CONFIRM') {
-      await confirmVaultSetup(message.words);
-      await migrateProtectedHistory();
-      return vaultStatus();
-    }
-    if (message.type === 'VAULT_UNLOCK') {
-      await recoverVault(message.phrase);
-      await migrateProtectedHistory();
-      return vaultStatus();
-    }
-    if (message.type === 'VAULT_RETRY') {
-      await syncVaultWithEcho(true);
-      await migrateProtectedHistory();
-      return vaultStatus();
-    }
     if (message.type === 'LIVE_PREVIEW') return livePreview(message.recordingId);
     if (message.type === 'MIC_EXCLUSION') {
       await restoreOwner();
@@ -470,19 +445,11 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
       if (message.action === 'stop') await clearOwner(id);
       return response;
     }
-    if (message.type === 'PAIR_BEGIN') return beginPairing(message.endpoint, message.name);
-    if (message.type === 'PAIR_STATUS') return resumePairing();
+    if (message.type === 'PAIR_BEGIN')
+      return beginPairing(typeof message.endpoint === 'string' ? message.endpoint : undefined);
     if (message.type === 'PAIR_CANCEL') return cancelPairing();
-    if (message.type === 'PAIR_CONFIRM_LIBRARY') return confirmPairingLibrary(message.requestId);
-    if (message.type === 'PAIR_OPEN_APPROVAL') return openPairingApproval(message.requestId);
-    if (message.type === 'PAIR_REQUEST')
-      return requestManualPairing(message.endpoint, message.name, message.code);
-    if (message.type === 'PAIR_CLAIM')
-      return message.confirmLibrary === true
-        ? confirmPairingLibrary((await pairingView()).requestId ?? '')
-        : resumePairing();
-    if (message.type === 'SAVE_ENDPOINT')
-      return connectionAction(() => saveSettings({ endpoint: message.endpoint })).then(() => ({}));
+    if (message.type === 'PAIR_SHOW_APPROVAL') return showPairingApproval();
+    if (message.type === 'DISCONNECT') return disconnect().then(() => ({}));
     if (message.type === 'MIC_GRANTED')
       return saveSettings({ micGranted: message.granted === true }).then(() => ({}));
     if (
@@ -497,9 +464,8 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
       return {};
     }
     if (message.type === 'SYNC') {
-      await syncVaultWithEcho(true);
       await migrateProtectedHistory();
-      void send({ type: 'SYNC' });
+      void send({ type: 'SYNC' }).catch(logFailure('transfer'));
       return {};
     }
     throw new Error('Unsupported extension action.');
@@ -510,52 +476,59 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
   );
   return true;
 });
-chrome.tabs.onRemoved.addListener((tabId: number) => {
+chrome.tabs.onRemoved.addListener((tabId) => {
   void restoreOwner().then(() => {
-    if (owner?.tabId === tabId) void stopOwner('tab-closed').catch(() => {});
+    if (owner?.tabId === tabId)
+      void stopOwner('tab-closed').catch(logFailure('stopping the recording'));
   });
   observations.delete(tabId);
 });
-chrome.tabs.onUpdated.addListener((tabId: number, change: any, tab: any) => {
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
   void restoreOwner().then(() => {
-    if (owner?.tabId !== tabId) return;
+    if (!owner || owner.tabId !== tabId) return;
     if (change.url && meetingFor(tab.url ?? change.url)?.identity !== owner.identity) {
-      void stopOwner('meeting-changed').catch(() => {});
+      void stopOwner('meeting-changed').catch(logFailure('stopping the recording'));
       return;
     }
     if (change.status === 'loading') {
       observations.delete(tabId);
-      void gate().catch(() => {});
+      void gate().catch(logFailure('microphone gate'));
     }
     if (change.status === 'loading' || change.status === 'complete')
-      void verifyOwnerDocument(tabId).catch(() => {});
+      void verifyOwnerDocument(tabId).catch(logFailure('meeting document check'));
   });
 });
-chrome.alarms.onAlarm.addListener((alarm: any) => {
-  if (alarm.name === 'echo-transfer') {
-    void resumePairing()
-      .then(() => syncVaultWithEcho())
-      .then(() => migrateProtectedHistory())
-      .catch(() => {});
-    void allRecordings().then((rows) => {
-      if (rows.some((row) => !row.receipt && row.chunkCount)) void send({ type: 'SYNC' });
-    });
-  }
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== 'echo-transfer') return;
+  void resumePairing().catch(logFailure('connection check'));
+  void syncPending().catch(logFailure('transfer'));
 });
-chrome.runtime.onInstalled.addListener((details: any) => {
-  void settings();
+chrome.runtime.onInstalled.addListener((details) => {
+  // An update migrates settings and saved recordings right away, not at the next alarm.
+  // A fresh install has nothing to migrate.
+  void settings()
+    .then(() => (details.reason === 'update' ? syncPending() : undefined))
+    .catch(logFailure('migration'));
   void chrome.alarms.create('echo-transfer', { periodInMinutes: 0.5 });
   if (details.reason === 'install') void chrome.runtime.openOptionsPage();
 });
 chrome.runtime.onStartup.addListener(() => {
   void clearOwner();
-  void resumePairing()
-    .then(() => syncVaultWithEcho(true))
-    .then(() => migrateProtectedHistory())
-    .then(() => send({ type: 'SYNC' }))
-    .catch(() => {});
+  void syncPending().catch(logFailure('transfer'));
 });
+chrome.runtime.onMessageExternal.addListener((message, sender, respond) => {
+  externalMessage(message, sender).then(respond, (error) => {
+    console.warn('Echo: rejected a message from an Echo page.', error);
+    respond({ ok: false, error: (error as Error).message });
+  });
+  return true;
+});
+whenConnected(() => void syncPending().catch(logFailure('transfer')));
 setInterval(() => {
-  void gate().catch(() => {});
+  void gate().catch(logFailure('microphone gate'));
+}, 1000);
+// Fallback for a missed ECHO_APPROVED message: claim while a request is waiting.
+setInterval(() => {
+  void resumePairing().catch(logFailure('connection claim'));
 }, 1000);
 void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });

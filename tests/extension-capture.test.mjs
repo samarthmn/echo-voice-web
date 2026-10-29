@@ -144,18 +144,7 @@ function harness({
       },
       sendMessage: async (message) => {
         notifications.push(message);
-        if (message.type === 'TRUSTED_SETTINGS')
-          return {
-            ok: true,
-            value: {
-              installationId: 'synthetic',
-              endpoint: 'http://localhost:3000',
-              pairs: {},
-              activeLibraryId: null,
-              enabledProviders: ['meet'],
-              micGranted: true,
-            },
-          };
+        if (message.type === 'TRUSTED_LINK') return { ok: true, value: { state: 'none' } };
         return {};
       },
     },
@@ -190,6 +179,8 @@ function harness({
       },
     },
     crypto: globalThis.crypto,
+    TextEncoder,
+    TextDecoder,
     setInterval: () => 1,
     setTimeout,
     clearTimeout,
@@ -250,7 +241,7 @@ function harness({
 async function settle() {
   for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
 }
-test('offscreen uses runtime-only trusted settings and captures selected mic without feedback', async () => {
+test('offscreen asks the service worker for its connection and captures selected mic without feedback', async () => {
   const h = harness();
   assert.equal((await h.start()).ok, true);
   assert.equal(h.journal.recovered, true);
@@ -264,7 +255,7 @@ test('offscreen uses runtime-only trusted settings and captures selected mic wit
   assert.equal(sources[1].connections[0].target, h.worklet());
   assert.equal(sources[1].connections[0].input, 1);
   await h.message({ type: 'SYNC' });
-  assert.ok(h.notifications.some((message) => message.type === 'TRUSTED_SETTINGS'));
+  assert.ok(h.notifications.some((message) => message.type === 'TRUSTED_LINK'));
   assert.equal(
     await h.message(
       { type: 'START' },

@@ -1,6 +1,4 @@
-// Browser-profile storage. Keys here protect accidental storage disclosure; the
-// browser profile and OS account remain trusted. Recording identities live only
-// in session storage and are recovered from Echo or the saved recovery phrase.
+// Shared browser-profile journal and non-extractable device key.
 let opening: Promise<IDBDatabase> | undefined;
 export function database(): Promise<IDBDatabase> {
   return (opening ??= new Promise((resolve, reject) => {

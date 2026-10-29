@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { cp, mkdir, readFile, lstat } from 'node:fs/promises';
+import { cp, mkdir, readFile, lstat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -93,7 +93,11 @@ export async function buildExtension({ outdir = path.join(project, 'extension', 
   await mkdir(path.join(outdir, 'fonts'), { recursive: true });
   for (const name of ['inter-400.woff2', 'inter-500.woff2', 'inter-600.woff2', 'LICENSE'])
     await cp(path.join(project, 'public', 'fonts', name), path.join(outdir, 'fonts', name));
-  return { outdir, extensionId: extensionId(manifest.key), version: manifest.version };
+  const id = extensionId(manifest.key);
+  const idFile = path.join(project, 'public', 'js', 'extension-id.json');
+  await mkdir(path.dirname(idFile), { recursive: true });
+  await writeFile(idFile, `${JSON.stringify({ id }, null, 2)}\n`);
+  return { outdir, extensionId: id, version: manifest.version };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const result = await buildExtension({

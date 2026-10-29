@@ -1,15 +1,9 @@
 import { protectedCompanion } from './compatibility';
 import { Pair } from './core';
-import { lockEchoIdentity } from './vault-manager';
-import { settings, saveSettings } from './settings';
+import { readLink, connectedPair, saveLink, wasRevoked, Link } from './settings';
 import { recording } from './storage';
 import { jsonRequest, ProtocolError } from './protocol';
-export type ConnectionStatus =
-  | 'connected'
-  | 'not-connected'
-  | 'unavailable'
-  | 'revoked'
-  | 'update-needed';
+export type ConnectionStatus = 'connected' | 'echo-offline' | 'revoked' | 'waiting' | 'none';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const liveStates = new Set([
   'live',
@@ -24,95 +18,67 @@ const liveStates = new Set([
   'disabled',
 ]);
 let actions: Promise<unknown> = Promise.resolve();
+/** Run connection changes one at a time, so a claim never races a cancel or disconnect. */
 export function connectionAction<T>(work: () => Promise<T>): Promise<T> {
   const result = actions.then(work);
   actions = result.catch(() => undefined);
   return result;
 }
-let connectionCache: { pair: Pair; at: number; value: { status: ConnectionStatus } } | undefined;
-let connectionPending: { pair: Pair; promise: Promise<{ status: ConnectionStatus }> } | undefined;
 const samePair = (a: Pair, b: Pair) =>
   a.libraryId === b.libraryId && a.endpoint === b.endpoint && a.credential === b.credential;
-export async function connectionStatus(): Promise<{ status: ConnectionStatus }> {
-  const prefs = await settings();
-  const pair = prefs.pairs[prefs.activeLibraryId ?? ''];
-  if (!pair) return { status: 'not-connected' };
-  if (
-    connectionCache &&
-    samePair(pair, connectionCache.pair) &&
-    Date.now() - connectionCache.at < 5000
-  )
-    return connectionCache.value;
-  if (connectionPending && samePair(pair, connectionPending.pair)) return connectionPending.promise;
-  const promise = (async () => {
-    let status: ConnectionStatus;
-    try {
-      const body = await jsonRequest(
-        pair.endpoint,
-        '/connection',
-        { signal: AbortSignal.timeout(3000) },
-        pair.credential,
-      );
-      if (body.libraryId !== pair.libraryId || body.installationId !== prefs.installationId)
-        throw new Error('Invalid connection response.');
-      status = protectedCompanion(body) ? 'connected' : 'update-needed';
-    } catch (error) {
-      status = error instanceof ProtocolError && error.status === 401 ? 'revoked' : 'unavailable';
-    }
-    const current = await settings();
-    const currentPair = current.pairs[current.activeLibraryId ?? ''];
-    if (!currentPair) status = 'not-connected';
-    else if (!samePair(currentPair, pair)) status = 'unavailable';
-    if (status === 'revoked') await lockEchoIdentity();
-    const value = { status };
-    connectionCache = { pair, at: Date.now(), value };
-    return value;
-  })();
-  connectionPending = { pair, promise };
-  try {
-    return await promise;
-  } finally {
-    if (connectionPending?.promise === promise) connectionPending = undefined;
-  }
+type StatusReply = { status: ConnectionStatus; endpoint?: string };
+async function localStatus(link: Link): Promise<StatusReply> {
+  if (link.state === 'none') return { status: (await wasRevoked()) ? 'revoked' : 'none' };
+  return { status: link.state, endpoint: link.endpoint };
 }
-export function disconnect(confirmed: boolean): Promise<{ status: 'disconnected' }> {
-  return connectionAction(() => disconnectLocked(confirmed));
-}
-// Called only while holding connectionAction, including pairing reconciliation.
-export async function disconnectLocked(confirmed: boolean): Promise<{ status: 'disconnected' }> {
-  if (!confirmed)
-    throw new Error('Confirm disconnect first. Pending local audio will remain on this device.');
-  const prefs = await settings();
-  const pair = prefs.pairs[prefs.activeLibraryId ?? ''];
-  if (!pair) return { status: 'disconnected' };
+/** Contract UI status. A connected link is checked against Echo's GET /connection. */
+export async function connectionStatus(): Promise<StatusReply> {
+  const link = await readLink();
+  if (link.state !== 'connected') return localStatus(link);
   try {
     const body = await jsonRequest(
-      pair.endpoint,
+      link.endpoint,
       '/connection',
-      { method: 'DELETE', signal: AbortSignal.timeout(3000) },
-      pair.credential,
+      { signal: AbortSignal.timeout(3_000) },
+      link.credential,
     );
-    if (body.status !== 'disconnected') throw new Error('Echo did not confirm disconnect.');
+    if (body.libraryId !== link.libraryId || !protectedCompanion(body))
+      throw new ProtocolError('Echo returned an unexpected connection.');
+    // A disconnect or new pairing may have finished while Echo answered.
+    const current = await readLink();
+    return current.state === 'connected' && samePair(current, link)
+      ? { status: 'connected', endpoint: link.endpoint }
+      : localStatus(current);
   } catch (error) {
-    if (!(error instanceof ProtocolError && error.status === 401))
-      throw new Error(
-        'Echo could not confirm revocation. The connection is retained. Open Echo and retry disconnect; local audio is safe.',
-      );
+    // jsonRequest already cleared a credential that Echo answered 401 for.
+    if (error instanceof ProtocolError && error.status === 401)
+      return { status: 'revoked', endpoint: link.endpoint };
+    return { status: 'echo-offline', endpoint: link.endpoint };
   }
-  await saveSettings((current) => {
-    if (!current.pairs[pair.libraryId] || !samePair(pair, current.pairs[pair.libraryId])) return {};
-    const pairs = { ...current.pairs };
-    delete pairs[pair.libraryId];
-    return {
-      pairs,
-      activeLibraryId: current.activeLibraryId === pair.libraryId ? null : current.activeLibraryId,
-    };
-  });
-  connectionCache = undefined;
-  return { status: 'disconnected' };
 }
-const livePending = new Map<string, Promise<any>>();
-export async function livePreview(id: string): Promise<any> {
+/** Forget this browser in Echo, then locally. Echo must be reachable to revoke the credential. */
+export function disconnect(): Promise<void> {
+  return connectionAction(async () => {
+    const pair = await connectedPair();
+    if (!pair) return;
+    try {
+      await jsonRequest(pair.endpoint, '/connection', { method: 'DELETE' }, pair.credential);
+    } catch (error) {
+      if (!(error instanceof ProtocolError && error.status === 401))
+        throw new Error('Open Echo to disconnect this browser. Recordings stay saved here.');
+    }
+    await saveLink({ state: 'none' });
+  });
+}
+type LivePreview = {
+  recordingId: string;
+  status: string;
+  preview: string;
+  backlogSeconds: number;
+  provisional: boolean;
+};
+const livePending = new Map<string, Promise<LivePreview>>();
+export async function livePreview(id: string): Promise<LivePreview> {
   if (!uuid.test(id)) throw new Error('Invalid recording identity.');
   const row = await recording(id);
   if (!row) throw new Error('Recording no longer exists locally.');
@@ -124,8 +90,7 @@ export async function livePreview(id: string): Promise<any> {
       backlogSeconds: 0,
       provisional: false,
     };
-  const prefs = await settings();
-  const pair = prefs.pairs[row.libraryId ?? prefs.activeLibraryId ?? ''];
+  const pair = await connectedPair();
   if (!pair)
     return {
       recordingId: id,
@@ -134,17 +99,17 @@ export async function livePreview(id: string): Promise<any> {
       backlogSeconds: 0,
       provisional: false,
     };
-  if (livePending.has(id)) return livePending.get(id);
-  const promise = (async () => {
+  const inFlight = livePending.get(id);
+  if (inFlight) return inFlight;
+  const promise = (async (): Promise<LivePreview> => {
     try {
       const body = await jsonRequest(
         pair.endpoint,
         `/recordings/${id}/live`,
-        { signal: AbortSignal.timeout(3000) },
+        { signal: AbortSignal.timeout(3_000) },
         pair.credential,
       );
-      const current = await settings();
-      const currentPair = current.pairs[pair.libraryId];
+      const currentPair = await connectedPair();
       if (!currentPair || !samePair(currentPair, pair))
         return {
           recordingId: id,

@@ -16,7 +16,23 @@
     </header>
     <main>
       <div id="error" class="error" role="alert" hidden></div>
-      <p id="connection" class="eyebrow" role="status">Checking connection</p>
+      <section
+        id="connection-card"
+        class="card connection-card"
+        aria-labelledby="connection-title"
+        hidden
+      >
+        <h2 id="connection-title">Connect to Echo</h2>
+        <p id="connection-detail" class="description" role="status">
+          Recordings are saved in this browser until you connect.
+        </p>
+        <div class="actions">
+          <button id="connect" class="primary">Connect to Echo</button
+          ><button id="show-echo" class="secondary" hidden>Show Echo tab</button
+          ><button id="cancel-connect" class="quiet" hidden>Cancel</button>
+        </div>
+      </section>
+      <p id="locked-notice" class="warning" hidden></p>
       <section id="start-panel" class="card">
         <h1>Record this meeting</h1>
         <p id="meeting" class="description">Looking for your meeting tab…</p>
@@ -88,6 +104,9 @@
         <div id="recordings"></div>
       </section>
     </main>
-    <footer>Audio is stored on this device first.</footer>
+    <footer class="connection-status">
+      <span id="connection-dot" class="status-dot" aria-hidden="true"></span
+      ><span id="connection" role="status">Checking connection</span>
+    </footer>
   </body>
 </html>

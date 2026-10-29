@@ -10,10 +10,16 @@ summary() { printf '\nPassed checks:'; printf ' %s' "${passed[@]}"; printf '\n';
 trap summary EXIT
 run() { local name="$1"; shift; printf '\n==> %s\n' "$name"; "$@"; passed+=("$name"); }
 run rust-format cargo fmt --all -- --check
+if command -v dx >/dev/null; then
+  run rsx-format dx fmt --check
+else
+  printf '\n==> rsx-format skipped (install with: cargo install dioxus-cli --version ^0.7 --locked)\n'
+fi
 run clippy cargo clippy --locked --workspace --all-targets -- -D warnings
 run wasm-clippy cargo clippy --locked -p echo-app --target wasm32-unknown-unknown -- -D warnings
 run rust-tests cargo test --locked --workspace
 run formatting pnpm format:check
+run typecheck pnpm typecheck
 run unit-tests pnpm test
 if [[ ${1:-} == --all ]]; then
   run release-build ./scripts/setup.sh --build-only

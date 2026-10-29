@@ -1,15 +1,13 @@
-import { endpointURL, Recording, Settings } from './core';
-import { settings } from './settings';
+import { endpointURL, Pair, Recording } from './core';
+import { connectedPair } from './settings';
 import { deleteRecording, recording } from './storage';
 import { withRecordingLock } from './recording-lock';
-declare const chrome: any;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function echoURL(prefs: Settings, row?: Recording): string {
-  const libraryId = row?.receipt?.libraryId ?? row?.libraryId ?? prefs.activeLibraryId;
+export function echoURL(pair: Pair | undefined, row?: Recording): string {
+  const libraryId = row?.receipt?.libraryId ?? row?.libraryId ?? pair?.libraryId;
   if (!libraryId || !uuid.test(libraryId))
     throw new Error('Connect this recording’s Echo library in Setup before opening it.');
-  const pair = prefs.pairs[libraryId];
   if (!pair || pair.libraryId !== libraryId)
     throw new Error(
       'This recording belongs to a different Echo library. Reconnect that library to open it.',
@@ -26,7 +24,7 @@ export function echoURL(prefs: Settings, row?: Recording): string {
 export async function openEcho(id?: string): Promise<void> {
   const row = id ? await recording(id) : undefined;
   if (id && !row) throw new Error('This local recording is no longer available.');
-  await chrome.tabs.create({ url: echoURL(await settings(), row) });
+  await chrome.tabs.create({ url: echoURL(await connectedPair(), row) });
 }
 export async function deleteLocalRecording(
   id: string,

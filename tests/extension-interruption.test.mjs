@@ -3,19 +3,17 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { build } from 'esbuild';
 const fakeModules = {
-  'vault-manager':
-    'export const beginVaultSetup=async()=>({});export const confirmVaultSetup=async()=>({});export const recoverVault=async()=>({});export const vaultStatus=async()=>({ready:true,unlocked:true});export const syncVaultWithEcho=async()=>{};export const lockVault=async()=>{};export const trustedVaultIdentity=async()=>undefined;',
   pairing:
-    'export const beginPairing=async()=>({});export const resumePairing=async()=>({});export const cancelPairing=async()=>({});export const confirmPairingLibrary=async()=>({});export const openPairingApproval=async()=>({});export const requestManualPairing=async()=>({});export const pairingView=async()=>({phase:"idle"});export const disconnectPairing=async()=>({});',
+    'export const beginPairing=async()=>({});export const resumePairing=async()=>({});export const cancelPairing=async()=>({});export const showPairingApproval=async()=>({});export const pairingView=async()=>({phase:"none"});export const whenConnected=()=>{};',
   connection:
-    'export async function connectionAction(work){return work()}; export async function connectionStatus(){return {status:"not-connected"}};export async function disconnect(){};export async function livePreview(){}',
+    'export async function connectionStatus(){return {status:"none"}};export async function disconnect(){};export async function livePreview(){}',
+  'external-messages': 'export async function externalMessage(){return {}}',
   'library-actions':
     'export async function openEcho(){}; export async function deleteLocalRecording(){}',
   settings:
-    "export async function settings(){return {enabledProviders:['meet'],activeLibraryId:null}}; export async function saveSettings(){return {}}",
+    "export async function settings(){return {enabledProviders:['meet']}};export async function saveSettings(){return {}};export async function readLink(){return {state:'none'}};export async function connectedPair(){};export async function revokeCredential(){};export async function wasRevoked(){return false}",
   storage:
-    'export async function allRecordings(){return []};export const migrateRecordings=async()=>{};export const protectionMigrationPending=async()=>false;',
-  protocol: 'export async function jsonRequest(){throw new Error("unexpected network")}',
+    'export async function allRecordings(){return []};export const migrateRecordings=async()=>{};',
 };
 const built = await build({
   entryPoints: ['extension/src/background.ts'],
@@ -28,8 +26,7 @@ const built = await build({
       setup(builder) {
         builder.onResolve(
           {
-            filter:
-              /^\.\/(settings|storage|protocol|library-actions|connection|pairing|vault-manager)$/,
+            filter: /^\.\/(settings|storage|library-actions|connection|pairing|external-messages)$/,
           },
           (args) => ({ path: args.path.slice(2), namespace: 'mock' }),
         );
@@ -79,6 +76,7 @@ function harness() {
         onMessage: event('message'),
         onInstalled: event('installed'),
         onStartup: event('startup'),
+        onMessageExternal: event('external'),
       },
       permissions: { contains: async () => true },
       tabCapture: { getMediaStreamId: async () => 'stream' },

@@ -1,5 +1,5 @@
 import { readMeta, writeMeta, storageLock } from './vault-db';
-import { Ciphertext, encryptPayload, decryptPayload } from './vault-crypto';
+import { Ciphertext, encryptPayload, decryptPayload } from './encryption';
 let deviceKey: Promise<CryptoKey> | undefined;
 async function key(): Promise<CryptoKey> {
   return (deviceKey ??= storageLock('device-key', async () => {
@@ -29,6 +29,22 @@ export async function openSecret<T>(value: Ciphertext, purpose: string): Promise
   const bytes = await decryptPayload(await key(), value, ['device-secret', purpose]);
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+export async function wrapRecordingKey(
+  bytes: Uint8Array<ArrayBuffer>,
+  id: string,
+): Promise<Ciphertext> {
+  return encryptPayload(await key(), bytes, ['recording-key', id]);
+}
+export async function unwrapRecordingKey(value: Ciphertext, id: string): Promise<CryptoKey> {
+  const bytes = await decryptPayload(await key(), value, ['recording-key', id]);
+  try {
+    if (bytes.length !== 32) throw new Error('Invalid recording key.');
+    return await crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
   } finally {
     bytes.fill(0);
   }

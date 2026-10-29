@@ -1,26 +1,33 @@
 import { meetingFor, Recording, MAX_FRAMES } from './core';
-import { action, duration, element, renderRecordings, request, showError } from './ui';
-import { connectionLabel, liveLabel } from './status-labels';
-declare const chrome: any;
-let tab: any;
-let active: any;
-let prefs: any;
+import type { ExtensionState } from './background';
+import {
+  action,
+  duration,
+  element,
+  lockedNotice,
+  renderRecordings,
+  request,
+  showError,
+} from './ui';
+import { liveLabel } from './status-labels';
+import { connectionCard } from './connection-card';
+let tab: chrome.tabs.Tab | undefined;
+let active: ExtensionState['active'];
+let prefs: ExtensionState['settings'] | undefined;
 let busy = false;
 let initialized = false;
 let refreshing: Promise<void> | undefined;
-let vaultReady = true;
 let hostGranted = false;
 let micGranted = false;
 let checkingStatus = false;
-let connection = 'checking';
 let liveRecordingId: string | undefined;
+const connection = connectionCard(refresh);
 async function refreshStatus() {
   if (checkingStatus) return;
   checkingStatus = true;
   try {
     const result = await request({ type: 'CONNECTION_STATUS' });
-    connection = result.status;
-    element('connection').textContent = connectionLabel(connection);
+    connection.setOnline(result.status !== 'echo-offline');
     const id = liveRecordingId;
     if (id) {
       const live = await request({ type: 'LIVE_PREVIEW', recordingId: id });
@@ -41,7 +48,6 @@ function enableStart() {
   const meeting = meetingFor(tab?.url ?? '');
   startButton.textContent = mic.checked ? 'Start recording' : 'Record call audio only';
   startButton.disabled =
-    !vaultReady ||
     busy ||
     !consent.checked ||
     !meeting ||
@@ -57,10 +63,12 @@ function refresh(): Promise<void> {
   return refreshing;
 }
 async function refreshState() {
-  const state = await request({ type: 'STATE' });
-  prefs = state.settings;
+  const state: ExtensionState = await request({ type: 'STATE' });
+  const settings = state.settings;
+  prefs = settings;
   active = state.active;
-  vaultReady = state.vault?.ready ?? true;
+  connection.update(state.connection);
+  lockedNotice(state.recordings, connection.status() === 'connected', state.migrationError);
   if (state.recoveryError) showError(new Error(state.recoveryError));
   try {
     micGranted =
@@ -72,7 +80,7 @@ async function refreshState() {
   if (!initialized) {
     [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     element<HTMLInputElement>('title').value = (tab?.title ?? 'Meeting').slice(0, 200);
-    mic.checked = prefs.micGranted && micGranted;
+    mic.checked = settings.micGranted && micGranted;
     initialized = true;
     const selector = element<HTMLSelectElement>('mic-device');
     const defaultOption = document.createElement('option');
@@ -87,7 +95,7 @@ async function refreshState() {
           option.textContent = device.label || 'Microphone';
           selector.append(option);
         }
-      selector.value = prefs.micDeviceId || 'default';
+      selector.value = settings.micDeviceId || 'default';
       if (!selector.value) selector.value = 'default';
     }
     element('mic-device-field').hidden = !mic.checked;
@@ -95,29 +103,24 @@ async function refreshState() {
   const meeting = meetingFor(tab?.url ?? '');
   hostGranted =
     !!meeting && (await chrome.permissions.contains({ origins: [meeting.originPattern] }));
-  const enabled = !!meeting && prefs.enabledProviders.includes(meeting.provider) && hostGranted;
+  const enabled = !!meeting && settings.enabledProviders.includes(meeting.provider) && hostGranted;
   element('readiness-action').hidden =
-    !!active || (vaultReady && !!meeting && enabled && (!mic.checked || micGranted));
-  element('readiness-action').textContent = !vaultReady
-    ? 'Protect recordings in setup'
-    : meeting && !enabled
+    !!active || (!!meeting && enabled && (!mic.checked || micGranted));
+  element('readiness-action').textContent =
+    meeting && !enabled
       ? 'Enable this meeting service'
       : mic.checked && !micGranted
         ? 'Allow microphone in setup'
         : 'Open setup';
-  element('meeting').textContent = !vaultReady
-    ? 'Save your recovery phrase in Setup before recording.'
-    : meeting
-      ? `${{ meet: 'Google Meet', zoom: 'Zoom Web', teams: 'Teams Web' }[meeting.provider]} · ${enabled ? (mic.checked && !micGranted ? 'Microphone access is missing. Open Setup or uncheck Include my microphone.' : 'Enabled. Ready to record.') : 'Not enabled. Open Setup to enable.'}`
-      : 'Open your Google Meet, Zoom Web or Teams Web meeting, then click Echo again.';
-  if (!prefs.activeLibraryId) connection = 'not-connected';
-  else if (connection === 'not-connected') connection = 'checking';
-  element('connection').textContent = connectionLabel(connection);
+  element('meeting').textContent = meeting
+    ? `${{ meet: 'Google Meet', zoom: 'Zoom Web', teams: 'Teams Web' }[meeting.provider]} · ${enabled ? (mic.checked && !micGranted ? 'Microphone access is missing. Open Setup or uncheck Include my microphone.' : 'Enabled. Ready to record.') : 'Not enabled. Open Setup to enable.'}`
+    : 'Open your Google Meet, Zoom Web or Teams Web meeting, then click Echo again.';
   element('start-panel').hidden = !!active;
   element('active-panel').hidden = !active;
   if (active) {
-    const row = state.recordings.find((row: Recording) => row.recordingId === active.recordingId);
-    element('active-title').textContent = active.title ?? row?.title ?? 'Meeting';
+    const recordingId = active.recordingId;
+    const row = state.recordings.find((row: Recording) => row.recordingId === recordingId);
+    element('active-title').textContent = active.title || 'Meeting';
     element('duration').textContent = duration(row?.totalFrames ?? 0);
     element('capture-label').textContent = active.paused ? 'II · PAUSED' : 'REC · RECORDING';
     element('mic-source').textContent =
@@ -168,11 +171,12 @@ element('open-echo').addEventListener('click', () => {
   }, element<HTMLButtonElement>('open-echo'));
 });
 element('mic-exclusion').addEventListener('change', () => {
-  if (active)
+  const current = active;
+  if (current)
     void action(async () => {
       await request({
         type: 'MIC_EXCLUSION',
-        recordingId: active.recordingId,
+        recordingId: current.recordingId,
         excluded: element<HTMLInputElement>('mic-exclusion').checked,
       });
       await refresh();
@@ -188,7 +192,7 @@ startButton.addEventListener('click', () => {
   void action(async () => {
     await request({
       type: 'START',
-      tabId: tab.id,
+      tabId: tab?.id,
       title: element<HTMLInputElement>('title').value,
       micEnabled: mic.checked,
       micDeviceId: element<HTMLSelectElement>('mic-device').value,
@@ -202,20 +206,22 @@ startButton.addEventListener('click', () => {
   });
 });
 element('pause').addEventListener('click', () => {
-  if (active)
+  const current = active;
+  if (current)
     void action(async () => {
       await request({
         type: 'CONTROL',
-        recordingId: active.recordingId,
-        action: active.paused ? 'resume' : 'pause',
+        recordingId: current.recordingId,
+        action: current.paused ? 'resume' : 'pause',
       });
       await refresh();
     }, element<HTMLButtonElement>('pause'));
 });
 element('stop').addEventListener('click', () => {
-  if (active)
+  const current = active;
+  if (current)
     void action(async () => {
-      await request({ type: 'CONTROL', recordingId: active.recordingId, action: 'stop' });
+      await request({ type: 'CONTROL', recordingId: current.recordingId, action: 'stop' });
       consent.checked = false;
       await refresh();
     }, element<HTMLButtonElement>('stop'));

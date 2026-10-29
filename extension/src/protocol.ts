@@ -1,5 +1,5 @@
 import { protectedCompanion, UPDATE_ECHO_MESSAGE } from './compatibility';
-import { endpointURL, Pair, Recording, Settings } from './core';
+import { endpointURL, Pair, Recording } from './core';
 import {
   allRecordings,
   getChunk,
@@ -7,6 +7,7 @@ import {
   retainReceiptAndRemovePCM,
   updateRecording,
 } from './storage';
+import { connectedPair, revokeCredential } from './settings';
 import { withRecordingLock } from './recording-lock';
 export class ProtocolError extends Error {
   constructor(
@@ -48,6 +49,7 @@ export async function jsonRequest(
     throw new ProtocolError('Echo is unavailable. Audio remains saved locally.');
   }
   if (!response.ok) {
+    if (response.status === 401 && credential) await revokeCredential(credential, endpoint);
     const errorBody = await response.json().catch(() => null);
     const reason = typeof errorBody?.error === 'string' ? errorBody.error.slice(0, 200) : '';
     throw new ProtocolError(
@@ -57,12 +59,13 @@ export async function jsonRequest(
       response.status,
     );
   }
+  if (response.status === 204) return {};
   const body = await response.json();
-  if (body.protocolVersion !== 1)
+  if (body.protocolVersion !== undefined && ![1, 2].includes(body.protocolVersion))
     throw new ProtocolError('This Echo version is incompatible. Audio is retained.');
   return body;
 }
-export function checkStatus(status: any, row: Recording, pair: Pair): void {
+function checkStatus(status: any, row: Recording, pair: Pair): void {
   if (
     status.recordingId !== row.recordingId ||
     status.libraryId !== pair.libraryId ||
@@ -95,15 +98,14 @@ async function transferLocked(
   onControl: (id: string, action: string) => Promise<void>,
 ): Promise<void> {
   if (row.receipt) return;
-  if (row.libraryId && row.libraryId !== pair.libraryId)
-    throw new ProtocolError('This recording belongs to a different Echo library.');
   const companion = await jsonRequest(pair.endpoint, '/connection', {}, pair.credential);
   if (companion.libraryId !== pair.libraryId)
     throw new ProtocolError(
       'Echo returned an inconsistent library acknowledgement. Audio is retained.',
     );
   if (!protectedCompanion(companion)) throw new ProtocolError(UPDATE_ECHO_MESSAGE, 426);
-  if (!row.libraryId) row = await updateRecording(row.recordingId, { libraryId: pair.libraryId });
+  if (row.libraryId !== pair.libraryId)
+    row = await updateRecording(row.recordingId, { libraryId: pair.libraryId });
   const path = `/recordings/${row.recordingId}`;
   const metadata = {
     title: row.title,
@@ -211,7 +213,7 @@ async function transferLocked(
 let transferring = false;
 let attemptCounter = 0;
 const lastAttempt = new Map<string, number>();
-const retryAfterLibrary = new Map<string, number>();
+let retryAfter = 0;
 async function updateTransferState(
   id: string,
   patch: Partial<Recording>,
@@ -226,7 +228,6 @@ async function updateTransferState(
   }
 }
 export async function transferPending(
-  settings: Settings,
   onControl: (id: string, action: string) => Promise<void>,
   notify: () => void,
 ): Promise<void> {
@@ -234,6 +235,8 @@ export async function transferPending(
   transferring = true;
   const passStarted = Date.now();
   try {
+    const pair = await connectedPair();
+    if (!pair || retryAfter > Date.now()) return;
     const rows = await allRecordings();
     rows.sort(
       (a, b) =>
@@ -243,31 +246,27 @@ export async function transferPending(
         b.createdAt.localeCompare(a.createdAt),
     );
     for (const row of rows) {
+      // Locked rows wait for migration; they are never uploaded under another key.
       if (row.receipt || row.locked || !row.chunkCount) continue;
-      const pair = settings.pairs[row.libraryId ?? settings.activeLibraryId ?? ''];
-      if (!pair) continue;
-      if ((retryAfterLibrary.get(pair.libraryId) ?? 0) > Date.now()) continue;
       lastAttempt.set(row.recordingId, ++attemptCounter);
       if (!(await updateTransferState(row.recordingId, { transferState: 'transferring' })))
         continue;
       notify();
       try {
         await transferOne(row, pair, onControl);
-        retryAfterLibrary.delete(pair.libraryId);
+        retryAfter = 0;
       } catch (error) {
-        if (
-          error instanceof ProtocolError &&
-          (error.status === 0 || error.status === 401 || error.status === 426)
-        )
-          retryAfterLibrary.set(
-            pair.libraryId,
-            Date.now() + (error.status === 401 || error.status === 426 ? 60000 : 10000),
-          );
+        const status = error instanceof ProtocolError ? error.status : -1;
         await updateTransferState(row.recordingId, {
-          transferState:
-            error instanceof ProtocolError && error.status >= 400 ? 'attention' : 'saved-local',
+          transferState: status >= 400 ? 'attention' : 'saved-local',
           error: (error as Error).message,
         });
+        // Offline, revoked or outdated Echo fails every row alike: back off instead.
+        if ([0, 401, 426].includes(status)) {
+          retryAfter = Date.now() + (status === 0 ? 10_000 : 60_000);
+          notify();
+          break;
+        }
       }
       notify();
       if (Date.now() - passStarted >= 5000) break;

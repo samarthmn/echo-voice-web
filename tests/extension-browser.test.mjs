@@ -12,28 +12,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scratch = path.join(project, 'tmp', 'extension-runtime', 'browser');
 process.env.TMPDIR = scratch;
-async function protectBrowser(page) {
-  await page.locator('#vault-create').click();
-  const phrase = (await page.locator('#vault-phrase li').allTextContents()).join(' ');
-  assert.equal(phrase.split(' ').length, 24);
-  await page.locator('#vault-saved').click();
-  assert.equal(await page.locator('#vault-phrase li').count(), 0);
-  for (const input of await page.locator('#vault-checks input').all()) {
-    const position = Number(await input.getAttribute('data-position'));
-    await input.fill(phrase.split(' ')[position - 1]);
-  }
-  await page.locator('#vault-confirm').click();
-  await page
-    .locator('#vault-summary')
-    .getByText('Recording protection ready', { exact: true })
-    .waitFor();
-  return phrase;
-}
 const privateHarness = (
   await build({
     stdin: {
       contents:
-        "import {openSecret} from './extension/src/device-secrets.ts';import {jsonRequest} from './extension/src/protocol.ts';import {settings} from './extension/src/settings.ts';globalThis.testExtensionRequest=async(path,options={})=>{const prefs=await settings();const pair=prefs.pairs[prefs.activeLibraryId];try{return {status:200,body:await jsonRequest(pair.endpoint,path,options,pair.credential)}}catch(error){return {status:error.status}}};globalThis.readTestPairing=async()=>{const raw=(await chrome.storage.local.get('pairingAttempt')).pairingAttempt;return raw?.encrypted?openSecret(raw.encrypted,'pairing-attempt'):raw;};",
+        "import {jsonRequest} from './extension/src/protocol.ts';import {connectedPair,readLink} from './extension/src/settings.ts';globalThis.testExtensionRequest=async(path,options={})=>{const pair=await connectedPair();try{return {status:200,body:await jsonRequest(pair.endpoint,path,options,pair.credential)}}catch(error){return {status:error.status}}};globalThis.readTestLink=()=>readLink();",
       resolveDir: project,
       loader: 'ts',
     },
@@ -78,18 +61,13 @@ test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through in
     await page.locator('#connect').waitFor();
     const startup = await page.evaluate(async () => {
       const reply = await chrome.runtime.sendMessage({ type: 'STATE' });
-      return {
-        ok: reply.ok,
-        endpoint: reply.value?.settings?.endpoint,
-        credentialsExposed: !!reply.value?.settings?.pairs,
-      };
+      return { ok: reply.ok, phase: reply.value?.connection?.phase };
     });
-    assert.deepEqual(startup, {
-      ok: true,
-      endpoint: 'http://localhost:3000',
-      credentialsExposed: false,
-    });
-    await protectBrowser(page);
+    assert.deepEqual(startup, { ok: true, phase: 'none' });
+    await page
+      .locator('#connection-detail')
+      .getByText('Recordings are saved in this browser until you connect.')
+      .waitFor();
     await page.locator('#providers button').first().focus();
     await delay(6500);
     assert.equal(
@@ -118,7 +96,7 @@ test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through in
     assert.equal(response.status.value.active, null);
     assert.equal(response.sync.ok, true, JSON.stringify(response));
     const credentialRequest = await page.evaluate(async () =>
-      chrome.runtime.sendMessage({ type: 'TRUSTED_SETTINGS' }),
+      chrome.runtime.sendMessage({ type: 'TRUSTED_LINK' }),
     );
     assert.equal(credentialRequest.ok, false);
     assert.match(credentialRequest.error, /Unsupported extension action/);
@@ -375,7 +353,6 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     let page = await context.newPage();
     await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
     await page.locator('#connect').waitFor();
-    const savedPhrase = await protectBrowser(page);
     await page.locator('#advanced summary').click();
     await page.locator('#endpoint').fill(base);
     const approvalOpened = context.waitForEvent('page');
@@ -384,8 +361,9 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     await approval.waitForURL(`${base}/extension-connect.html#request=*`);
     await approval.locator('#approve').waitFor();
     await worker.evaluate(privateHarness);
-    const reservation = await worker.evaluate(() => readTestPairing());
-    assert.equal(typeof reservation.expiresAtMs, 'number');
+    const reservation = await worker.evaluate(() => readTestLink());
+    assert.equal(reservation.state, 'waiting');
+    assert.equal(typeof reservation.expiresAt, 'number');
     assert.match(reservation.claimSecret, /^[0-9a-f]{64}$/);
     assert.equal(approval.url(), `${base}/extension-connect.html#request=${reservation.requestId}`);
     assert.equal(
@@ -393,36 +371,28 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
       'pending',
       'loading approval page never approves',
     );
-    const pending = await page.evaluate(async () =>
-      chrome.runtime.sendMessage({ type: 'PAIR_STATUS' }),
-    );
+    const pending = await page.evaluate(async () => chrome.runtime.sendMessage({ type: 'STATE' }));
     assert.equal(pending.ok, true);
-    assert.equal(pending.value.phase, 'pending');
+    assert.equal(pending.value.connection.phase, 'waiting');
     assert.ok(!JSON.stringify(pending).includes(reservation.claimSecret));
-    // The service-worker alarm, not an open setup timer, must complete an approved request.
+    // ECHO_APPROVED from the approval page (or the worker's claim poll) finishes pairing with
+    // Setup closed, and the extension closes the approval tab it opened.
     await page.close();
+    const approvalClosed = approval.waitForEvent('close');
     await approval.locator('#approve').click();
-    await approval
-      .locator('#status')
-      .getByText('Return to the extension', { exact: false })
-      .waitFor();
-    await worker.evaluate(async () => {
-      await chrome.alarms.create('echo-transfer', { when: Date.now() + 100 });
-    });
-    let pairedPrefs;
+    let link;
     for (let attempt = 0; attempt < 100; attempt++) {
-      pairedPrefs = await worker.evaluate(
-        async () => (await chrome.storage.local.get('settings')).settings,
-      );
-      if (pairedPrefs.activeLibraryId === reservation.libraryId) break;
+      link = await worker.evaluate(() => readTestLink());
+      if (link.state === 'connected') break;
       await delay(100);
     }
-    assert.equal(
-      pairedPrefs.activeLibraryId,
-      reservation.libraryId,
-      'closed setup connects through the alarm',
+    assert.equal(link.state, 'connected', 'closed setup connects from the service worker');
+    assert.equal(link.endpoint, base);
+    await approvalClosed;
+    const pairCode = { libraryId: link.libraryId };
+    const installationId = await worker.evaluate(
+      async () => (await chrome.storage.local.get('settings')).settings.installationId,
     );
-    const pairCode = { libraryId: reservation.libraryId };
     page = await context.newPage();
     await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
     await page
@@ -432,13 +402,13 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     const state = await page.evaluate(
       async () => (await chrome.runtime.sendMessage({ type: 'STATE' })).value,
     );
-    assert.equal(state.settings.activeLibraryId, pairCode.libraryId);
-    assert.equal(state.settings.pairs, undefined);
+    assert.equal(state.connection.phase, 'connected');
+    assert.ok(!JSON.stringify(state).includes(link.credential));
     const connection = await page.evaluate(async () =>
       chrome.runtime.sendMessage({ type: 'CONNECTION_STATUS' }),
     );
     assert.equal(connection.ok, true);
-    assert.deepEqual(connection.value, { status: 'connected' });
+    assert.deepEqual(connection.value, { status: 'connected', endpoint: base });
     const harness = await build({
       stdin: {
         contents:
@@ -481,7 +451,7 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
         await journal.appendChunk(id, sequence, pcm);
       }
       const interruption = {
-        reason: 'tab-loading',
+        reason: 'audio-suspended',
         at: new Date().toISOString(),
         atFrame: 65 * 16000,
       };
@@ -520,12 +490,8 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     assert.equal(receipt.totalFrames, saved.totalFrames);
     assert.equal(receipt.pcmRemoved, true);
     assert.equal(receipt.error, undefined);
-    assert.deepEqual(receipt.interruption, saved.interruption);
     await page.reload();
-    await page
-      .locator('#recordings')
-      .getByText('Interrupted at 01:05: The meeting tab began loading.', { exact: true })
-      .waitFor();
+    await page.locator('#recordings').getByText('Saved in Echo', { exact: false }).waitFor();
     const recordings = await api('/api/extensions/recordings');
     const imported = recordings.recordings.find((row) => row.recordingId === saved.id);
     assert.ok(imported);
@@ -533,17 +499,7 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     assert.equal(imported.nextSequence, 65);
     assert.equal(imported.totalFrames, saved.totalFrames);
     assert.equal(imported.meetingId, receipt.receipt.meetingId);
-    const live = await page.evaluate(
-      async (id) => chrome.runtime.sendMessage({ type: 'LIVE_PREVIEW', recordingId: id }),
-      saved.id,
-    );
-    assert.equal(live.ok, true);
-    assert.equal(live.value.status, 'final-transcript-needed');
-    assert.equal(live.value.preview, '');
-    assert.equal(live.value.draft, undefined);
-    assert.equal(live.value.credential, undefined);
-    // A full browser restart drops the private identity. Echo authorizes the
-    // same installation and restores it through the scoped encrypted vault.
+    // A full browser restart keeps the device key: saved recordings stay readable without Echo.
     await context.close();
     context = await chromium.launchPersistentContext(path.join(runRoot, 'profile'), {
       executablePath,
@@ -554,15 +510,9 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     page = await context.newPage();
     await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
     await page
-      .locator('#vault-summary')
-      .getByText('Recording protection ready', { exact: true })
+      .locator('#connect-summary')
+      .getByText('Connected to Echo', { exact: true })
       .waitFor();
-    const unlock = await page.evaluate(async () => ({
-      state: (await chrome.runtime.sendMessage({ type: 'STATE' })).value.vault,
-      identity: (await chrome.storage.session.get('recordingVaultIdentity')).recordingVaultIdentity,
-    }));
-    assert.equal(unlock.state.unlocked, true);
-    assert.equal(unlock.identity.source, 'echo');
     await page.evaluate(harness.outputFiles[0].text);
     // A complete response can be lost or become invalid before its independent
     // verification GET. Corrupt an actual encrypted audio body at byte 80 after
@@ -693,52 +643,27 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
       await journal.appendChunk(id, 0, new ArrayBuffer(32000));
       return id;
     }, pairCode.libraryId);
-    await api(`/api/extensions/connections/${state.settings.installationId}`, 'DELETE');
-    const revoked = await page.evaluate(async () =>
-      chrome.runtime.sendMessage({ type: 'VAULT_RETRY' }),
-    );
-    assert.equal(revoked.ok, true);
-    assert.equal(revoked.value.unlocked, false);
-    const hiddenHistory = await page.evaluate(
-      async (id) =>
-        journal.recording(id).then(
-          () => null,
-          (error) => error.message,
-        ),
-      saved.id,
-    );
-    assert.match(hiddenHistory, /recovery phrase/);
-    const disconnected = await page.evaluate(async () =>
-      chrome.runtime.sendMessage({ type: 'DISCONNECT', confirmed: true }),
-    );
-    assert.equal(disconnected.ok, true);
-    assert.equal(disconnected.value.status, 'disconnected');
-    const afterDisconnect = await page.evaluate(
+    await api(`/api/extensions/connections/${installationId}`, 'DELETE');
+    // Echo's 401 clears the credential; every local recording stays readable and pending.
+    const afterRevoke = await page.evaluate(
       async (id) => ({
-        connection: (await chrome.runtime.sendMessage({ type: 'CONNECTION_STATUS' })).value,
+        status: (await chrome.runtime.sendMessage({ type: 'CONNECTION_STATUS' })).value.status,
+        link: (await readTestLink()).state,
         local: !!(await journal.getChunk(id, 0)),
-        frames: (await journal.recording(id)).totalFrames,
+        title: (await journal.recording(id)).title,
       }),
       pendingId,
     );
-    assert.deepEqual(afterDisconnect, {
-      connection: { status: 'not-connected' },
+    assert.deepEqual(afterRevoke, {
+      status: 'revoked',
+      link: 'none',
       local: true,
-      frames: 16000,
+      title: 'Synthetic retained pending audio',
     });
-    const recovered = await page.evaluate(
-      async (phrase) => chrome.runtime.sendMessage({ type: 'VAULT_UNLOCK', phrase }),
-      savedPhrase,
-    );
-    assert.equal(recovered.ok, true);
-    assert.equal(recovered.value.unlocked, true);
-    assert.equal(
-      await page.evaluate(async (id) => (await journal.recording(id)).title, saved.id),
-      'Synthetic real-wire recording',
-    );
+    await page.locator('#connect').getByText('Connect again', { exact: true }).waitFor();
     const connections = await api('/api/extensions/connections');
     assert.equal(
-      connections.connections.some((item) => item.installationId === state.settings.installationId),
+      connections.connections.some((item) => item.installationId === installationId),
       false,
     );
   } finally {

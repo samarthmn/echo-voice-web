@@ -1,9 +1,14 @@
-import { Recording, INTERRUPTION_DESCRIPTIONS } from './core';
-declare const chrome: any;
+import { Provider, Recording, INTERRUPTION_DESCRIPTIONS } from './core';
+const PROVIDER_NAMES: Record<Provider, string> = {
+  meet: 'Google Meet',
+  zoom: 'Zoom Web',
+  teams: 'Teams Web',
+};
 export function element<T extends HTMLElement = HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
-export async function request(message: any): Promise<any> {
+// Replies are validated by the service worker, which owns every extension action.
+export async function request(message: { type: string } & Record<string, unknown>): Promise<any> {
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok) throw new Error(response?.error ?? 'Echo extension did not respond.');
   return response.value;
@@ -30,6 +35,28 @@ export function duration(frames: number): string {
     .toString()
     .padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
+/** Lists never decrypt titles, so a row is named by its service and start time. */
+function recordingLabel(row: Recording): string {
+  const started = Date.parse(row.createdAt);
+  const when = Number.isNaN(started)
+    ? 'Earlier recording'
+    : new Date(started).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return `${PROVIDER_NAMES[row.provider]} · ${when}`;
+}
+/** "N older recordings are locked" notice for v2 recordings Echo has not unlocked yet. */
+export function lockedNotice(rows: Recording[], connected: boolean, migrationError?: string) {
+  const node = element('locked-notice');
+  const count = rows.filter((row) => row.needsUnlock).length;
+  const older = `${count} older recording${count === 1 ? ' is' : 's are'} locked`;
+  node.textContent = migrationError
+    ? `Some saved recordings could not be prepared: ${migrationError} Their audio is kept.`
+    : !count
+      ? ''
+      : connected
+        ? `${older} — keep Echo open to unlock ${count === 1 ? 'it' : 'them'}.`
+        : `${older} — connect to Echo to unlock ${count === 1 ? 'it' : 'them'}.`;
+  node.hidden = !node.textContent;
+}
 export function renderRecordings(
   rows: Recording[],
   exportRecording: (row: Recording) => void,
@@ -49,7 +76,7 @@ export function renderRecordings(
     const copy = document.createElement('div');
     copy.className = 'recording-copy';
     const title = document.createElement('strong');
-    title.textContent = row.title;
+    title.textContent = recordingLabel(row);
     const text = document.createElement('p');
     const transfer = {
       'saved-local': 'Saved locally',
@@ -57,12 +84,12 @@ export function renderRecordings(
       'saved-echo': 'Saved in Echo',
       attention: 'Needs attention',
     }[row.transferState];
-    text.textContent = `${row.locked ? 'Protected · locked · ' : ''}${duration(row.totalFrames)} · ${row.captureState === 'interrupted' ? 'Interrupted · ' : row.captureState === 'paused' ? 'Paused · ' : row.captureState === 'recording' ? 'Recording · ' : ''}${transfer}`;
+    text.textContent = `${row.locked ? 'Locked · ' : ''}${duration(row.totalFrames)} · ${row.captureState === 'interrupted' ? 'Interrupted · ' : row.captureState === 'paused' ? 'Paused · ' : row.captureState === 'recording' ? 'Recording · ' : ''}${transfer}`;
     copy.append(title, text);
-    if (row.error || row.protectionError) {
+    if (row.error) {
       const error = document.createElement('p');
       error.className = 'attention';
-      error.textContent = row.protectionError ?? row.error ?? '';
+      error.textContent = row.error;
       copy.append(error);
     }
     if (row.interruption) {
@@ -85,10 +112,10 @@ export function renderRecordings(
       });
       actions.append(button);
     }
-    if (!row.receipt && row.chunkCount && row.recordingId !== activeRecordingId) {
+    if (!row.receipt && !row.locked && row.chunkCount && row.recordingId !== activeRecordingId) {
       const button = document.createElement('button');
       button.className = 'quiet';
-      button.textContent = row.locked ? 'Unlock history' : 'Export';
+      button.textContent = 'Export';
       button.addEventListener('click', () => exportRecording(row));
       actions.append(button);
     }

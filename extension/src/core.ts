@@ -1,5 +1,4 @@
 export const SAMPLE_RATE = 16000;
-export const CHUNK_FRAMES = 16000;
 export const MAX_FRAMES = SAMPLE_RATE * 60 * 60 * 8;
 export const MAX_PENDING_BYTES = 2 * 1024 ** 3;
 export const MAX_BACKLOG_FRAMES = SAMPLE_RATE * 5;
@@ -9,7 +8,6 @@ export type Provider = 'meet' | 'zoom' | 'teams';
 export type CaptureState = 'idle' | 'recording' | 'paused' | 'stopped' | 'interrupted';
 export type TransferState = 'saved-local' | 'transferring' | 'saved-echo' | 'attention';
 export const INTERRUPTION_DESCRIPTIONS = {
-  'tab-loading': 'The meeting tab began loading.',
   'tab-closed': 'The meeting tab closed.',
   'document-changed': 'The meeting document changed.',
   'meeting-changed': 'The meeting identity changed.',
@@ -53,7 +51,7 @@ export type Recording = {
   gaps: { atFrame: number; pauseMs: number }[];
   interrupted: boolean;
   locked?: boolean;
-  protectionError?: string;
+  needsUnlock?: boolean;
   error?: string;
   interruption?: ReturnType<typeof interruption>;
   receipt?: { libraryId: string; meetingId: string; verifiedAt: string };
@@ -68,9 +66,6 @@ export type Chunk = {
 export type Pair = { libraryId: string; credential: string; endpoint: string };
 export type Settings = {
   installationId: string;
-  endpoint: string;
-  activeLibraryId: string | null;
-  pairs: Record<string, Pair>;
   enabledProviders: Provider[];
   micGranted: boolean;
   micDeviceId?: string;
@@ -87,7 +82,7 @@ export function endpointURL(raw: string): string {
     url.hash ||
     url.pathname !== '/'
   ) {
-    throw new Error('Enter an exact local Echo address, such as http://localhost:3000.');
+    throw new Error('Enter an exact local Echo address, using its exact loopback origin.');
   }
   return url.origin;
 }
@@ -172,7 +167,7 @@ export async function sha256(pcm: ArrayBuffer): Promise<string> {
     b.toString(16).padStart(2, '0'),
   ).join('');
 }
-export function wavHeader(frames: number): Uint8Array {
+export function wavHeader(frames: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(44);
   const view = new DataView(bytes.buffer);
   const text = (at: number, str: string) =>

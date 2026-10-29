@@ -1,6 +1,5 @@
 import { meetingFor } from './core';
 import { observeDocument } from './adapters';
-declare const chrome: any;
 // This script is a one-way observer. It never receives endpoint settings, tokens or capture audio.
 const marker = '__echoMuteObserverV2';
 {
