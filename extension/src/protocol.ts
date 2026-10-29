@@ -9,6 +9,7 @@ import {
 } from './storage';
 import { connectedPair, revokeCredential } from './settings';
 import { withRecordingLock } from './recording-lock';
+import type { PassOutcome } from './upload-scheduler';
 export class ProtocolError extends Error {
   constructor(
     message: string,
@@ -81,23 +82,24 @@ function checkStatus(status: any, row: Recording, pair: Pair): void {
       'Echo returned an inconsistent recording acknowledgement. Audio is retained.',
     );
 }
+/** Upload one bounded turn of a recording. True when committed audio is still waiting. */
 export async function transferOne(
   row: Recording,
   pair: Pair,
   onControl: (id: string, action: string) => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
   return withRecordingLock(row.recordingId, async () => {
     const current = await recording(row.recordingId);
-    if (!current) return;
-    await transferLocked(current, pair, onControl);
+    if (!current) return false;
+    return transferLocked(current, pair, onControl);
   });
 }
 async function transferLocked(
   row: Recording,
   pair: Pair,
   onControl: (id: string, action: string) => Promise<void>,
-): Promise<void> {
-  if (row.receipt) return;
+): Promise<boolean> {
+  if (row.receipt) return false;
   const companion = await jsonRequest(pair.endpoint, '/connection', {}, pair.credential);
   if (companion.libraryId !== pair.libraryId)
     throw new ProtocolError(
@@ -173,7 +175,7 @@ async function transferLocked(
     if (Date.now() - transferStarted >= 5000) break;
   }
   const latest = await recording(row.recordingId);
-  if (!latest) return;
+  if (!latest) return false;
   if (
     ['stopped', 'interrupted'].includes(latest.captureState) &&
     status.nextSequence === latest.chunkCount
@@ -208,12 +210,13 @@ async function transferLocked(
       meetingId: verified.meetingId,
       verifiedAt: new Date().toISOString(),
     });
-  } else await updateRecording(row.recordingId, { transferState: 'saved-local', error: undefined });
+    return false;
+  }
+  await updateRecording(row.recordingId, { transferState: 'saved-local', error: undefined });
+  return status.nextSequence < latest.chunkCount;
 }
-let transferring = false;
 let attemptCounter = 0;
 const lastAttempt = new Map<string, number>();
-let retryAfter = 0;
 async function updateTransferState(
   id: string,
   patch: Partial<Recording>,
@@ -227,51 +230,48 @@ async function updateTransferState(
     throw error;
   }
 }
+/**
+ * One bounded upload pass over pending recordings. "offline" asks the scheduler to back off
+ * (Echo unreachable or outdated); "more" asks for an immediate follow-up pass.
+ */
 export async function transferPending(
   onControl: (id: string, action: string) => Promise<void>,
   notify: () => void,
-): Promise<void> {
-  if (transferring) return;
-  transferring = true;
+): Promise<PassOutcome> {
   const passStarted = Date.now();
-  try {
-    const pair = await connectedPair();
-    if (!pair || retryAfter > Date.now()) return;
-    const rows = await allRecordings();
-    rows.sort(
-      (a, b) =>
-        Number(['recording', 'paused'].includes(b.captureState)) -
-          Number(['recording', 'paused'].includes(a.captureState)) ||
-        (lastAttempt.get(a.recordingId) ?? 0) - (lastAttempt.get(b.recordingId) ?? 0) ||
-        b.createdAt.localeCompare(a.createdAt),
-    );
-    for (const row of rows) {
-      // Locked rows wait for migration; they are never uploaded under another key.
-      if (row.receipt || row.locked || !row.chunkCount) continue;
-      lastAttempt.set(row.recordingId, ++attemptCounter);
-      if (!(await updateTransferState(row.recordingId, { transferState: 'transferring' })))
-        continue;
+  const pair = await connectedPair();
+  if (!pair) return 'idle';
+  const rows = await allRecordings();
+  rows.sort(
+    (a, b) =>
+      Number(['recording', 'paused'].includes(b.captureState)) -
+        Number(['recording', 'paused'].includes(a.captureState)) ||
+      (lastAttempt.get(a.recordingId) ?? 0) - (lastAttempt.get(b.recordingId) ?? 0) ||
+      b.createdAt.localeCompare(a.createdAt),
+  );
+  let outcome: PassOutcome = 'idle';
+  for (const row of rows) {
+    // Locked rows wait for migration; they are never uploaded under another key.
+    if (row.receipt || row.locked || !row.chunkCount) continue;
+    if (Date.now() - passStarted >= 5000) return 'more';
+    lastAttempt.set(row.recordingId, ++attemptCounter);
+    if (!(await updateTransferState(row.recordingId, { transferState: 'transferring' }))) continue;
+    notify();
+    try {
+      if (await transferOne(row, pair, onControl)) outcome = 'more';
+    } catch (error) {
+      const status = error instanceof ProtocolError ? error.status : -1;
+      await updateTransferState(row.recordingId, {
+        transferState: status >= 400 ? 'attention' : 'saved-local',
+        error: (error as Error).message,
+      });
       notify();
-      try {
-        await transferOne(row, pair, onControl);
-        retryAfter = 0;
-      } catch (error) {
-        const status = error instanceof ProtocolError ? error.status : -1;
-        await updateTransferState(row.recordingId, {
-          transferState: status >= 400 ? 'attention' : 'saved-local',
-          error: (error as Error).message,
-        });
-        // Offline, revoked or outdated Echo fails every row alike: back off instead.
-        if ([0, 401, 426].includes(status)) {
-          retryAfter = Date.now() + (status === 0 ? 10_000 : 60_000);
-          notify();
-          break;
-        }
-      }
-      notify();
-      if (Date.now() - passStarted >= 5000) break;
+      // Offline, revoked or outdated Echo fails every row alike: stop this pass. A revoked
+      // credential is already cleared, so nothing retries until Echo connects again.
+      if (status === 401) return 'idle';
+      if (status === 0 || status === 426) return 'offline';
     }
-  } finally {
-    transferring = false;
+    notify();
   }
+  return outcome;
 }

@@ -42,6 +42,12 @@
     "128": "icons/128.png"
   },
   "options_page": "setup.html",
+  "commands": {
+    "toggle-recording": {
+      "suggested_key": { "default": "Alt+Shift+R", "mac": "MacCtrl+Shift+R" },
+      "description": "Start or stop recording the meeting in this tab"
+    }
+  },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://localhost:* http://127.0.0.1:* http://[::1]:*"
   },

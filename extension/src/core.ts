@@ -69,6 +69,10 @@ export type Settings = {
   enabledProviders: Provider[];
   micGranted: boolean;
   micDeviceId?: string;
+  /** Services where the user asked Echo to remember their participant-consent confirmation. */
+  rememberedConsent: Provider[];
+  /** Default for the popup's "Show live text in Echo" choice. */
+  liveTranscription: boolean;
 };
 
 export function endpointURL(raw: string): string {
@@ -96,9 +100,27 @@ export function unixSecondsToMilliseconds(value: unknown): number {
     throw new Error('Echo returned an invalid expiry timestamp.');
   return value * 1000;
 }
-export function meetingFor(
-  raw: string,
-): { provider: Provider; identity: string; originPattern: string } | null {
+type Meeting = { provider: Provider; identity: string; originPattern: string };
+type MeetingPage = Meeting & { joinable: boolean };
+const MEET_CODE = /^\/([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/i;
+const ZOOM_MEETING = /^\/wc\/(?:join\/)?(\d+)(?:\/(?:join|start))?\/?$/;
+const TEAMS_HOSTS = ['teams.microsoft.com', 'teams.live.com', 'teams.cloud.microsoft'];
+function teamsPage(url: URL): MeetingPage | null {
+  const base = { provider: 'teams' as const, originPattern: `https://${url.hostname}/*` };
+  const link = /^\/(l\/meetup-join|meet)\/([^/]+)/.exec(url.pathname);
+  if (link) return { ...base, identity: `${url.origin}/${link[1]}/${link[2]}`, joinable: true };
+  // Teams routes inside the URL hash, and a call continues while the user opens chat or
+  // another view. The tab's meeting identity is the app itself; only the hash shows a meeting.
+  if (/^\/v2\/?$/.test(url.pathname))
+    return {
+      ...base,
+      identity: `${url.origin}/v2`,
+      joinable: /meetup-join|\/meet\//.test(url.hash),
+    };
+  return null;
+}
+/** A provider page and its stable identity: query parameters and hash never change it. */
+function meetingPage(raw: string): MeetingPage | null {
   let url: URL;
   try {
     url = new URL(raw);
@@ -106,36 +128,48 @@ export function meetingFor(
     return null;
   }
   if (url.protocol !== 'https:') return null;
-  if (url.hostname === 'meet.google.com' && /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}\/?$/.test(url.pathname))
-    return {
-      provider: 'meet',
-      identity: url.origin + url.pathname.replace(/\/$/, ''),
-      originPattern: 'https://meet.google.com/*',
-    };
+  if (url.hostname === 'meet.google.com') {
+    const code = MEET_CODE.exec(url.pathname)?.[1];
+    return code
+      ? {
+          provider: 'meet',
+          identity: `${url.origin}/${code.toLowerCase()}`,
+          originPattern: 'https://meet.google.com/*',
+          joinable: true,
+        }
+      : null;
+  }
   if (
-    (url.hostname === 'zoom.us' ||
-      url.hostname.endsWith('.zoom.us') ||
-      url.hostname === 'app.zoom.com') &&
-    /^\/wc\/\d+(?:\/join)?\/?$/.test(url.pathname)
-  )
-    return {
-      provider: 'zoom',
-      identity: url.origin + url.pathname.replace(/\/join\/?$/, '').replace(/\/$/, ''),
-      originPattern:
-        url.hostname === 'app.zoom.com' ? 'https://app.zoom.com/*' : 'https://*.zoom.us/*',
-    };
-  if (
-    ['teams.microsoft.com', 'teams.live.com', 'teams.cloud.microsoft'].includes(url.hostname) &&
-    (/^\/l\/meetup-join\//.test(url.pathname) ||
-      /^\/meet\//.test(url.pathname) ||
-      (/^\/v2\/?$/.test(url.pathname) && /meetup-join|\/meet\//.test(url.hash)))
-  )
-    return {
-      provider: 'teams',
-      identity: url.origin + url.pathname + url.hash,
-      originPattern: `https://${url.hostname}/*`,
-    };
-  return null;
+    url.hostname === 'zoom.us' ||
+    url.hostname.endsWith('.zoom.us') ||
+    url.hostname === 'app.zoom.com'
+  ) {
+    const id = ZOOM_MEETING.exec(url.pathname)?.[1];
+    return id
+      ? {
+          provider: 'zoom',
+          identity: `${url.origin}/wc/${id}`,
+          originPattern:
+            url.hostname === 'app.zoom.com' ? 'https://app.zoom.com/*' : 'https://*.zoom.us/*',
+          joinable: true,
+        }
+      : null;
+  }
+  return TEAMS_HOSTS.includes(url.hostname) ? teamsPage(url) : null;
+}
+/** A meeting this tab can start recording. */
+export function meetingFor(raw: string): Meeting | null {
+  const page = meetingPage(raw);
+  return page?.joinable
+    ? { provider: page.provider, identity: page.identity, originPattern: page.originPattern }
+    : null;
+}
+/** The identity a recording keeps while its tab navigates inside the same meeting. */
+export function meetingIdentity(raw: string): string | undefined {
+  return meetingPage(raw)?.identity;
+}
+export function meetingProvider(raw: string): Provider | undefined {
+  return meetingPage(raw)?.provider;
 }
 export function microphoneAllowed(
   observation: Observation | undefined,
@@ -150,7 +184,7 @@ export function microphoneAllowed(
     observation.state === 'unmuted' &&
     observation.receivedAt <= now &&
     now - observation.receivedAt < MIC_FRESH_MS &&
-    meetingFor(observation.url)?.identity === identity
+    meetingIdentity(observation.url) === identity
   );
 }
 export function validObservation(value: any): boolean {

@@ -60,8 +60,20 @@
             >Participants have consented to recording.</span
           ></label
         >
+        <label id="remember-consent-field" class="check" hidden
+          ><input id="remember-consent" type="checkbox" /><span
+            >Remember for <span id="remember-provider">this service</span
+            ><small
+              >Ticks consent here next time and allows the Alt+Shift+R shortcut. Only for meetings
+              where participants always agree.</small
+            ></span
+          ></label
+        >
         <button id="start" class="primary full" disabled>Start recording</button>
-        <p class="footnote">Tab audio stays audible. Recording continues when this popup closes.</p>
+        <p class="footnote">
+          Tab audio stays audible. Recording continues when this popup closes. Alt+Shift+R (⌃⇧R on
+          Mac) starts or stops recording.
+        </p>
       </section>
       <section id="active-panel" class="card" hidden>
         <div class="recording-heading">

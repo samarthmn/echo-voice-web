@@ -1,4 +1,4 @@
-import { meetingFor } from './core';
+import { meetingProvider } from './core';
 import { observeDocument } from './adapters';
 // This script is a one-way observer. It never receives endpoint settings, tokens or capture audio.
 const marker = '__echoMuteObserverV2';
@@ -11,7 +11,11 @@ const marker = '__echoMuteObserverV2';
   let pending: ReturnType<typeof setTimeout> | undefined;
   const transmit = (message: any) => {
     try {
-      chrome.runtime.sendMessage(message).catch(dispose);
+      // The worker answers observe:false once this tab is not recording, so an idle tab
+      // stops waking it. A rejected send means the extension reloaded.
+      chrome.runtime.sendMessage(message).then((reply) => {
+        if (reply?.observe === false) dispose();
+      }, dispose);
     } catch {
       dispose(); /* Extension reload invalidated this observer's runtime. */
     }
@@ -23,13 +27,13 @@ const marker = '__echoMuteObserverV2';
       pending = undefined;
     }
     lastSentAt = Date.now();
-    const meeting = meetingFor(location.href);
+    const provider = meetingProvider(location.href);
     transmit({
       type: 'MUTE_OBSERVATION',
       seq: seq++,
       observedAt: lastSentAt,
       url: location.href,
-      state: meeting ? observeDocument(meeting.provider, document) : 'unknown',
+      state: provider ? observeDocument(provider, document, lastSentAt) : 'unknown',
     });
   };
   const schedule = () => {
@@ -45,7 +49,15 @@ const marker = '__echoMuteObserverV2';
     subtree: true,
     childList: true,
     attributes: true,
-    attributeFilter: ['aria-label', 'title', 'aria-pressed', 'class', 'style'],
+    attributeFilter: [
+      'aria-label',
+      'title',
+      'aria-pressed',
+      'class',
+      'style',
+      'data-is-muted',
+      'data-state',
+    ],
   });
   const timer = setInterval(schedule, 500);
   const pagehide = (event: PageTransitionEvent) => {

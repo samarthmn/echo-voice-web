@@ -44,6 +44,14 @@ async function refreshStatus() {
 const startButton = element<HTMLButtonElement>('start');
 const mic = element<HTMLInputElement>('mic');
 const consent = element<HTMLInputElement>('consent');
+const rememberConsent = element<HTMLInputElement>('remember-consent');
+const live = element<HTMLInputElement>('live');
+const PROVIDER_NAMES = { meet: 'Google Meet', zoom: 'Zoom Web', teams: 'Teams Web' } as const;
+/** Participant consent the user asked Echo to remember for this tab's meeting service. */
+function consentRemembered(): boolean {
+  const meeting = meetingFor(tab?.url ?? '');
+  return !!meeting && !!prefs?.rememberedConsent.includes(meeting.provider);
+}
 function enableStart() {
   const meeting = meetingFor(tab?.url ?? '');
   startButton.textContent = mic.checked ? 'Start recording' : 'Record call audio only';
@@ -74,13 +82,16 @@ async function refreshState() {
     micGranted =
       (await navigator.permissions.query({ name: 'microphone' as PermissionName })).state ===
       'granted';
-  } catch {
+  } catch (error) {
+    console.warn('Echo: microphone permission state is unavailable.', error);
     micGranted = false;
   }
   if (!initialized) {
     [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     element<HTMLInputElement>('title').value = (tab?.title ?? 'Meeting').slice(0, 200);
     mic.checked = settings.micGranted && micGranted;
+    live.checked = settings.liveTranscription;
+    consent.checked = rememberConsent.checked = consentRemembered();
     initialized = true;
     const selector = element<HTMLSelectElement>('mic-device');
     const defaultOption = document.createElement('option');
@@ -112,8 +123,10 @@ async function refreshState() {
       : mic.checked && !micGranted
         ? 'Allow microphone in setup'
         : 'Open setup';
+  element('remember-consent-field').hidden = !meeting;
+  if (meeting) element('remember-provider').textContent = PROVIDER_NAMES[meeting.provider];
   element('meeting').textContent = meeting
-    ? `${{ meet: 'Google Meet', zoom: 'Zoom Web', teams: 'Teams Web' }[meeting.provider]} · ${enabled ? (mic.checked && !micGranted ? 'Microphone access is missing. Open Setup or uncheck Include my microphone.' : 'Enabled. Ready to record.') : 'Not enabled. Open Setup to enable.'}`
+    ? `${PROVIDER_NAMES[meeting.provider]} · ${enabled ? (mic.checked && !micGranted ? 'Microphone access is missing. Open Setup or uncheck Include my microphone.' : 'Enabled. Ready to record.') : 'Not enabled. Open Setup to enable.'}`
     : 'Open your Google Meet, Zoom Web or Teams Web meeting, then click Echo again.';
   element('start-panel').hidden = !!active;
   element('active-panel').hidden = !active;
@@ -151,20 +164,20 @@ async function refreshState() {
   renderRecordings(
     state.recordings,
     (row: Recording) => {
-      void chrome.tabs.create({
-        url: chrome.runtime.getURL(`setup.html#recording=${encodeURIComponent(row.recordingId)}`),
-      });
+      chrome.tabs
+        .create({
+          url: chrome.runtime.getURL(`setup.html#recording=${encodeURIComponent(row.recordingId)}`),
+        })
+        .catch(showError);
     },
     active?.recordingId,
   );
   enableStart();
 }
-element('readiness-action').addEventListener('click', () => {
-  void chrome.runtime.openOptionsPage();
-});
-element('setup').addEventListener('click', () => {
-  void chrome.runtime.openOptionsPage();
-});
+for (const id of ['readiness-action', 'setup'])
+  element(id).addEventListener('click', () => {
+    chrome.runtime.openOptionsPage().catch(showError);
+  });
 element('open-echo').addEventListener('click', () => {
   void action(async () => {
     await request({ type: 'OPEN_ECHO', recordingId: active?.recordingId });
@@ -183,6 +196,26 @@ element('mic-exclusion').addEventListener('change', () => {
     });
 });
 consent.addEventListener('change', enableStart);
+rememberConsent.addEventListener('change', () => {
+  const meeting = meetingFor(tab?.url ?? '');
+  if (!meeting) return;
+  // Remembering consent confirms it for this recording too.
+  if (rememberConsent.checked) consent.checked = true;
+  enableStart();
+  void action(async () => {
+    await request({
+      type: 'REMEMBER_CONSENT',
+      provider: meeting.provider,
+      remember: rememberConsent.checked,
+    });
+    await refresh();
+  });
+});
+live.addEventListener('change', () => {
+  void action(() =>
+    request({ type: 'LIVE_TEXT_DEFAULT', enabled: live.checked }).then(() => undefined),
+  );
+});
 mic.addEventListener('change', () => {
   element('mic-device-field').hidden = !mic.checked;
   enableStart();
@@ -197,7 +230,7 @@ startButton.addEventListener('click', () => {
       micEnabled: mic.checked,
       micDeviceId: element<HTMLSelectElement>('mic-device').value,
       consent: consent.checked,
-      liveTranscription: element<HTMLInputElement>('live').checked,
+      liveTranscription: live.checked,
     });
     await refresh();
   }, startButton).finally(() => {
@@ -222,7 +255,7 @@ element('stop').addEventListener('click', () => {
   if (current)
     void action(async () => {
       await request({ type: 'CONTROL', recordingId: current.recordingId, action: 'stop' });
-      consent.checked = false;
+      consent.checked = consentRemembered();
       await refresh();
     }, element<HTMLButtonElement>('stop'));
 });

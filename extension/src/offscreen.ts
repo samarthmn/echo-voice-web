@@ -16,6 +16,7 @@ import {
   updateRecording,
 } from './storage';
 import { transferPending } from './protocol';
+import { Settled, uploadScheduler } from './upload-scheduler';
 type Capture = {
   id: string;
   title: string;
@@ -52,9 +53,13 @@ function endTransition() {
   finishTransition?.();
   finishTransition = undefined;
 }
-let initializing: Promise<void> = markInterrupted().catch((error) => {
-  recoveryError = `Local recovery metadata could not be updated. Saved audio is retained for export. ${(error as Error).message}`;
-});
+function recoverInterrupted(): Promise<void> {
+  return markInterrupted().catch((error) => {
+    console.error('Echo: unfinished recordings could not be marked interrupted.', error);
+    recoveryError = `Local recovery metadata could not be updated. Saved audio is retained for export. ${(error as Error).message}`;
+  });
+}
+let initializing = recoverInterrupted();
 const activeStatus = () =>
   active
     ? {
@@ -69,15 +74,28 @@ const activeStatus = () =>
       }
     : null;
 export type ActiveStatus = NonNullable<ReturnType<typeof activeStatus>>;
-const publish = (endedRecordingId?: string) =>
+function toBackground(message: { type: string } & Record<string, unknown>) {
   chrome.runtime
-    .sendMessage({
-      target: 'background',
-      type: 'CAPTURE_STATUS',
-      endedRecordingId,
-      active: activeStatus(),
-    })
-    .catch(() => {});
+    .sendMessage({ ...message, target: 'background' })
+    .catch((error) => console.warn(`Echo: could not report ${message.type}.`, error));
+}
+let published: string | undefined;
+/** Report capture status for the badge and popup. Unchanged status is not resent. */
+function publish(endedRecordingId?: string, force = false) {
+  const status = { endedRecordingId, active: activeStatus(), error: recoveryError };
+  const key = JSON.stringify(status);
+  if (!force && !endedRecordingId && key === published) return;
+  published = key;
+  toBackground({ type: 'CAPTURE_STATUS', ...status });
+}
+/** While recording, this document schedules its own retries; otherwise the worker decides. */
+function uploadsSettled(state: Settled) {
+  if (!active && !transition) toBackground({ type: 'UPLOADS_SETTLED', ...state });
+}
+const uploads = uploadScheduler(
+  () => transferPending(control, () => publish(undefined, true)),
+  uploadsSettled,
+);
 function microphoneFailure(error: unknown): string {
   const name = (error as { name?: string } | null)?.name;
   const retry = ' Or explicitly choose tab audio only before starting.';
@@ -103,14 +121,13 @@ function microphoneFailure(error: unknown): string {
     retry
   );
 }
-async function sync() {
-  await transferPending(control, () => publish());
-}
 function cleanup(capture: Capture) {
   capture.worklet.disconnect();
   capture.tab.getTracks().forEach((track) => track.stop());
   capture.mic?.getTracks().forEach((track) => track.stop());
-  void capture.context.close();
+  capture.context
+    .close()
+    .catch((error) => console.warn('Echo: the audio context did not close.', error));
 }
 async function fail(
   capture: Capture,
@@ -121,18 +138,20 @@ async function fail(
   capture.failed = true;
   cleanup(capture);
   if (active === capture) active = undefined;
-  await capture.queue.catch(() => {});
+  // The queue's own failure is what this reports; wait only for its in-flight commit.
+  await capture.queue.catch(() => undefined);
   await updateRecording(capture.id, {
     captureState: 'interrupted',
     interrupted: true,
     interruption: interruption(reason, capture.persistedFrames),
     transferState: 'attention',
     error: message,
-  }).catch(() => {
+  }).catch((error) => {
+    console.error('Echo: the interrupted recording could not be updated.', error);
     recoveryError = message;
   });
   publish(capture.id);
-  void sync().catch(() => {});
+  uploads.request();
 }
 async function flush(capture: Capture, type: string) {
   const requestId = crypto.randomUUID();
@@ -152,9 +171,18 @@ async function flush(capture: Capture, type: string) {
   if (capture.failed)
     throw new Error('Recording stopped because local audio could not be safely saved.');
 }
+/** A reported recovery failure blocks only the next start: retry recovery, then record. */
+async function retryRecovery() {
+  if (!recoveryError) return;
+  recoveryError = undefined;
+  initializing = recoverInterrupted();
+  await initializing;
+  publish();
+  if (recoveryError) throw new Error(recoveryError);
+}
 async function start(message: any) {
   await initializing;
-  if (recoveryError) throw new Error(recoveryError);
+  await retryRecovery();
   if (active || transition) throw new Error('A recording is already active.');
   beginTransition();
   let tab: MediaStream | undefined;
@@ -271,8 +299,9 @@ async function start(message: any) {
           });
         }
         capture.queuedFrames -= data.frames;
+        if (frames) uploads.request();
         if (row.totalFrames + frames >= MAX_FRAMES)
-          void control(capture.id, 'stop').catch(() => {});
+          void control(capture.id, 'stop').catch(logFailure('stopping at the recording limit'));
       });
       capture.queue.catch((error) => {
         void fail(
@@ -292,7 +321,9 @@ async function start(message: any) {
     for (const track of tab.getTracks())
       track.addEventListener('ended', () => {
         if (!capture.failed && active === capture)
-          void control(capture.id, 'stop', true, 'tab-track-ended').catch(() => {});
+          void control(capture.id, 'stop', true, 'tab-track-ended').catch(
+            logFailure('stopping after the tab audio ended'),
+          );
       });
     for (const track of mic?.getTracks() ?? [])
       track.addEventListener('ended', () => {
@@ -315,7 +346,9 @@ async function start(message: any) {
   } catch (error) {
     tab?.getTracks().forEach((track) => track.stop());
     mic?.getTracks().forEach((track) => track.stop());
-    if (context) void context.close();
+    context
+      ?.close()
+      .catch((closeError) => console.warn('Echo: the audio context did not close.', closeError));
     if (active) {
       await updateRecording(active.id, {
         captureState: 'interrupted',
@@ -390,7 +423,10 @@ async function control(
   } finally {
     endTransition();
   }
-  if (action === 'stop') void sync().catch(() => {});
+  if (action === 'stop') uploads.request();
+}
+function logFailure(task: string) {
+  return (error: unknown) => console.warn(`Echo: ${task} failed.`, error);
 }
 chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) => {
   if (
@@ -470,8 +506,14 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
       });
       publish();
     }
-    if (message.type === 'SYNC') await sync();
-    if (message.type === 'STATUS') return { active: activeStatus(), error: recoveryError };
+    if (message.type === 'SYNC')
+      await uploads.retryNow(Number.isSafeInteger(message.failures) ? message.failures : 0);
+    if (message.type === 'STATUS')
+      return {
+        active: activeStatus(),
+        error: recoveryError,
+        busy: transition || uploads.busy(),
+      };
     return {};
   };
   run().then(
@@ -480,10 +522,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) =
   );
   return true;
 });
-setInterval(() => {
-  void sync().catch(() => {});
-}, 1000);
 void initializing.then(() => {
   publish();
-  void sync().catch(() => {});
+  uploads.request();
 });

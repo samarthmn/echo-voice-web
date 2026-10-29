@@ -49,7 +49,12 @@ test('pairing v1 plaintext pairs migrate to a sealed connected link; obsolete st
     pairingAttempt: { encrypted: {} },
     pairingCancellation: 'request',
   });
-  assert.deepEqual({ ...(await h.api.settings()) }, { installationId: 'existing', ...preferences });
+  assert.deepEqual(JSON.parse(JSON.stringify(await h.api.settings())), {
+    installationId: 'existing',
+    ...preferences,
+    rememberedConsent: [],
+    liveTranscription: false,
+  });
   assert.deepEqual({ ...(await h.api.readLink()) }, { state: 'connected', ...pair });
   assert.deepEqual(Object.keys(h.local).sort(), ['link', 'settings']);
   assert.ok(!JSON.stringify(h.local).includes('existing-credential'));
@@ -126,7 +131,7 @@ test('an open popup refreshes provider status without resetting an explicit micr
   };
   let enabled = [];
   let interval;
-  const ui = `export const element=globalThis.element; export const lockedNotice=()=>{}; export async function request(){return {connection:{phase:'none',revoked:false},settings:{enabledProviders:globalThis.providers(),micGranted:false},active:null,recordings:[]}}; export const renderRecordings=()=>{}; export const showError=error=>{throw error}; export const action=async fn=>fn(); export const duration=()=>'';`;
+  const ui = `export const element=globalThis.element; export const lockedNotice=()=>{}; export async function request(){return {connection:{phase:'none',revoked:false},settings:{enabledProviders:globalThis.providers(),micGranted:false,rememberedConsent:[],liveTranscription:false},active:null,recordings:[]}}; export const renderRecordings=()=>{}; export const showError=error=>{throw error}; export const action=async fn=>fn(); export const duration=()=>'';`;
   const result = await build({
     entryPoints: ['extension/src/popup.ts'],
     bundle: true,
@@ -195,7 +200,7 @@ test('overlapping first popup refreshes cannot re-enable a microphone explicitly
   };
   let interval;
   const queries = [];
-  const ui = `export const element=globalThis.element; export const lockedNotice=()=>{}; export async function request(){return {connection:{phase:'none',revoked:false},settings:{enabledProviders:['meet'],micGranted:true},active:null,recordings:[]}}; export const renderRecordings=()=>{}; export const showError=error=>{throw error}; export const action=async fn=>fn(); export const duration=()=>'';`;
+  const ui = `export const element=globalThis.element; export const lockedNotice=()=>{}; export async function request(){return {connection:{phase:'none',revoked:false},settings:{enabledProviders:['meet'],micGranted:true,rememberedConsent:[],liveTranscription:false},active:null,recordings:[]}}; export const renderRecordings=()=>{}; export const showError=error=>{throw error}; export const action=async fn=>fn(); export const duration=()=>'';`;
   const result = await build({
     entryPoints: ['extension/src/popup.ts'],
     bundle: true,

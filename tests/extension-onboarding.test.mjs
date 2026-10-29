@@ -127,7 +127,7 @@ test('popup checks actual host and microphone permission before enabling Start',
         setup(b) {
           b.onResolve({ filter: /^\.\/ui$/ }, () => ({ path: 'ui', namespace: 'mock' }));
           b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({
-            contents: `export const element=globalThis.element;export const request=async()=>({connection:{phase:'none',revoked:false},settings:{enabledProviders:['meet'],micGranted:true},active:null,recordings:[]});export const renderRecordings=()=>{};export const lockedNotice=()=>{};export const showError=error=>{throw error};export const action=fn=>fn();export const duration=()=>'';`,
+            contents: `export const element=globalThis.element;export const request=async()=>({connection:{phase:'none',revoked:false},settings:{enabledProviders:['meet'],micGranted:true,rememberedConsent:[],liveTranscription:false},active:null,recordings:[]});export const renderRecordings=()=>{};export const lockedNotice=()=>{};export const showError=error=>{throw error};export const action=fn=>fn();export const duration=()=>'';`,
           }));
         },
       },

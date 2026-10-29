@@ -101,10 +101,13 @@ test('streaming 44.1/48 kHz resampling preserves duration across render blocks a
       ).length;
     assert.ok(Math.abs(count - 48000) <= 1, `${sampleRate}: ${count}`);
   }
-  assert.deepEqual([...audio.monoMix([Float32Array.of(1)], [Float32Array.of(1)], true, 1)], [1]);
+  const mixer = new audio.PCMMixer();
+  const [both] = mixer.mix([Float32Array.of(1)], [Float32Array.of(1)], true, 1);
+  assert.ok(both > 0.99 && both <= 1, 'two full-scale sources are limited, never clipped');
   assert.deepEqual(
-    [...audio.monoMix([Float32Array.of(0.5)], [Float32Array.of(1)], false, 1)],
-    [0.25],
+    [...mixer.mix([Float32Array.of(0.5)], [Float32Array.of(1)], false, 1)],
+    [0.5],
+    'an excluded microphone leaves tab audio at unity gain',
   );
 });
 test('AudioWorklet keeps stale microphone out even when delayed gates arrive', async () => {
@@ -445,7 +448,7 @@ test('bounded transfer turns retain unfinished audio and complete only after the
     globalThis.fetch = originalFetch;
   }
 });
-test('unassigned and other-library recordings upload to the connected library; offline Echo backs off', async () => {
+test('unassigned and other-library recordings upload to the connected library; offline Echo stops the pass', async () => {
   const base = { chunkCount: 1, totalFrames: 1, captureState: 'stopped', gaps: [] };
   const unassigned = {
     ...base,
@@ -500,22 +503,24 @@ test('unassigned and other-library recordings upload to the connected library; o
     );
   };
   try {
-    await protocol.transferPending(
-      async () => {},
-      () => {},
+    assert.equal(
+      await protocol.transferPending(
+        async () => {},
+        () => {},
+      ),
+      'offline',
+      'an unreachable Echo asks the upload scheduler to back off',
     );
-    assert.equal(requests, 1, 'one failed request backs off instead of retrying every row');
+    assert.equal(requests, 1, 'one failed request stops the pass instead of retrying every row');
     assert.equal(globalThis.records.get(unassigned.recordingId).transferState, 'saved-local');
-    await protocol.transferPending(
-      async () => {},
-      () => {},
-    );
-    assert.equal(requests, 1, 'no requests during the backoff');
     now += 11000;
     online = true;
-    await protocol.transferPending(
-      async () => {},
-      () => {},
+    assert.equal(
+      await protocol.transferPending(
+        async () => {},
+        () => {},
+      ),
+      'idle',
     );
     for (const id of [unassigned.recordingId, elsewhere.recordingId]) {
       const row = globalThis.records.get(id);

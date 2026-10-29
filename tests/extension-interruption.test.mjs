@@ -11,7 +11,7 @@ const fakeModules = {
   'library-actions':
     'export async function openEcho(){}; export async function deleteLocalRecording(){}',
   settings:
-    "export async function settings(){return {enabledProviders:['meet']}};export async function saveSettings(){return {}};export async function readLink(){return {state:'none'}};export async function connectedPair(){};export async function revokeCredential(){};export async function wasRevoked(){return false}",
+    "export async function settings(){return {enabledProviders:['meet'],micGranted:false,micDeviceId:'default',rememberedConsent:globalThis.remembered??[],liveTranscription:false}};export async function saveSettings(){return {}};export async function readLink(){return {state:'none'}};export async function connectedPair(){};export async function revokeCredential(){};export async function wasRevoked(){return false}",
   storage:
     'export async function allRecordings(){return []};export const migrateRecordings=async()=>{};',
 };
@@ -37,15 +37,23 @@ const built = await build({
     },
   ],
 });
-function harness() {
+const MEET_URL = 'https://meet.google.com/abc-defg-hij';
+function harness({
+  url = MEET_URL,
+  identity = 'https://meet.google.com/abc-defg-hij',
+  recording = true,
+  remembered = [],
+} = {}) {
   let setupOpened = 0;
-  let owner = {
-    tabId: 7,
-    identity: 'https://meet.google.com/abc-defg-hij',
-    recordingId: 'recording',
-    documentId: 'original',
-    gateRevision: 0,
-  };
+  let popupOpened = 0;
+  let closedDocuments = 0;
+  const intervals = [];
+  const session = {};
+  const alarms = [];
+  const badges = [];
+  let owner = recording
+    ? { tabId: 7, identity, recordingId: 'recording', documentId: 'original', gateRevision: 0 }
+    : undefined;
   let probeDocumentId = 'original';
   const events = {};
   const sent = [];
@@ -60,7 +68,14 @@ function harness() {
     Map,
     Promise,
     crypto: globalThis.crypto,
-    setInterval() {},
+    remembered,
+    setInterval(callback, ms) {
+      intervals.push(ms);
+      return intervals.length;
+    },
+    clearInterval() {},
+    setTimeout,
+    clearTimeout,
     chrome: {
       runtime: {
         openOptionsPage: async () => {
@@ -93,28 +108,63 @@ function harness() {
       },
       storage: {
         session: {
-          get: async () => ({ captureOwner: owner }),
+          get: async (key) => (key === 'captureOwner' ? { captureOwner: owner } : session),
           set: async (value) => {
-            owner = value.captureOwner;
+            for (const [key, item] of Object.entries(value))
+              if (key === 'captureOwner') owner = item;
+              else session[key] = item;
           },
-          remove: async () => {
-            owner = undefined;
+          remove: async (key) => {
+            if (key === 'captureOwner') owner = undefined;
+            else delete session[key];
           },
           setAccessLevel: async () => {},
         },
       },
       tabs: {
-        get: async () => ({ id: 7, url: 'https://meet.google.com/abc-defg-hij' }),
+        get: async () => ({ id: 7, url, active: true }),
+        query: async () => [],
         onRemoved: event('removed'),
         onUpdated: event('updated'),
+        onActivated: event('activated'),
       },
-      alarms: { create: async () => {}, onAlarm: event('alarm') },
+      action: {
+        setBadgeText: async (details) => {
+          badges.push(details);
+        },
+        setBadgeBackgroundColor: async () => {},
+        setTitle: async () => {},
+        openPopup: async () => {
+          popupOpened++;
+        },
+      },
+      commands: { onCommand: event('command') },
+      offscreen: {
+        closeDocument: async () => {
+          closedDocuments++;
+        },
+      },
+      alarms: {
+        create: async (name, info) => {
+          alarms.push({ name, ...info });
+        },
+        clear: async (name) => {
+          alarms.push({ name, cleared: true });
+        },
+        onAlarm: event('alarm'),
+      },
     },
   };
   vm.runInNewContext(built.outputFiles[0].text, context);
   return {
     events,
     sent,
+    intervals,
+    session,
+    alarms,
+    badges,
+    popupOpened: () => popupOpened,
+    closedDocuments: () => closedDocuments,
     setupOpened: () => setupOpened,
     owner: () => owner,
     clear: () => {
@@ -126,15 +176,21 @@ function harness() {
     observation: (
       state = 'muted',
       documentId = 'original',
-      url = 'https://meet.google.com/abc-defg-hij',
+      observedUrl = url,
+      respond = () => {},
     ) =>
       events.message(
-        { type: 'MUTE_OBSERVATION', seq: 1, observedAt: Date.now(), url, state },
-        { id: 'synthetic', tab: { id: 7 }, frameId: 0, documentId, url },
+        { type: 'MUTE_OBSERVATION', seq: 1, observedAt: Date.now(), url: observedUrl, state },
+        { id: 'synthetic', tab: { id: 7 }, frameId: 0, documentId, url: observedUrl },
+        respond,
+      ),
+    fromOffscreen: (message) =>
+      events.message(
+        message,
+        { id: 'synthetic', url: 'chrome-extension://synthetic/offscreen.html' },
         () => {},
       ),
     pagehide: (patch = {}) => {
-      const url = 'https://meet.google.com/abc-defg-hij';
       events.message(
         { type: 'MEETING_PAGEHIDE', seq: 1, observedAt: Date.now(), url, state: 'unknown' },
         { id: 'synthetic', tab: { id: 7 }, frameId: 0, documentId: 'original', url, ...patch },
@@ -332,6 +388,7 @@ function contentHarness() {
         sendMessage(message) {
           if (failSend === 'sync') throw new Error('extension invalidated');
           if (failSend === 'async') return Promise.reject(new Error('extension invalidated'));
+          if (failSend === 'retire') return Promise.resolve({ observe: false });
           sent.push(message);
           return Promise.resolve();
         },
@@ -470,6 +527,15 @@ for (const failure of ['sync', 'async'])
     h.mutate();
     assert.equal(h.scans(), scans);
   });
+test('an observer retires when the worker reports that its tab is not recording', async () => {
+  const h = contentHarness();
+  h.fail('retire');
+  h.advance(500);
+  await settle();
+  assert.equal(h.observers[0].disconnected, true);
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.handlers.size, 0);
+});
 
 test('setup opens on first install only, never on extension update', async () => {
   const h = harness();
@@ -479,4 +545,102 @@ test('setup opens on first install only, never on extension update', async () =>
   h.events.installed({ reason: 'install' });
   await settle();
   assert.equal(h.setupOpened(), 1);
+});
+test('an idle worker keeps no timers and retires observers of tabs that are not recording', async () => {
+  const h = harness({ recording: false });
+  await settle();
+  assert.equal(h.intervals.length, 0, 'no gate or claim polling while nothing records');
+  let reply;
+  h.observation('unmuted', 'original', MEET_URL, (value) => {
+    reply = value;
+  });
+  await settle();
+  assert.equal(reply.observe, false);
+  assert.equal(
+    h.sent.some((message) => message.type === 'GATE'),
+    false,
+  );
+});
+test('a recording runs the gate on observations and once a second, and keeps its observer', async () => {
+  const h = harness();
+  let reply;
+  h.observation('unmuted', 'original', MEET_URL, (value) => {
+    reply = value;
+  });
+  await settle();
+  assert.equal(reply.observe, true);
+  assert.deepEqual([...h.intervals], [1000]);
+  assert.ok(h.sent.some((message) => message.type === 'GATE' && message.allowed));
+});
+test('Teams in-meeting hash navigation keeps recording and the microphone gate', async () => {
+  const join =
+    'https://teams.microsoft.com/v2/?meetingjoin=true#/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%7d';
+  const h = harness({ url: join, identity: 'https://teams.microsoft.com/v2' });
+  const moved = 'https://teams.microsoft.com/v2/#/conversations/19:meeting_abc@thread.v2?ctx=chat';
+  h.events.updated(7, { url: moved }, { url: moved });
+  h.observation('unmuted', 'original', moved);
+  await settle();
+  assert.equal(
+    h.sent.some((message) => message.type === 'CONTROL'),
+    false,
+  );
+  assert.ok(h.sent.some((message) => message.type === 'GATE' && message.allowed));
+  const elsewhere = 'https://teams.live.com/v2/#/l/meetup-join/other';
+  h.events.updated(7, { url: elsewhere }, { url: elsewhere });
+  await settle();
+  assert.equal(
+    h.sent.find((message) => message.type === 'CONTROL')?.interruptionReason,
+    'meeting-changed',
+  );
+});
+test('the shortcut stops an active recording', async () => {
+  const h = harness();
+  h.events.command('toggle-recording', { id: 7, url: MEET_URL });
+  await settle();
+  const stop = h.sent.find((message) => message.type === 'CONTROL');
+  assert.equal(stop?.action, 'stop');
+  assert.equal(stop.interrupted, undefined);
+  assert.equal(h.owner(), undefined);
+});
+test('the shortcut starts only where consent is remembered, otherwise it opens the popup', async () => {
+  const unconfirmed = harness({ recording: false });
+  unconfirmed.events.command('toggle-recording', { id: 7, url: MEET_URL, title: 'Standup' });
+  await settle();
+  assert.equal(
+    unconfirmed.sent.some((message) => message.type === 'START'),
+    false,
+  );
+  assert.match(unconfirmed.session.recorderError, /participants consent/);
+  assert.equal(unconfirmed.popupOpened(), 1);
+  const remembered = harness({ recording: false, remembered: ['meet'] });
+  remembered.events.command('toggle-recording', { id: 7, url: MEET_URL, title: 'Standup' });
+  await settle();
+  const start = remembered.sent.find((message) => message.type === 'START');
+  assert.equal(start?.recording.consent, true);
+  assert.equal(start.recording.title, 'Standup');
+  assert.equal(start.micEnabled, false);
+  assert.equal(remembered.owner().tabId, 7);
+});
+test('settled uploads close an idle offscreen document and schedule the offline retry', async () => {
+  const h = harness({ recording: false });
+  h.fromOffscreen({ type: 'UPLOADS_SETTLED', failures: 2, retryAt: 123456 });
+  await settle();
+  assert.deepEqual(h.alarms, [{ name: 'echo-transfer', when: 123456 }]);
+  assert.equal(h.session.uploadFailures, 2);
+  assert.equal(h.closedDocuments(), 1);
+  const recording = harness();
+  recording.fromOffscreen({ type: 'UPLOADS_SETTLED', failures: 0 });
+  await settle();
+  assert.equal(recording.closedDocuments(), 0, 'a recording keeps its offscreen document');
+});
+test('an enabled meeting tab shows the ready badge; recording shows REC everywhere', async () => {
+  const h = harness({ recording: false });
+  h.events.activated({ tabId: 7 });
+  await settle();
+  assert.equal(h.badges.at(-1).text, '●');
+  assert.equal(h.badges.at(-1).tabId, 7);
+  h.fromOffscreen({ type: 'CAPTURE_STATUS', active: { recordingId: 'recording', paused: false } });
+  await settle();
+  assert.equal(h.badges.at(-1).text, 'REC');
+  assert.equal(h.badges.at(-1).tabId, undefined);
 });

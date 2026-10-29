@@ -1,10 +1,11 @@
-import { PCMResampler, monoMix } from './audio';
+import { PCMMixer, PCMResampler } from './audio';
 declare const AudioWorkletProcessor: any;
 declare function registerProcessor(name: string, processor: any): void;
 declare const sampleRate: number;
 declare const currentTime: number;
 class EchoPCMProcessor extends AudioWorkletProcessor {
   private resampler = new PCMResampler(sampleRate);
+  private mixer = new PCMMixer();
   private pending = new Int16Array(16000);
   private used = 0;
   private generatedFrames = 0;
@@ -80,7 +81,7 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
     if (this.paused) return true;
     const frames = inputs[0]?.[0]?.length ?? 128;
     const pcm = this.resampler.process(
-      monoMix(
+      this.mixer.mix(
         inputs[0] ?? [],
         inputs[1] ?? [],
         !this.micExcluded &&
@@ -90,7 +91,7 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
         frames,
       ),
     );
-    for (const value of pcm) {
+    for (let i = 0; i < pcm.length; i++) {
       if (this.generatedFrames - this.committedFrames >= 80000) {
         this.paused = true;
         this.micAllowed = false;
@@ -98,7 +99,7 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
         return true;
       }
       this.generatedFrames++;
-      this.pending[this.used++] = value;
+      this.pending[this.used++] = pcm[i];
       if (this.used === this.pending.length) this.flush();
     }
     return true;

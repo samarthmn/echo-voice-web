@@ -333,7 +333,12 @@ test('popup polls bounded live/connection status separately and renders exclusio
     }
     return {
       connection: context.view,
-      settings: { enabledProviders: ['meet'], micGranted: true },
+      settings: {
+        enabledProviders: ['meet'],
+        micGranted: true,
+        rememberedConsent: [],
+        liveTranscription: false,
+      },
       active: context.active,
       recordings: [{ recordingId: id, liveTranscription: true, totalFrames: 16000 }],
     };
@@ -414,7 +419,12 @@ test('popup connect shows waiting, then the not-found message with Retry, never 
     if (message.type === 'CONNECTION_STATUS') return { status: context.view.phase };
     return {
       connection: context.view,
-      settings: { enabledProviders: ['meet'], micGranted: false },
+      settings: {
+        enabledProviders: ['meet'],
+        micGranted: false,
+        rememberedConsent: [],
+        liveTranscription: false,
+      },
       active: null,
       recordings: [],
     };

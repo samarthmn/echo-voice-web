@@ -75,6 +75,7 @@ function harness({
   const streams = [];
   const notifications = [];
   const contexts = [];
+  const intervals = [];
   let listener;
   class Context {
     constructor() {
@@ -181,7 +182,10 @@ function harness({
     crypto: globalThis.crypto,
     TextEncoder,
     TextDecoder,
-    setInterval: () => 1,
+    setInterval: () => {
+      intervals.push(1);
+      return 1;
+    },
     setTimeout,
     clearTimeout,
     Date,
@@ -228,6 +232,7 @@ function harness({
     });
   return {
     journal,
+    intervals,
     calls,
     nodes,
     streams,
@@ -617,3 +622,50 @@ for (const partialPause of [false, true])
     assert.equal((await h.message({ type: 'STATUS' })).value.active, null);
     assert.ok(h.streams.every((stream) => stream.getTracks()[0].stopped));
   });
+test('a reported recorder failure clears on the next start, which retries recovery and records', async () => {
+  const h = harness();
+  await h.start(false);
+  h.worklet().emit(new ArrayBuffer(32000));
+  await settle();
+  h.journal.quotaAt = 1;
+  h.journal.failMetadata = true;
+  h.worklet().emit(new ArrayBuffer(32000));
+  await settle();
+  assert.ok(
+    h.notifications.some(
+      (message) => message.type === 'CAPTURE_STATUS' && /Storage quota/.test(message.error),
+    ),
+    'the failure reaches the worker for the popup',
+  );
+  h.journal.failMetadata = false;
+  h.journal.quotaAt = -1;
+  const again = await h.start(false, 'second-recording');
+  assert.equal(again.ok, true, again.error);
+  const status = await h.message({ type: 'STATUS' });
+  assert.equal(status.value.error, undefined);
+  assert.equal(status.value.active.recordingId, 'second-recording');
+  assert.equal(h.journal.rows.get('synthetic-recording').captureState, 'interrupted');
+  await h.message({ type: 'CONTROL', recordingId: 'second-recording', action: 'stop' });
+});
+test('uploads follow committed audio instead of polling, and settle only when not recording', async () => {
+  const h = harness();
+  const idle = () =>
+    h.notifications.some((message) => message.type === 'UPLOADS_SETTLED' && !message.retryAt);
+  // The first pass runs from a zero-delay timer after recovery.
+  for (let i = 0; i < 20 && !idle(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(h.intervals.length, 0, 'the offscreen document never polls');
+  assert.ok(idle(), 'an idle document tells the worker it may close');
+  await h.start(false);
+  h.notifications.length = 0;
+  h.worklet().emit(new ArrayBuffer(32000));
+  await settle();
+  assert.equal((await h.message({ type: 'STATUS' })).value.busy, true, 'an upload is scheduled');
+  await h.message({ type: 'SYNC', failures: 3 });
+  assert.ok(h.notifications.some((message) => message.type === 'TRUSTED_LINK'));
+  assert.equal(
+    h.notifications.some((message) => message.type === 'UPLOADS_SETTLED'),
+    false,
+    'a recording document schedules its own uploads',
+  );
+  await h.message({ type: 'CONTROL', recordingId: 'synthetic-recording', action: 'stop' });
+});
