@@ -23,6 +23,13 @@ use tower_http::{
     set_header::SetResponseHeaderLayer,
 };
 
+async fn not_found() -> (axum::http::StatusCode, axum::Json<serde_json::Value>) {
+    (
+        axum::http::StatusCode::NOT_FOUND,
+        axum::Json(serde_json::json!({"error": "Not found"})),
+    )
+}
+
 /// Bound runtime teardown even when an in-flight blocking operation cannot be cancelled.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -98,9 +105,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         })
                     }),
                 )
+                .fallback(not_found)
                 .layer(axum::middleware::from_fn(security::local_access)),
         )
-        .nest("/extension/v1", extensions::extension_routes())
+        .nest(
+            "/extension/v1",
+            extensions::extension_routes().fallback(not_found),
+        )
         .fallback_service(
             ServeDir::new(runtime_paths.resource_root.join("public")).not_found_service(
                 ServeFile::new(runtime_paths.resource_root.join("public/index.html")),

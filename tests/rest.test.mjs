@@ -427,8 +427,13 @@ test(
             async (path) => (await fetch(server.base + path, { method: 'POST' })).status,
           ),
         ),
-        [405, 405],
+        [404, 404],
       );
+      for (const path of ['/api/nope', '/extension/v1/nope']) {
+        const response = await fetch(server.base + path);
+        assert.equal(response.status, 404);
+        assert.deepEqual(await response.json(), { error: 'Not found' });
+      }
       const csrfCallback = await rawGet(
         `${server.base}/api/integrations/google/callback?code=fake&state=fake`,
         {
