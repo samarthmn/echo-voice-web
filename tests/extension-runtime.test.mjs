@@ -244,6 +244,66 @@ async function protocolHarness() {
   return import(pathToFileURL(outfile).href);
 }
 const protocol = await protocolHarness();
+test('paused recording with no pending audio fetches and applies a remote Resume', async () => {
+  const id = 'paused-control';
+  globalThis.pair = {
+    endpoint: 'http://localhost:3000',
+    libraryId: 'library-1',
+    credential: 'token',
+  };
+  globalThis.records = new Map([
+    [
+      id,
+      {
+        recordingId: id,
+        libraryId: 'library-1',
+        title: 'Meeting',
+        provider: 'meet',
+        consent: true,
+        sampleRate: 16000,
+        channels: 1,
+        createdAt: '2026-10-05T00:00:00Z',
+        chunkCount: 0,
+        totalFrames: 0,
+        captureState: 'paused',
+        gaps: [],
+      },
+    ],
+  ]);
+  globalThis.chunks = new Map();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+    return new Response(
+      JSON.stringify({
+        appVersion: '0.1.0',
+        storageProtectionVersion: 1,
+        recordingReceiptVersion: 1,
+        libraryId: 'library-1',
+        recordingId: id,
+        status: 'receiving',
+        nextSequence: 0,
+        totalFrames: 0,
+        controls: [{ commandId: 'resume-1', action: 'resume' }],
+      }),
+    );
+  };
+  try {
+    await protocol.transferPending(
+      async (recordingId, action) => {
+        assert.equal(recordingId, id);
+        assert.equal(action, 'resume');
+        globalThis.records.get(id).captureState = 'recording';
+      },
+      () => {},
+    );
+    assert.equal(globalThis.records.get(id).captureState, 'recording');
+    assert.ok(calls.some((url) => url.endsWith('/controls/resume-1/ack')));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test('lost completion acknowledgement retains PCM, repeat verification then safely purges', async () => {
   const id = 'recording-1';
   const row = {

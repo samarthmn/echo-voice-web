@@ -1,4 +1,4 @@
-import { meetingFor, Recording, MAX_FRAMES } from './core';
+import { meetingFor, MEETING_SITES, Recording, MAX_FRAMES } from './core';
 import type { ExtensionState } from './background';
 import {
   action,
@@ -119,11 +119,14 @@ async function refreshState() {
   hostGranted =
     !!meeting && (await chrome.permissions.contains({ origins: [meeting.originPattern] }));
   const enabled = !!meeting && settings.enabledProviders.includes(meeting.provider) && hostGranted;
+  // Without site access the browser hides the tab's address, so Echo cannot tell it is a meeting.
+  const unreadable = !!tab && !tab.url;
   element('readiness-action').hidden =
     !!active || (!!meeting && enabled && (!mic.checked || micGranted));
-  element('readiness-action').textContent =
-    meeting && !enabled
-      ? 'Enable this meeting service'
+  element('readiness-action').textContent = unreadable
+    ? 'Allow Echo on meeting sites'
+    : meeting && !enabled
+      ? `Enable ${PROVIDER_NAMES[meeting.provider]}`
       : mic.checked && !micGranted
         ? 'Allow microphone in setup'
         : 'Open setup';
@@ -131,7 +134,9 @@ async function refreshState() {
   if (meeting) element('remember-provider').textContent = PROVIDER_NAMES[meeting.provider];
   element('meeting').textContent = meeting
     ? `${PROVIDER_NAMES[meeting.provider]} · ${enabled ? (mic.checked && !micGranted ? 'Microphone access is missing. Open Setup or uncheck Include my microphone.' : 'Enabled. Ready to record.') : 'Not enabled. Open Setup to enable.'}`
-    : 'Open your Google Meet, Zoom Web or Teams Web meeting, then click Echo again.';
+    : unreadable
+      ? 'Echo cannot read this tab yet. Allow it on Google Meet, Zoom and Teams to record calls here.'
+      : 'Open your Google Meet, Zoom Web or Teams Web meeting, then click Echo again.';
   element('start-panel').hidden = !!active;
   element('active-panel').hidden = !active;
   if (active) {
@@ -181,10 +186,30 @@ async function refreshState() {
 element('unlock-older').addEventListener('click', () => {
   chrome.tabs.create({ url: chrome.runtime.getURL('setup.html#unlock') }).catch(showError);
 });
-for (const id of ['readiness-action', 'setup'])
-  element(id).addEventListener('click', () => {
-    chrome.runtime.openOptionsPage().catch(showError);
-  });
+element('setup').addEventListener('click', () => {
+  chrome.runtime.openOptionsPage().catch(showError);
+});
+/** Grant meeting-site access from the popup itself; a click here is the required user gesture. */
+async function allowMeetingSites(): Promise<boolean> {
+  const meeting = meetingFor(tab?.url ?? '');
+  const sites = MEETING_SITES.filter((site) => !meeting || site.id === meeting.provider);
+  if (!sites.length || (meeting && prefs?.enabledProviders.includes(meeting.provider)))
+    return false;
+  if (!(await chrome.permissions.request({ origins: sites.flatMap((site) => site.origins) })))
+    throw new Error('Meeting-site access was not granted. Choose the button again to retry.');
+  for (const site of sites)
+    await request({ type: 'PROVIDER_ENABLED', provider: site.id, enabled: true });
+  // The address becomes readable once access is granted.
+  [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return true;
+}
+element('readiness-action').addEventListener('click', () => {
+  const button = element<HTMLButtonElement>('readiness-action');
+  void action(async () => {
+    if (await allowMeetingSites()) await refresh();
+    else await chrome.runtime.openOptionsPage();
+  }, button);
+});
 element('open-echo').addEventListener('click', () => {
   void action(async () => {
     await request({ type: 'OPEN_ECHO', recordingId: active?.recordingId });

@@ -1,24 +1,13 @@
-import { Provider, Recording } from './core';
+import { MEETING_SITES, Provider, Recording } from './core';
 import type { ExtensionState } from './background';
 import { exportParts, recording } from './storage';
 import { action, element, lockedNotice, renderRecordings, request, showError } from './ui';
 import { connectionCard } from './connection-card';
 type ExportPart = { blob: Blob; part: number; startFrame: number; frames: number };
-const providers: { id: Provider; name: string; origins: string[] }[] = [
-  { id: 'meet', name: 'Google Meet', origins: ['https://meet.google.com/*'] },
-  { id: 'zoom', name: 'Zoom Web', origins: ['https://*.zoom.us/*', 'https://app.zoom.com/*'] },
-  {
-    id: 'teams',
-    name: 'Microsoft Teams Web',
-    origins: [
-      'https://teams.microsoft.com/*',
-      'https://teams.live.com/*',
-      'https://teams.cloud.microsoft/*',
-    ],
-  },
-];
+const providers = MEETING_SITES;
 let initialized = false;
 let checkingConnection = false;
+let connectRequest: { id: string; endpoint: string; previous?: string } | undefined;
 let pendingCount = 0;
 let capturing = false;
 let refreshing: Promise<void> | undefined;
@@ -89,6 +78,18 @@ async function refreshState() {
     initialized = true;
   }
   connection.update(state.connection);
+  connectRequest = await request({ type: 'CONNECT_REQUEST' });
+  element('connect-confirmation').hidden = !connectRequest;
+  if (connectRequest) {
+    element<HTMLDetailsElement>('connect-step').open = true;
+    element('connect-confirmation-title').textContent =
+      `Connect this browser to Echo at ${new URL(connectRequest.endpoint).host}?`;
+    const replacement = element('connect-replacement');
+    replacement.hidden = !connectRequest.previous;
+    replacement.textContent = connectRequest.previous
+      ? `This replaces your connection to ${new URL(connectRequest.previous).host}.`
+      : '';
+  }
   const connected = state.connection.phase === 'connected';
   element('disconnect').hidden = !connected;
   element('legacy-unlock').hidden = !lockedNotice(
@@ -133,7 +134,7 @@ async function refreshState() {
     : micGranted
       ? 'Microphone allowed · meeting mute applies'
       : 'Choose microphone or call audio only';
-  completeStep('connect-step', connected);
+  completeStep('connect-step', connected && !connectRequest);
   completeStep('provider-step', enabledCount > 0);
   completeStep('microphone-step', micGranted || choices.callOnly);
   element('ready').hidden = !enabledCount || !(micGranted || choices.callOnly);
@@ -145,6 +146,14 @@ async function refreshState() {
     state.active?.recordingId,
   );
 }
+element('confirm-connect').addEventListener('click', () => {
+  const pending = connectRequest;
+  if (!pending) return;
+  void action(async () => {
+    await request({ type: 'CONNECT_CONFIRM', id: pending.id, previous: pending.previous });
+    await refresh();
+  }, element<HTMLButtonElement>('confirm-connect'));
+});
 // Create once: periodic state refresh must not replace focused provider controls.
 for (const provider of providers) {
   const row = document.createElement('div');

@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { build } from 'esbuild';
 const fakeModules = {
   pairing:
-    'export const beginPairing=async()=>({});export const resumePairing=async()=>({});export const cancelPairing=async()=>({});export const showPairingApproval=async()=>({});export const pairingView=async()=>({phase:"none"});export const whenConnected=()=>{};',
+    'export const pendingConnect=async()=>undefined;export const confirmConnect=async()=>({});export const beginPairing=async()=>({});export const resumePairing=async()=>({});export const cancelPairing=async()=>({});export const showPairingApproval=async()=>({});export const pairingView=async()=>({phase:"none"});export const whenConnected=()=>{};',
   connection:
     'export async function connectionStatus(){return {status:"none"}};export async function disconnect(){};export async function livePreview(){}',
   'external-messages': 'export async function externalMessage(){return {}}',

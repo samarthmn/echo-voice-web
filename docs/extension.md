@@ -101,11 +101,11 @@ Discovery probes `GET /hello` in parallel (700 ms timeout) and takes the first v
 
 The manifest declares `externally_connectable` for `http://localhost/*` and `http://127.0.0.1/*`. The extension verifies that the sender's origin itself answers `/hello` as Echo before trusting it.
 
-| Message                             | Reply and effect                                                                                                        |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `{type:"ECHO_PRESENT"}`             | `{installed:true, version, status}`. Sent by every Echo page on load, which also lets the extension remember the origin |
-| `{type:"ECHO_APPROVED", requestId}` | Sent right after you click Allow; the extension claims immediately (it also polls every second while waiting)           |
-| `{type:"ECHO_CONNECT", intent}`     | Echo-initiated connect: `POST /pair` with the intent, then claim. Reply `{ok, status}`                                  |
+| Message                             | Reply and effect                                                                                                                                |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{type:"ECHO_PRESENT"}`             | `{installed:true, version, status}`. Sent by every Echo page on load, which also lets the extension remember the origin                         |
+| `{type:"ECHO_APPROVED", requestId}` | Sent right after you click Allow; the extension claims immediately (it also polls every second while waiting)                                   |
+| `{type:"ECHO_CONNECT", intent}`     | Opens Setup for confirmation. Reply `{ok:true, status:"confirm-in-extension"}`; Connect then pairs with the intent or requests approval in Echo |
 
 ### At-rest encryption (storage v3)
 
@@ -117,8 +117,8 @@ Earlier versions encrypted recordings under a separate "vault" identity. The ser
 
 ## Security notes
 
-- Pairing needs an explicit approval in Echo (or a single-use intent that Echo created when you clicked **Connect browser extension**). Nothing else creates a credential.
+- Pairing requires a click in extension Setup for an Echo-initiated request, plus approval in Echo if its single-use intent is no longer valid. Extension-initiated pairing requires approval in Echo.
 - The server only accepts loopback `Host` headers and `chrome-extension://` origins on `/extension/v1`; the workspace `/api` routes are same-origin only.
 - Credentials are bound to the origin that paired and are scoped to recording upload; they cannot read the library, settings, or Calendar tokens.
-- Any page served from `localhost` or `127.0.0.1` can message the extension (that is what `externally_connectable` allows). So `ECHO_CONNECT` only pairs an extension that is not already connected, and only with a server that answers `/hello` as Echo. An unrelated local web server cannot take over an existing connection.
+- Any page served from `localhost` or `127.0.0.1` can message the extension. `ECHO_CONNECT` only opens Setup; it cannot pair or replace a connection without a click there. Setup shows the requested endpoint and identifies any connection being replaced. A `/hello` response alone does not establish trust.
 - The device key does not protect against someone who can run your unlocked browser profile.

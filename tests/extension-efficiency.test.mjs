@@ -128,6 +128,17 @@ test('an unexpected pass failure backs off instead of looping', async () => {
   }
   assert.deepEqual(settled, [{ failures: 1, retryAt: 10_000 }]);
 });
+test('active control polling repeats every three seconds and stops on capture end', async () => {
+  const h = scheduler(['poll', 'poll', 'idle']);
+  await h.api.retryNow();
+  await h.clock.advance(2999);
+  assert.deepEqual(h.passes, [0]);
+  await h.clock.advance(1);
+  assert.deepEqual(h.passes, [0, 3000]);
+  h.api.stopPolling();
+  await h.clock.advance(10_000);
+  assert.deepEqual(h.passes, [0, 3000]);
+});
 test('meeting identity ignores hash and volatile query parameters for every service', () => {
   const same = (urls) => {
     const identities = urls.map((url) => core.meetingIdentity(url));

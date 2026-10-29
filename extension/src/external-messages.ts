@@ -1,7 +1,7 @@
 // Messages from Echo pages (manifest externally_connectable: localhost and 127.0.0.1).
 import { endpointURL } from './core';
 import { probe } from './discovery';
-import { beginPairing, resumePairing } from './pairing';
+import { resumePairing } from './pairing';
 import { connectionStatus } from './connection';
 type EchoMessage =
   | { type: 'ECHO_PRESENT' }
@@ -34,12 +34,30 @@ async function verifiedOrigin(sender: chrome.runtime.MessageSender): Promise<str
 export async function externalMessage(raw: unknown, sender: chrome.runtime.MessageSender) {
   const message = parse(raw);
   const origin = await verifiedOrigin(sender);
+  if (message.type === 'ECHO_CONNECT') {
+    await chrome.storage.session.set({
+      connectRequest: {
+        id: crypto.randomUUID(),
+        endpoint: origin,
+        intent: message.intent,
+        receivedAt: Date.now(),
+      },
+    });
+    const url = chrome.runtime.getURL('setup.html');
+    const tab = (await chrome.tabs.query({ url })).find(
+      (item) => item.url?.split(/[?#]/)[0] === url,
+    );
+    if (tab?.id !== undefined) {
+      await chrome.tabs.update(tab.id, { active: true });
+      if (tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true });
+    } else await chrome.tabs.create({ url });
+    return { ok: true, status: 'confirm-in-extension' };
+  }
   await chrome.storage.local.set({ echoOrigin: origin });
   const version = chrome.runtime.getManifest().version;
   if (message.type === 'ECHO_PRESENT')
     return { installed: true, version, ...(await connectionStatus()) };
   if (message.type === 'ECHO_APPROVED') await resumePairing(message.requestId);
-  else await beginPairing(origin, message.intent);
   const status = await connectionStatus();
   return { ok: status.status === 'connected', ...status };
 }

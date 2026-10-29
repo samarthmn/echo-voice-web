@@ -31,6 +31,8 @@ import {
   pairingView,
   whenConnected,
   PairingView,
+  pendingConnect,
+  confirmConnect,
 } from './pairing';
 import { captureChanged, renderBadge } from './badge';
 import { unlockWithRecoveryPhrase } from './legacy-vault';
@@ -386,7 +388,8 @@ async function requestUploads(reset: boolean): Promise<void> {
   const pending = (await allRecordings()).some(
     (row) => !row.receipt && !row.locked && row.chunkCount > 0,
   );
-  if (!pending || !(await connectedPair())) {
+  const active = (await offscreenStatus())?.active;
+  if ((!pending && !active) || !(await connectedPair())) {
     await chrome.alarms.clear(TRANSFER_ALARM);
     await closeOffscreenIfIdle();
     return;
@@ -572,6 +575,9 @@ function offscreenMessage(message: any, respond: (reply: unknown) => void): bool
 }
 async function pageAction(message: any) {
   if (message.type === 'STATE') return state();
+  if (message.type === 'CONNECT_REQUEST') return pendingConnect();
+  if (message.type === 'CONNECT_CONFIRM')
+    return confirmConnect(message.id, message.previous).then(scheduleClaim);
   if (message.type === 'CONNECTION_STATUS') return connectionStatus();
   if (message.type === 'LIVE_PREVIEW') return livePreview(message.recordingId);
   if (message.type === 'MIC_EXCLUSION') {
@@ -651,6 +657,11 @@ chrome.runtime.onMessage.addListener((message: any, sender, respond) => {
   if (sender.url === chrome.runtime.getURL('offscreen.html'))
     return offscreenMessage(message, respond);
   if (!trustedPage) return false;
+  if (
+    ['CONNECT_REQUEST', 'CONNECT_CONFIRM'].includes(message.type) &&
+    documentURL !== chrome.runtime.getURL('setup.html')
+  )
+    return false;
   pageAction(message).then(
     (value) => respond({ ok: true, value }),
     (error) => respond({ ok: false, error: (error as Error).message }),

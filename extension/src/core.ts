@@ -5,6 +5,20 @@ export const MAX_BACKLOG_FRAMES = SAMPLE_RATE * 5;
 export const PART_FRAMES = SAMPLE_RATE * 60 * 30;
 export const MIC_FRESH_MS = 2000;
 export type Provider = 'meet' | 'zoom' | 'teams';
+/** Meeting sites and the optional host permissions that let Echo read and record them. */
+export const MEETING_SITES: { id: Provider; name: string; origins: string[] }[] = [
+  { id: 'meet', name: 'Google Meet', origins: ['https://meet.google.com/*'] },
+  { id: 'zoom', name: 'Zoom Web', origins: ['https://*.zoom.us/*', 'https://app.zoom.com/*'] },
+  {
+    id: 'teams',
+    name: 'Microsoft Teams Web',
+    origins: [
+      'https://teams.microsoft.com/*',
+      'https://teams.live.com/*',
+      'https://teams.cloud.microsoft/*',
+    ],
+  },
+];
 export type CaptureState = 'idle' | 'recording' | 'paused' | 'stopped' | 'interrupted';
 export type TransferState = 'saved-local' | 'transferring' | 'saved-echo' | 'attention';
 export const INTERRUPTION_DESCRIPTIONS = {

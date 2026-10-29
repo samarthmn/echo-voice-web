@@ -224,6 +224,7 @@ test('setup submits Cancel immediately while a state refresh is still waiting', 
         return view();
       }
       if (message.type === 'CONNECTION_STATUS') return { status: phase };
+      if (message.type === 'CONNECT_REQUEST') return undefined;
       if (hold) await hold;
       return {
         settings: { enabledProviders: [], micGranted: false },

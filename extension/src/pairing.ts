@@ -179,26 +179,47 @@ async function linkedTo(link: Extract<Link, { state: 'connected' }>, endpoint?: 
  * Echo's single-use approval for a connection Echo started, so no approval tab opens.
  * An Echo-started connection replaces a link to a different Echo (moved port, other library).
  */
-export function beginPairing(endpoint?: string, intent?: string): Promise<PairingView> {
+export function beginPairing(
+  endpoint?: string,
+  intent?: string,
+  replace = false,
+): Promise<PairingView> {
   return connectionAction(async () => {
     notice = undefined;
     let link = await readLink();
     const previous = link.state === 'connected' ? link : undefined;
-    if (previous && (!intent || (await linkedTo(previous, endpoint)))) return view(previous);
+    if (previous && ((!intent && !replace) || (await linkedTo(previous, endpoint))))
+      return view(previous);
     const reusable =
       link.state === 'waiting' &&
       !expired(link) &&
       !intent &&
       (!endpoint || link.endpoint === endpoint);
+    const selectedEndpoint = async () => {
+      if (replace && endpoint) {
+        if (!(await hello(endpoint)))
+          throw new Error('The requested Echo is unavailable. Try again.');
+        return endpoint;
+      }
+      return discover(endpoint);
+    };
     if (!reusable) {
-      link = newRequest(await discover(endpoint));
+      link = newRequest(await selectedEndpoint());
       // Persist before POST so a lost reply retries with the same installation and secret.
       await saveLink(link);
     }
-    const waiting = await reserved(link as Waiting, intent);
+    let waiting = await reserved(link as Waiting, intent);
+    // An expired or rejected intent requires a fresh extension-initiated approval.
+    if (!waiting && intent) {
+      link = newRequest(await selectedEndpoint());
+      await saveLink(link);
+      waiting = await reserved(link as Waiting);
+      intent = undefined;
+    }
     if (!waiting) return view({ state: 'none' });
     if (!intent) await showApprovalTab(waiting);
     const result = await claim(waiting);
+    if (intent && result.phase === 'waiting') await showApprovalTab(waiting);
     // Best effort: the replaced Echo stops listing this browser if it is still running.
     if (previous && result.phase === 'connected') void forgetRemote(previous);
     return result;
@@ -247,4 +268,29 @@ export function cancelPairing(): Promise<PairingView> {
     }
     return cancelled;
   });
+}
+
+type ConnectRequest = { id: string; endpoint: string; intent: string; receivedAt: number };
+export async function pendingConnect() {
+  const pending = (await chrome.storage.session.get('connectRequest')).connectRequest as
+    | ConnectRequest
+    | undefined;
+  if (!pending) return undefined;
+  const link = await readLink();
+  return {
+    id: pending.id,
+    endpoint: pending.endpoint,
+    previous: link.state === 'connected' ? link.endpoint : undefined,
+  };
+}
+export async function confirmConnect(id: string, previous?: string) {
+  const pending = (await chrome.storage.session.get('connectRequest')).connectRequest as
+    | ConnectRequest
+    | undefined;
+  const view = await pendingConnect();
+  if (!pending || !view || pending.id !== id || view.previous !== previous)
+    throw new Error('The connection request changed. Review it and try again.');
+  await chrome.storage.session.remove('connectRequest');
+  const intent = Date.now() - pending.receivedAt < 120_000 ? pending.intent : undefined;
+  return beginPairing(pending.endpoint, intent, true);
 }

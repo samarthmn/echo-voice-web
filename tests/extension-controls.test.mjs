@@ -468,6 +468,7 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
   let warning = '';
   let offline = true;
   let paired = true;
+  let pending = { id: 'request', endpoint: 'http://localhost:3222', previous: endpoint };
   const calls = [];
   const errors = [];
   const context = {
@@ -495,6 +496,12 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
   context.request = async (message) => {
     calls.push(message);
     if (message.type === 'CONNECTION_STATUS') return { status: paired ? 'echo-offline' : 'none' };
+    if (message.type === 'CONNECT_REQUEST') return pending;
+    if (message.type === 'CONNECT_CONFIRM') {
+      assert.equal(message.id, pending.id);
+      pending = undefined;
+      return {};
+    }
     if (message.type === 'DISCONNECT') {
       if (message.forgetLocally) {
         paired = false;
@@ -522,6 +529,17 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
     'export async function* exportParts(){};export async function recording(){}',
   );
   assert.match(element('connection').textContent, /Echo is offline/);
+  assert.equal(
+    element('connect-confirmation-title').textContent,
+    'Connect this browser to Echo at localhost:3222?',
+  );
+  assert.equal(
+    element('connect-replacement').textContent,
+    'This replaces your connection to 127.0.0.1:3111.',
+  );
+  element('confirm-connect').listeners.click();
+  await settle();
+  assert.ok(calls.some((message) => message.type === 'CONNECT_CONFIRM'));
   element('disconnect').listeners.click();
   assert.match(warning, /1 recording still need to upload/);
   assert.match(warning, /stay saved in this browser/);

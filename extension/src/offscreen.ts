@@ -17,6 +17,7 @@ import {
 } from './storage';
 import { transferPending } from './protocol';
 import { Settled, uploadScheduler } from './upload-scheduler';
+import { connectedPair } from './settings';
 type Capture = {
   id: string;
   title: string;
@@ -92,10 +93,11 @@ function publish(endedRecordingId?: string, force = false) {
 function uploadsSettled(state: Settled) {
   if (!active && !transition) toBackground({ type: 'UPLOADS_SETTLED', ...state });
 }
-const uploads = uploadScheduler(
-  () => transferPending(control, () => publish(undefined, true)),
-  uploadsSettled,
-);
+const uploads = uploadScheduler(async () => {
+  const result = await transferPending(control, () => publish(undefined, true));
+  const connected = result === 'idle' && active ? await connectedPair() : undefined;
+  return result === 'idle' && active && connected ? 'poll' : result;
+}, uploadsSettled);
 function microphoneFailure(error: unknown): string {
   const name = (error as { name?: string } | null)?.name;
   const retry = ' Or explicitly choose tab audio only before starting.';
@@ -138,6 +140,7 @@ async function fail(
   capture.failed = true;
   cleanup(capture);
   if (active === capture) active = undefined;
+  uploads.stopPolling();
   // The queue's own failure is what this reports; wait only for its in-flight commit.
   await capture.queue.catch(() => undefined);
   await updateRecording(capture.id, {
@@ -342,6 +345,7 @@ async function start(message: any) {
         );
     });
     publish();
+    uploads.request();
     return { recordingId: row.recordingId };
   } catch (error) {
     tab?.getTracks().forEach((track) => track.stop());
@@ -406,6 +410,7 @@ async function control(
           pauseMs: Math.max(0, Date.now() - capture.pausedAt),
         });
       active = undefined;
+      uploads.stopPolling();
       cleanup(capture);
       await updateRecording(id, {
         captureState: interrupted ? 'interrupted' : 'stopped',

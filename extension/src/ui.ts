@@ -12,15 +12,17 @@ export function element<T extends HTMLElement = HTMLElement>(id: string): T {
 export async function request(message: { type: string } & Record<string, unknown>): Promise<any> {
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok) throw new Error(response?.error ?? 'Echo extension did not respond.');
-  if (message.type === 'STATE') reloadIfStale(response.value?.build);
+  if (message.type === 'STATE') reloadIfStale(response.value?.build, !!response.value?.active);
   return response.value;
 }
 /**
  * After an in-place update the browser can keep running the previous service worker while
  * pages load the new code. Reload once per build so both sides match again.
  */
-function reloadIfStale(running: unknown) {
+function reloadIfStale(running: unknown, recording: boolean) {
   if (running === BUILD_ID) return;
+  // Reloading stops capture, so an update waits until the current recording ends.
+  if (recording) return;
   const key = 'echo-reloaded-for-build';
   if (localStorage.getItem(key) === BUILD_ID)
     throw new Error('Echo was updated. Reload it in your browser’s extensions page.');

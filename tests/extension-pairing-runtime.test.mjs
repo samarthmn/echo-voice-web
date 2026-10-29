@@ -142,7 +142,7 @@ test('401 on any authenticated call clears credential and records revoked state'
   await assert.rejects(h.api.jsonRequest(endpoint, '/recordings/a', {}, 'b'));
   assert.equal((await h.api.connectionStatus()).status, 'revoked');
 });
-test('ECHO messages require verified loopback sender origin; approval claims immediately; intent skips tab', async () => {
+test('ECHO messages require verified loopback sender origin; connect requires confirmation', async () => {
   const h = await harness();
   const sender = { origin: endpoint };
   const present = await h.api.externalMessage(
@@ -167,7 +167,10 @@ test('ECHO messages require verified loopback sender origin; approval claims imm
     (await h.api.externalMessage({ type: 'ECHO_CONNECT', intent: 'c'.repeat(64) }, sender)).ok,
     true,
   );
-  assert.equal(h.tabs.length, 0);
+  assert.equal(h.tabs.length, 1);
+  assert.equal((await h.api.readLink()).state, 'none');
+  const pending = await h.api.pendingConnect();
+  await h.api.confirmConnect(pending.id, pending.previous);
   assert.equal(
     JSON.parse(h.calls.filter(([url]) => url.endsWith('/pair')).at(-1)[1].body).intent,
     'c'.repeat(64),
@@ -184,7 +187,11 @@ test('Echo-initiated connect replaces a waiting request; approval from another E
     { type: 'ECHO_CONNECT', intent: 'd'.repeat(64) },
     sender,
   );
-  assert.equal(reply.ok, true);
+  assert.equal(reply.status, 'confirm-in-extension');
+  assert.equal((await h.api.readLink()).endpoint, endpoint);
+  assert.equal(h.calls.filter(([url]) => url.endsWith('/pair')).length, 1);
+  const pending = await h.api.pendingConnect();
+  await h.api.confirmConnect(pending.id, pending.previous);
   const pairs = h.calls
     .filter(([url]) => url.endsWith('/pair'))
     .map(([, options]) => JSON.parse(options.body));
@@ -252,7 +259,11 @@ test('an Echo-started connect from a moved Echo replaces the old link and forget
     { type: 'ECHO_CONNECT', intent: 'e'.repeat(64) },
     { origin: moved },
   );
-  assert.equal(result.ok, true);
+  assert.equal(result.status, 'confirm-in-extension');
+  assert.equal((await h.api.readLink()).endpoint, endpoint);
+  const pending = await h.api.pendingConnect();
+  assert.equal(pending.previous, endpoint);
+  await h.api.confirmConnect(pending.id, pending.previous);
   const link = await h.api.readLink();
   assert.equal(link.endpoint, moved);
   assert.equal(link.libraryId, otherLibrary);
