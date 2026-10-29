@@ -1,36 +1,109 @@
-# Set up and open Echo
+# Install and run
 
-**Development preview:** Echo is a locally served web app, with a browser extension for online meetings. Initial server setup currently requires the [source-build steps](development.md#build-and-start). There is no separate Echo desktop application. A Chrome Web Store listing has not been published; check the [readiness record](production-readiness-status.md) for tested builds and remaining work.
+Echo runs from a source checkout. There is no packaged installer.
 
-## Open the web app
+## Prerequisites
 
-If Echo is already running on your computer, open [http://localhost:3000](http://localhost:3000) in your existing Brave or Chrome browser. Use the same browser profile for the workspace and meeting extension. A different configured port or hostname must also be used when connecting the extension.
+| Tool                     | Notes                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Apple Silicon Mac        | `setup.sh` refuses to run elsewhere                                                                                                         |
+| Xcode command line tools | `xcode-select --install`                                                                                                                    |
+| Rust via rustup          | <https://rustup.rs>. `setup.sh` adds the `wasm32-unknown-unknown` target and installs the `wasm-bindgen-cli` version pinned in `Cargo.lock` |
+| Node.js 22 or newer      | Also needed at runtime for Whisper Large V3                                                                                                 |
+| pnpm                     | `corepack enable` or `brew install pnpm`                                                                                                    |
+| Ollama (optional)        | Local notes. See [integrations](integrations.md#local-notes-ollama)                                                                         |
 
-If the address cannot be reached, start the local server. The [developer guide](development.md) covers the one-time Rust/Node build setup and the build/start scripts. This preview does not provide installation without developer tools. Once started, the workspace is used through the browser; Echo does not host your library on a cloud service.
+## setup.sh
 
-Keep the server running for library access, transcription and recording transfers. Keep the workspace tab open during in-person capture and browser transcription. Closing the whole browser interrupts extension recording; closing only the popup does not. An initialized extension can record with the server stopped and transfer when it returns.
+```bash
+./scripts/setup.sh
+./scripts/setup.sh --build-only   # skip tool installs; rebuild outputs only
+```
 
-## First use
+It checks the prerequisites, then:
 
-1. Save the library recovery phrase in **Settings → Storage**.
-2. Try the [short in-person recording](../README.md#record-your-first-conversation), then play it back.
-3. Follow **First transcript** on Overview. It checks the selected model and links to its download or your saved recording. Download the model deliberately, then create the transcript.
-4. For online calls, [install and set up the extension](browser-extension.md). It records from the existing meeting tab and needs its own saved recovery phrase.
+1. adds the wasm Rust target, runs `pnpm install --frozen-lockfile`, and installs `wasm-bindgen-cli` if the version does not match (skipped with `--build-only`);
+2. warns if the pinned Codex 0.160.0 helper is missing (ChatGPT notes are then unavailable);
+3. builds browser assets (`pnpm build:assets`) and the extension (`pnpm build:extension`, output `extension/dist`);
+4. builds the Dioxus app to wasm and runs `wasm-bindgen` into `public/assets`;
+5. generates the asset manifest and builds the release server (`target/release/echo-server`).
 
-Google Calendar and notes providers are optional. Turbo runs in the browser; the full Large V3 model requires the separate [native speech setup](native-speech.md).
+It prints the URL to open when it finishes. It never downloads speech or Ollama models.
 
-## Existing library
+## start.sh
 
-Keep a backup and stop the old server before copying a library. The default library is `.echo-data` inside the project; **Settings → Storage** shows the actual path. Copy the whole folder to a separate location and point the new server's `dataDir` or `ECHO_DATA_DIR` at that copy. Keep the original until meetings, audio and saved versions work. See [storage and recovery](storage-and-recovery.md) for encrypted backups, locked keys and migration checks. Never use two servers against one library or remove locks to bypass an active process.
+```bash
+./scripts/start.sh
+```
 
-## Updates
+Verifies the build outputs exist, checks that the port is free, and runs `target/release/echo-server` in the foreground. Press Ctrl+C to stop. The server only binds loopback addresses.
 
-Follow [web updates and recovery](update-recovery.md): back up, finish recording and processing, stop the server, update/rebuild, then start it with the intended data directory. No automatic application update or pre-update snapshot is provided.
+## Configuration
 
-Extension updates are separate. Reloading an unpacked extension can interrupt capture. Moving from the development identity to a store identity creates a different browser installation: finish transfers or exports, install and pair the new extension, and verify the destination before removing the old one.
+`echo.config.json` in the repo root:
 
-## Remove Echo
+| Key                 | Default          | Meaning                                                                                                |
+| ------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `bind`              | `127.0.0.1:3000` | Listen address. Must be a loopback IP and port                                                         |
+| `dataDir`           | `.echo-data`     | Library folder. Relative paths resolve against the repo (resource root)                                |
+| `codexBinary`       | `null`           | Path to the Codex 0.160.0 executable. Relative paths resolve against the repo                          |
+| `googleRedirectUri` | derived          | Optional. Overrides the Google OAuth redirect URI, see [integrations](integrations.md#google-calendar) |
 
-Stop the server and finish or export pending extension recordings first. Back up the library outside the project folder before deleting a checkout: the default `.echo-data` folder is inside it. Removing the source folder can otherwise delete your recordings. Custom data directories remain until separately removed.
+Unknown keys are rejected, except a retired `runner` key, which is ignored. Edit the file and restart.
 
-Uninstalling the extension or deleting its browser profile can erase pending audio. A recovery phrase can unlock existing data; it cannot recreate deleted files.
+Environment overrides:
+
+| Variable             | Effect                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| `ECHO_BIND`          | Overrides `bind` (also read by the scripts)                                              |
+| `ECHO_DATA_DIR`      | Overrides `dataDir`                                                                      |
+| `ECHO_RESOURCE_ROOT` | Folder that contains `public/`. Normally found automatically from the binary or the repo |
+| `ECHO_CONFIG_FILE`   | Use another config file instead of `echo.config.json`                                    |
+| `ECHO_CODEX_BIN`     | Overrides `codexBinary`                                                                  |
+
+`.env` in the repo root is loaded at start and only holds the optional Google OAuth client (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). Copy `.env.example` to start.
+
+If you change the port, the extension finds Echo automatically only on ports 3000 to 3005; otherwise open Echo in the browser once (it announces itself to the extension) or set the address under **Advanced** in the extension Setup page.
+
+## Auto-start at login
+
+```bash
+./scripts/install-service.sh            # install and start the launchd agent
+./scripts/install-service.sh --dry-run  # print the plist only
+./scripts/uninstall-service.sh
+```
+
+The agent is `dev.echo-voice.server` (`~/Library/LaunchAgents/dev.echo-voice.server.plist`). It runs `target/release/echo-server` from the repo, restarts it if it exits with an error, and logs to `~/Library/Logs/Echo Voice/server.log`. Run `setup.sh` first. After a rebuild, macOS may ask again to allow Keychain access for the new binary; allow it, or the library stays locked. Restart the agent after rebuilding:
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/dev.echo-voice.server"
+```
+
+## Updating
+
+1. Finish recordings and let the extension upload pending audio.
+2. Export a backup (**Settings → Storage → Export library**, see [storage](storage-and-recovery.md)).
+3. Stop the server (Ctrl+C, or `uninstall-service.sh` / `launchctl bootout` if running as a service).
+4. `git pull && ./scripts/setup.sh`
+5. Start it again. If the extension changed, rebuild is already done by `setup.sh`; reload it at `brave://extensions` or `chrome://extensions`.
+
+The server refuses to open a library written by a newer version and does not downgrade a migrated library.
+
+## Uninstalling
+
+1. Export a backup if you want to keep the recordings. The default `.echo-data` folder is inside the checkout.
+2. `./scripts/uninstall-service.sh` if you installed the agent.
+3. Remove the extension in the browser. This deletes recordings it has not yet uploaded.
+4. Delete the checkout. The library key stays in Keychain; remove it with Keychain Access if you want it gone.
+
+## Troubleshooting
+
+| Symptom                          | Fix                                                                                                                                                                                              |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "Port N is in use"               | `lsof -nP -iTCP:<port> -sTCP:LISTEN` to find the process, or set `ECHO_BIND=127.0.0.1:<other>`                                                                                                   |
+| "Build outputs missing"          | Run `./scripts/setup.sh`                                                                                                                                                                         |
+| Library locked / key unavailable | Unlock the login keychain and allow Echo's Keychain prompt, then restart. If the key is gone, [recover with the phrase](storage-and-recovery.md#recovering-a-library)                            |
+| Speech model not ready           | Download it under **Models → Speech models**. Needs internet once                                                                                                                                |
+| Large V3 unavailable             | Needs Node.js 22+ on the server's `PATH` and the dependencies from `pnpm install`. Under launchd, `install-service.sh` records Node's folder in the agent's `PATH`; rerun it after changing Node |
+| ChatGPT helper missing           | `setup.sh` printed a warning. Run `pnpm install`, or set `codexBinary`                                                                                                                           |
+| Extension will not connect       | Make sure the server is running, then use **Connect to Echo**. See [extension troubleshooting](extension.md#troubleshooting)                                                                     |

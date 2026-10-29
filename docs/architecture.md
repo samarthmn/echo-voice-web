@@ -1,37 +1,79 @@
-# Echo Voice web architecture
+# Architecture
 
-## Intent
-A single-user meeting workspace with local storage, local speech recognition, and a responsive interface. The browser extension records existing meeting tabs; the workspace also supports in-person recording and file uploads. Ollama is the default notes provider. Optional ChatGPT notes require an explicit provider choice and consent for each generation; there is no cloud database.
+## Components
 
-## Chosen approach
-Dioxus 0.7 Rust/WebAssembly components, a Rust Axum same-origin REST server, and SQLCipher stores metadata; authenticated encrypted local files store recording chunks. Browser MediaRecorder records room audio. Transformers.js in a web worker downloads Turbo and speaker models into browser Cache Storage and executes locally with WASM. Full Large V3 runs in a server-supervised Node.js CPU helper using the pinned native ONNX checkpoint; its model cache stays in the managed model cache. Notes use either loopback-only Ollama or the explicitly selected ChatGPT connection. Calendar uses Google for read-only event access; audio/transcripts are not sent to Google for inference. The Manifest V3 extension owns durable encrypted PCM recording in IndexedDB and authenticated transfer to an isolated extension router. Meet, Zoom Web and Teams Web adapters fail closed for microphone inclusion. Actual compatibility remains separately qualified.
+```mermaid
+flowchart LR
+  subgraph Browser
+    UI["Echo web app (Dioxus wasm)"]
+    W["web/*.js: recorder, transformers.js worker (Turbo, speaker models)"]
+    EXT["Extension: service worker, offscreen audio, IndexedDB journal"]
+  end
+  subgraph "Mac (loopback only)"
+    S["echo-server (Axum)"]
+    DB[("SQLCipher + encrypted audio, .echo-data")]
+    KC[("Keychain: library key")]
+    N["Node: native Large V3"]
+    C["Codex 0.160.0 helper"]
+  end
+  UI --> W
+  UI -->|"/api"| S
+  EXT -->|"/extension/v1"| S
+  S --> DB
+  S --> KC
+  S --> N
+  S --> C
+  S -->|"loopback"| O["Ollama"]
+  C -->|"transcript text"| OAI["OpenAI (optional)"]
+  S -->|"read-only"| G["Google Calendar (optional)"]
+```
 
-The ChatGPT path uses the official Codex CLI 0.160.0 app-server over stdio. The helper manages ChatGPT OAuth and uses an eligible plan's Codex allowance, not a general ChatGPT token pool or OpenAI API credits. Source builds declare the pinned helper as an optional npm dependency. `scripts/package.mjs` includes the Linux x64 native helper and license when available. See [ChatGPT setup](chatgpt.md) for executable discovery and compatibility requirements.
+## Request flow
 
-The extension uses the user's existing meeting session, with no autonomous bot, Docker runtime, separate browser profile or cookie transfer. The local Echo server owns the library and coordinates final processing; the extension owns offline recording recovery.
+The server (`server/src/main.rs`) serves the static `public/` folder and two route trees on a loopback address. `/api` is for the same-origin web app and passes the `local_access` middleware (Host and Origin checks, no-store). `/extension/v1` is for the extension and has its own middleware (loopback Host, `chrome-extension://` Origin, bearer credentials, CORS for that origin only). All responses get no-cache, nosniff, frame-deny and no-referrer headers. The web app calls `/api` for data and runs speech models in the browser, except Large V3, which it hands to the server as a native job.
 
-## Interfaces and ownership
-JSON REST objects are the shared contract. `server/src/store.rs` owns SQLite and file storage. `/api/meetings` manages records, uploads, transcript and notes history, moments and exports. `/api/settings`, `/api/vocabulary`, `/api/storage` manage the workspace. `/api/integrations` owns optional read-only Calendar. `/extension/v1` is a separate scoped authenticated router; `/api/extensions` is same-origin pairing, live processing and control management. Normal `/api` protections remain unchanged. `server/src/notes.rs` dispatches `/api/notes` generation to the requested provider, validates passage evidence, and stores the producing provider/model plus token counts when reported. `server/src/chatgpt.rs` owns helper lifecycle, account/model status, and cloud generation. The extension offscreen document/AudioWorklet owns capture; the Echo workspace worker owns optional warm ASR-only live text and final speech recognition. Fenced leases separate multiple processing tabs and final processing preempts live drafts. Components render a warm white canvas, dark ink typography, indigo accents, consistent Lucide icons, quiet transitions, and responsive navigation.
+## Server modules (`server/src/`)
 
-Overview’s first-transcript guide is presentation-only. It checks the browser’s microphone capability and permission, the selected model’s complete current cache manifest, and optional local-notes availability. It never requests capture, downloads a model or changes a saved model choice automatically. Recording stays available without speech models, notes or Calendar; the guide disappears after the first saved transcript.
+| Module                                       | Role                                                                                                                                                                                              |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.rs`                                    | Startup, router, `--recover-library` and `--check-library`, graceful shutdown                                                                                                                     |
+| `config.rs`, `paths.rs`                      | `echo.config.json`, env overrides, resource root, data and runtime dirs                                                                                                                           |
+| `security.rs`                                | Local-access and browser-isolation middleware, `ApiError`                                                                                                                                         |
+| `protected_storage.rs`                       | Keychain-held library key, authenticated files                                                                                                                                                    |
+| `store/`                                     | `mod.rs` (database open, lock, migrations), `meetings.rs`, `audio.rs`, `settings.rs`, `vocabulary.rs`, `library_io.rs` (export/import), `validation.rs`                                           |
+| `library_schema.rs`, `library_validation.rs` | Format fence and offline library check                                                                                                                                                            |
+| `recovery.rs`                                | Recovery phrase, encrypted backups, `--recover-library`                                                                                                                                           |
+| `extensions/`                                | `mod.rs` (routes, auth, connections), `pairing.rs` (v2 pairing, intents), `recordings.rs` (chunk ingest), `live.rs` (live text), `workspace.rs` (`/api/extensions/*`), `vault.rs` (legacy escrow) |
+| `speech.rs`, `speech_spool.rs`               | Native Large V3 jobs and encrypted PCM spool                                                                                                                                                      |
+| `notes.rs`                                   | Ollama and ChatGPT notes generation                                                                                                                                                               |
+| `chatgpt.rs`, `chatgpt_runtime.rs`           | Codex app-server bridge, encrypted sparse-image home                                                                                                                                              |
+| `integrations.rs`, `google_oauth.rs`         | Google Calendar and its OAuth flow                                                                                                                                                                |
+| `api.rs`                                     | Meetings, settings, storage and other workspace routes                                                                                                                                            |
 
-## Reliability and privacy
-Save periodic audio chunks independently of speech processing. Preserve earlier transcript and notes versions on edits/regeneration/failure. In-person recording records recover as interrupted after server restart. An extension recording continues locally while Echo is unavailable and resumes transfer when Echo returns; browser restart instead recovers its committed prefix as interrupted, without automatically restarting capture. Consent is required before recording. Keep recording controls mounted while navigating. Source loss stops capture with a specific error and preserves saved audio. Constrain mutation origins and local provider URLs, validate payloads, bound uploads, and keep per-user OAuth tokens and publisher parameters out of browser URLs, frontend state and logs. Deletion confirms scope. Backups copy supported web-format data; legacy desktop compatibility is not claimed.
+## Other code
 
-ChatGPT generation separately requires explicit cloud consent before sending the whole active transcript, including speaker labels, in bounded excerpts. Highlight filters do not change that scope. Audio remains local. Notes providers and billing methods never fall back automatically; allowance or provider failures preserve existing notes.
+- `app/src/`: Dioxus UI (`main.rs`, `settings.rs`, `models.rs`, `calendar.rs`, `extension.rs`, `chatgpt.rs`, `privacy.rs`, `review.rs`, `onboarding.rs`, `api.rs`, `ui.rs`).
+- `web/`: browser JS bridges: recorder, `inference*.js` and `models.js` (speech and speaker models), `diarization.js`, `native-speech.js`, `extension-*.js` (extension connection, approval dialog, live text, import).
+- `scripts/native-speech.mjs`: the Node helper for Large V3.
+- `extension/src/` (below).
 
-Echo isolates helper credentials in the OS keyring and gives its SQLite/log files protected storage: a native encrypted macOS image or a verified private Linux tmpfs. Legacy files are migrated recoverably; active retired capture blocks migration before source data is changed. The native speech helper receives an encrypted per-job spool and a memory-only key through owned stdin, with no plaintext PCM/request files. Optional helpers fail closed if protected storage is unavailable. Portable backups exclude credentials.
+## Extension modules (`extension/src/`)
 
-The browser extension uses per-recording AES-GCM keys wrapped with P-256 ECDH/HKDF under its public vault identity. Private identity exists only in trusted browser session storage and encrypted recovery/server envelopes. Saved history unlocks from scoped authorized Echo or the saved 24-word phrase; offline new capture can use only public material. Metadata authentication binds recording/library ownership and receipts. The server authenticates and hashes complete imported audio before allowing local-copy removal. Unencrypted counters/status do not authorize transfer.
+| Module                                                                               | Role                                                                     |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `background.ts`                                                                      | Service worker: message routing, migration, upload scheduling            |
+| `popup.ts`, `setup.ts`, `ui.ts`, `connection-card.ts`, `status-labels.ts`            | Popup and Setup pages                                                    |
+| `pairing.ts`, `connection.ts`, `discovery.ts`, `external-messages.ts`, `protocol.ts` | Pairing, link state, finding Echo, messages from Echo pages, HTTP client |
+| `settings.ts`                                                                        | Sealed link state and settings                                           |
+| `content.ts`, `adapters.ts`, `compatibility.ts`                                      | Meeting-page observer and mute-state adapters (Meet, Zoom, Teams)        |
+| `offscreen.ts`, `audio.ts`, `worklet.ts`, `recording-lock.ts`                        | Tab/mic capture, resampling to 16 kHz PCM, single-recording lock         |
+| `storage.ts`, `encryption.ts`, `device-secrets.ts`, `vault-db.ts`, `legacy-vault.ts` | Encrypted IndexedDB journal, device key, migration of older recordings   |
+| `library-actions.ts`                                                                 | Upload, export and delete of local recordings                            |
 
-The library key is held in macOS Keychain or Linux Secret Service. Its recovery phrase wraps it with authenticated encryption. SQLCipher protects database/WAL content; audio encryption supports authenticated range reads. Portable backups are encrypted and include a recovery envelope; exported WAV/text are intentionally readable. Source migration, helper state, key recovery and tamper handling are release-review boundaries, not just cryptographic primitive claims.
+## Recording data flow
 
-The local web server starts from the checkout with an explicit configured library path, defaulting to `.echo-data`. The database stores schema/minimum-reader metadata; startup validates it before writes. Protected backup export/import and private recovery/validation commands remain available. Source updates require a deliberate backup and restart; they do not create snapshots or roll back library data automatically. See [update recovery](update-recovery.md).
-
-## Qualification boundaries
-ChatGPT integration has fixture-based verification only so far; live OAuth, account eligibility, model access/generation, and account usage have not been tested here. The app-server protocol includes version-sensitive experimental surfaces and is pinned to Codex 0.160.0. Real Google OAuth needs user credentials and browser consent. The browser extension needs explicit permissions, user-started recording, reliable provider mute observations and live platform compatibility checks. Model downloads require access to model hosts. Browser inference speed varies. Speaker diarization, acoustic echo cancellation, seamless microphone switching, and destructive passage/audio redaction must not be presented as verified when unavailable. See [feature coverage](feature-coverage.md), [ChatGPT qualification](chatgpt.md#verification-boundary-and-official-references), and the [verification record](verification.md).
-
-Calendar uses a configured Google Web application client, PKCE S256 and a fixed same-origin callback. Its client ID and secret are private server configuration; per-user grants remain encrypted in the library. See [Calendar configuration](integrations.md).
-
-## Verification
-Test storage/version isolation, mutation protection, path traversal and URL validation, bad uploads, failed provider calls, calendar state, recording recovery. `npm test` includes ChatGPT app-server protocol fixtures alongside inference, recorder, and REST checks. Build and typecheck. Use Playwright against real REST endpoints for first-use, import, search, edit, bookmark, notes provenance, exports, settings, mobile layout and keyboard navigation. Exercise capture with browser fake audio if available. Keep unsupported external prerequisites visible.
+1. The popup asks the service worker to start; `tabCapture` (plus optional microphone) feeds the offscreen document, which resamples to mono 16 kHz PCM16 and gates the microphone on the content script's mute state.
+2. About one-second chunks are encrypted with the recording's key and committed to the IndexedDB journal.
+3. When connected and Echo answers `/hello`, chunks are `PUT` to `/extension/v1/recordings/{id}/chunks/{sequence}` and finished with `complete`. The server stores them encrypted under `extension-pcm/` and creates the meeting. The extension drops its copy once the import is confirmed.
+4. In Echo, the meeting's audio is processed: Turbo in the browser or Large V3 through the server, plus speaker grouping, producing a transcript version stored in the library.
+5. Notes are generated from a transcript version by Ollama or, on confirmation, ChatGPT, and saved as a notes version.
