@@ -334,7 +334,7 @@ pub(super) async fn chunk(
         r["totalFrames"] = json!(total);
         save_recording(&tx, &r)?;
         let mut meeting = store::require_meeting(&tx, r["meetingId"].as_str().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?)?;
-        meeting["duration"] = json!(total as f64 / RATE as f64);
+        meeting["duration"] = json!(frame_seconds(total));
         meeting["extensionRecording"]["totalFrames"] = json!(total);
         store::save(&tx, &mut meeting)?;
         let lib = library(&tx)?;
@@ -342,22 +342,29 @@ pub(super) async fn chunk(
         Ok(reply(extension_recording(r, &lib)?))
     }).await
 }
-pub(super) fn wav_header(frames: u64) -> Vec<u8> {
-    let len = (frames * 2) as u32;
+pub(super) fn wav_header(frames: u64) -> Result<Vec<u8>> {
+    let len = frames
+        .checked_mul(2)
+        .and_then(|bytes| u32::try_from(bytes).ok())
+        .ok_or_else(|| ApiError::bad("WAV audio size exceeds the supported range."))?;
+    let riff_len = len
+        .checked_add(36)
+        .ok_or_else(|| ApiError::bad("WAV audio size exceeds the supported range."))?;
+    let rate = u32::try_from(RATE).map_err(|_| ApiError::bad("Unsupported WAV sample rate."))?;
     let mut b = Vec::with_capacity(44);
     b.extend(b"RIFF");
-    b.extend((36 + len).to_le_bytes());
+    b.extend(riff_len.to_le_bytes());
     b.extend(b"WAVEfmt ");
     b.extend(16u32.to_le_bytes());
     b.extend(1u16.to_le_bytes());
     b.extend(1u16.to_le_bytes());
-    b.extend((RATE as u32).to_le_bytes());
-    b.extend((RATE as u32 * 2).to_le_bytes());
+    b.extend(rate.to_le_bytes());
+    b.extend((rate * 2).to_le_bytes());
     b.extend(2u16.to_le_bytes());
     b.extend(16u16.to_le_bytes());
     b.extend(b"data");
     b.extend(len.to_le_bytes());
-    b
+    Ok(b)
 }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -448,15 +455,16 @@ pub(super) async fn complete(
         let mut chunk_offset = 0usize;
         for part in 0..part_count {
             let frames = PART_FRAMES.min(input.total_frames - part * PART_FRAMES);
-            let mut wav = wav_header(frames);
-            while wav.len() < 44 + (frames * 2) as usize {
+            let mut wav = wav_header(frames)?;
+            let wav_bytes = 44 + pcm_bytes(frames)?;
+            while wav.len() < wav_bytes {
                 if chunk_offset >= remaining_chunk.len() {
                     let row = &rows[row_idx];
                     remaining_chunk = read_chunk(&chunk_path(&id, &row.3)?, row.1, &row.2)?;
                     chunk_offset = 0;
                     row_idx += 1;
                 }
-                let n = (44 + (frames * 2) as usize - wav.len())
+                let n = (wav_bytes - wav.len())
                     .min(remaining_chunk.len() - chunk_offset);
                 wav.extend_from_slice(&remaining_chunk[chunk_offset..chunk_offset + n]);
                 chunk_offset += n;
@@ -492,8 +500,8 @@ pub(super) async fn complete(
             "saved"
         });
         meeting.as_object_mut().ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?.remove("error");
-        meeting["duration"] = json!(input.total_frames as f64 / RATE as f64);
-        meeting["gaps"]=json!(input.gaps.iter().map(|g|json!({"start":g.at_frame as f64/RATE as f64,"end":g.at_frame as f64/RATE as f64,"reason":format!("Recording paused for {} ms",g.pause_ms)})).collect::<Vec<_>>());
+        meeting["duration"] = json!(frame_seconds(input.total_frames));
+        meeting["gaps"]=json!(input.gaps.iter().map(|g|json!({"start":frame_seconds(g.at_frame),"end":frame_seconds(g.at_frame),"reason":format!("Recording paused for {} ms",g.pause_ms)})).collect::<Vec<_>>());
         store::validate_meeting(&meeting)?;
         store::save(&tx, &mut meeting)?;
         r["status"] = json!("complete");

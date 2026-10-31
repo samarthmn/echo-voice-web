@@ -22,7 +22,7 @@ fn payload(value: Payload) -> ApiResult<Value> {
 }
 
 /// Register meeting, vocabulary, settings, backup, and audio endpoints with size limits.
-pub fn routes() -> Router {
+pub(crate) fn routes() -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/meetings", get(list).post(create))
@@ -94,7 +94,7 @@ async fn read(Path(id): Path<String>) -> ApiResult<Json<Value>> {
 /// Apply an allowlisted meeting patch through the store.
 async fn update(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(
-        blocking(move || store::update_meeting(&id, payload(value)?)).await?,
+        blocking(move || store::update_meeting(&id, &payload(value)?)).await?,
     ))
 }
 /// Restore only restarted status markers claimed by still-running browser jobs.
@@ -145,7 +145,7 @@ async fn edit_moment(
     value: Payload,
 ) -> ApiResult<Json<Value>> {
     Ok(Json(
-        blocking(move || store::update_moment(&id, &moment, payload(value)?)).await?,
+        blocking(move || store::update_moment(&id, &moment, &payload(value)?)).await?,
     ))
 }
 /// Delete one bookmark without changing other saved history.
@@ -180,7 +180,7 @@ async fn new_vocabulary(value: Payload) -> ApiResult<(StatusCode, Json<Value>)> 
 /// Update a term and its aliases through the store.
 async fn edit_vocabulary(Path(id): Path<String>, value: Payload) -> ApiResult<Json<Value>> {
     Ok(Json(
-        blocking(move || store::update_vocabulary(&id, payload(value)?)).await?,
+        blocking(move || store::update_vocabulary(&id, &payload(value)?)).await?,
     ))
 }
 /// Delete a vocabulary entry and acknowledge completion.
@@ -194,7 +194,7 @@ async fn storage() -> ApiResult<Json<Value>> {
 }
 /// Download a portable library backup that excludes integration credentials.
 async fn backup() -> ApiResult<Response> {
-    let backup = blocking(|| crate::recovery::encrypt_backup(store::export_library()?)).await?;
+    let backup = blocking(|| crate::recovery::encrypt_backup(&store::export_library()?)).await?;
     download(
         serde_json::to_string(&backup)?,
         "application/json",
@@ -224,7 +224,7 @@ async fn restore(value: Payload) -> ApiResult<Json<Value>> {
         } else {
             value
         };
-        Ok(Json(store::import_library(backup)?))
+        Ok(Json(store::import_library(&backup)?))
     })
     .await
 }
@@ -234,7 +234,7 @@ async fn export(
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
     let (body, mime, filename) = blocking(move || {
-        store::export_meeting(&id, query.get("format").map(String::as_str).unwrap_or("md"))
+        store::export_meeting(&id, query.get("format").map_or("md", String::as_str))
     })
     .await?;
     download(body, mime, &filename)
@@ -305,10 +305,10 @@ async fn upload(
                 "label" => label = Some(text),
                 "mimeType" => mime = Some(text),
                 "sequence" | "chunkIndex" => {
-                    sequence = Some(
-                        text.parse::<i64>()
-                            .map_err(|_| ApiError::bad("The audio sequence must be an integer."))?,
-                    )
+                    sequence =
+                        Some(text.parse::<i64>().map_err(|_| {
+                            ApiError::bad("The audio sequence must be an integer.")
+                        })?);
                 }
                 _ => {
                     return Err(ApiError::bad(
@@ -395,7 +395,7 @@ async fn audio(
             let mut response = e.into_response();
             response.headers_mut().insert(
                 header::CONTENT_RANGE,
-                axum::http::HeaderValue::from_str(&format!("bytes */{total}"))
+                http::HeaderValue::from_str(&format!("bytes */{total}"))
                     .map_err(|_| ApiError::new(500, "Invalid audio range."))?,
             );
             return Ok(response);

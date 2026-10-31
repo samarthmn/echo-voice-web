@@ -32,8 +32,8 @@ const MODEL: &str = "onnx-community/whisper-large-v3";
 const CHECKPOINT: &str = "Xenova/whisper-large-v3";
 const REVISION: &str = "67bf02d92b7754a1ff82a7f8545f8b8c378b2ef0";
 const WEIGHTS: [(&str, u64); 2] = [
-    ("encoder_model_quantized.onnx", 645260435),
-    ("decoder_model_merged_quantized.onnx", 915059840),
+    ("encoder_model_quantized.onnx", 645_260_435),
+    ("decoder_model_merged_quantized.onnx", 915_059_840),
 ];
 const MODEL_JSON: [&str; 5] = [
     "config.json",
@@ -91,7 +91,7 @@ fn is_cancelled(receiver: &watch::Receiver<bool>) -> bool {
 }
 
 /// Register bounded native job, readiness, cancellation and model-removal endpoints.
-pub fn routes() -> Router {
+pub(crate) fn routes() -> Router {
     Router::new()
         .route("/speech", get(status))
         .route("/speech/jobs", post(start))
@@ -255,7 +255,7 @@ async fn reserve(owner: &Manager, id: &str, operation: &str) -> Result<watch::Re
     let mut state = owner.state.lock().await;
     state
         .cancelled
-        .retain(|(_, at)| at.elapsed() < Duration::from_secs(600));
+        .retain(|(_, at)| at.elapsed() < Duration::from_mins(10));
     if state.cancelled.iter().any(|(cancelled, _)| cancelled == id) {
         return Err(cancelled_error());
     }
@@ -402,8 +402,8 @@ fn clean_namespace(project: &FsPath, data: &FsPath) -> Result<()> {
     }
     Ok(())
 }
-/// Recover only this library's abandoned PCM spools after store::init holds its exclusive lock.
-pub fn recover_spools() -> Result<()> {
+/// Recover only this library's abandoned PCM spools after `store::init` holds its exclusive lock.
+pub(crate) fn recover_spools() -> Result<()> {
     clean_namespace(&root()?, &store::data_dir()?)
 }
 async fn remove_spool(path: &FsPath) {
@@ -522,7 +522,7 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
         if input.operation == "transcribe" {
             let mut file = speech_spool::Writer::create(&audio).await?;
             let mut body = request.into_body().into_data_stream(); let mut bytes = 0usize;
-            while let Some(chunk) = tokio::select! { _ = cancellation.changed() => { return Err(cancelled_error()); }, value = timeout(Duration::from_secs(60), body.next()) => value.map_err(|_| ApiError::new(408,"The speech upload timed out. Retry the saved audio."))? } {
+            while let Some(chunk) = tokio::select! { _ = cancellation.changed() => { return Err(cancelled_error()); }, value = timeout(Duration::from_mins(1), body.next()) => value.map_err(|_| ApiError::new(408,"The speech upload timed out. Retry the saved audio."))? } {
                 let chunk = chunk.map_err(|_| ApiError::bad("The speech upload was interrupted. Retry the saved audio."))?;
                 bytes = bytes.checked_add(chunk.len()).ok_or_else(|| ApiError::new(413,"Native speech accepts recordings up to two hours."))?;
                 if bytes > MAX_PCM { return Err(ApiError::new(413,"Native speech accepts recordings up to two hours.")); }
@@ -533,7 +533,7 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
         } else {
             let body = tokio::select! {
                 _ = cancellation.changed() => return Err(cancelled_error()),
-                body = timeout(Duration::from_secs(60), axum::body::to_bytes(request.into_body(), 0)) => body.map_err(|_| ApiError::new(408,"The model request timed out. Retry the download."))?.map_err(|_|ApiError::bad("A model download does not accept an audio body."))?,
+                body = timeout(Duration::from_mins(1), axum::body::to_bytes(request.into_body(), 0)) => body.map_err(|_| ApiError::new(408,"The model request timed out. Retry the download."))?.map_err(|_|ApiError::bad("A model download does not accept an audio body."))?,
             };
             if !body.is_empty() { return Err(ApiError::bad("A model download does not accept an audio body.")); }
         }
@@ -623,7 +623,7 @@ fn result(value: &Value, operation: &str) -> Result<Value> {
     };
     let words = value["words"]
         .as_array()
-        .filter(|words| words.len() <= 200000)
+        .filter(|words| words.len() <= 200_000)
         .ok_or_else(|| ApiError::new(502, "Native speech returned invalid word timestamps."))?;
     for word in words {
         let text = word["text"]
@@ -745,7 +745,7 @@ async fn supervise_request(
     });
     update(owner, id, json!({"state":"running"})).await;
     let mut reader = BufReader::new(stdout);
-    let outcome=timeout(Duration::from_secs(7200),async {
+    let outcome=timeout(Duration::from_hours(2),async {
         loop {
             let next=tokio::select! { _=cancellation.changed()=>return Err(cancelled_error()), value=line(&mut reader)=>value? };
             let Some(bytes)=next else { break; };
@@ -775,12 +775,11 @@ async fn supervise_request(
         let _ = child.kill().await;
         let _ = child.wait().await;
     }
-    let tail = match timeout(Duration::from_secs(1), &mut diagnostics).await {
-        Ok(Ok(bytes)) => bytes,
-        _ => {
-            diagnostics.abort();
-            Vec::new()
-        }
+    let tail = if let Ok(Ok(bytes)) = timeout(Duration::from_secs(1), &mut diagnostics).await {
+        bytes
+    } else {
+        diagnostics.abort();
+        Vec::new()
     };
     if outcome.is_err() {
         if !tail.is_empty() {
@@ -832,7 +831,7 @@ async fn cancel(Path(id): Path<String>) -> Result<Json<Value>> {
     }
     state
         .cancelled
-        .retain(|(old, at)| old != &id && at.elapsed() < Duration::from_secs(600));
+        .retain(|(old, at)| old != &id && at.elapsed() < Duration::from_mins(10));
     state.cancelled.push_back((id.clone(), Instant::now()));
     while state.cancelled.len() > TOMBSTONES {
         state.cancelled.pop_front();
@@ -858,7 +857,7 @@ async fn remove_model() -> Result<Json<Value>> {
     Ok(Json(json!({"ok":true})))
 }
 /// Cancel owned helper and upload work before the HTTP server completes shutdown.
-pub async fn shutdown() {
+pub(crate) async fn shutdown() {
     let owner = manager();
     {
         let state = owner.state.lock().await;
@@ -1161,7 +1160,7 @@ mod tests {
                 folder.path().join("ready.json"),
                 serde_json::to_vec(marker).unwrap(),
             )
-            .unwrap()
+            .unwrap();
         };
         write(&marker);
         assert!(qualified(folder.path()));

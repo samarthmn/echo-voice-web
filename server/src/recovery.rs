@@ -364,7 +364,7 @@ async fn prepare() -> Result<Json<Value>> {
         .map_err(|_| failure())?;
     *pending = Some(Pending {
         id: id.clone(),
-        expires: Instant::now() + Duration::from_secs(600),
+        expires: Instant::now() + Duration::from_mins(10),
         recovery,
         words: indices
             .iter()
@@ -448,7 +448,7 @@ fn backup_context(id: &str, recovery: &Recovery) -> Result<Vec<u8>> {
         recovery
     ]))?)
 }
-pub(crate) fn encrypt_backup(plaintext: Value) -> Result<Value> {
+pub(crate) fn encrypt_backup(plaintext: &Value) -> Result<Value> {
     let recovery=read_recovery(&store::data_dir()?)?.ok_or_else(||ApiError::new(409,"Save and confirm your library recovery phrase in Settings → Storage before creating an encrypted backup."))?;
     let bytes = Zeroizing::new(serde_json::to_vec(&plaintext)?);
     if bytes.len() > MAX_BACKUP {
@@ -524,15 +524,15 @@ mod tests {
         let path = directory.path().join("chatgpt/auth.json");
         store::mkdir(path.parent().unwrap()).unwrap();
         store::write_protected(&path, b"legacy state").unwrap();
-        let encrypted = std::fs::read(&path).unwrap();
+        let encrypted = fs::read(&path).unwrap();
         store::reset_for_tests();
         for bytes in [encrypted, b"legacy plaintext".to_vec()] {
-            std::fs::write(&path, &bytes).unwrap();
+            fs::write(&path, &bytes).unwrap();
             recover_library(directory.path(), &phrase).unwrap();
             store::init().unwrap();
             crate::library_validation::verify().unwrap();
             store::reset_for_tests();
-            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            assert_eq!(fs::read(&path).unwrap(), bytes);
         }
         std::env::remove_var("ECHO_DATA_DIR");
     }

@@ -41,18 +41,18 @@ fn readable_date(value: &str) -> String {
     api::local_date_time(value)
 }
 /// Dispatch a browser-only UI action without waiting for a return value.
-fn js(source: String) {
-    let _ = document::eval(&source);
+fn js(source: &str) {
+    let _ = document::eval(source);
 }
 /// Move playback to a timestamp and optionally highlight its transcript passage.
 fn seek(time: f64, passage: Option<String>) {
-    js(format!(
+    js(&format!(
         "const a=document.getElementById('review-audio');if(a){{a.currentTime={};}}",
         time.max(0.)
     ));
     if let Some(id) = passage {
-        js("window.echoReviewFollow=false;const input=document.getElementById('review-transcript-search');if(input&&input.value){input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));}const filter=document.getElementById('review-highlight-filter');if(filter?.getAttribute('aria-pressed')==='true')filter.click();".into());
-        js(format!("let attempts=0;const reveal=()=>{{const p=document.getElementById({});if(p){{document.querySelectorAll('.review-passage-selected').forEach(x=>x.classList.remove('review-passage-selected'));p.classList.add('review-passage-selected');p.scrollIntoView({{behavior:'smooth',block:'center'}});p.focus({{preventScroll:true}});}}else if(attempts++<100){{document.getElementById('review-show-more')?.click();setTimeout(reveal,40);}}}};requestAnimationFrame(reveal)", json!(format!("passage-{id}"))));
+        js("window.echoReviewFollow=false;const input=document.getElementById('review-transcript-search');if(input&&input.value){input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));}const filter=document.getElementById('review-highlight-filter');if(filter?.getAttribute('aria-pressed')==='true')filter.click();");
+        js(&format!("let attempts=0;const reveal=()=>{{const p=document.getElementById({});if(p){{document.querySelectorAll('.review-passage-selected').forEach(x=>x.classList.remove('review-passage-selected'));p.classList.add('review-passage-selected');p.scrollIntoView({{behavior:'smooth',block:'center'}});p.focus({{preventScroll:true}});}}else if(attempts++<100){{document.getElementById('review-show-more')?.click();setTimeout(reveal,40);}}}};requestAnimationFrame(reveal)", json!(format!("passage-{id}"))));
     }
 }
 /// Persist transcript or notes edits while preserving active version and evidence references.
@@ -110,7 +110,7 @@ async fn save(
 fn audio_transcribe(v: &Value) {
     // The inference module publishes its own terminal event. Redispatching a
     // duplicate-request rejection would incorrectly finish an active UI job.
-    js(format!("if(window.echoInference){{window.echoInference.transcribeMeeting({},{}).catch(()=>{{}});}}else{{window.dispatchEvent(new CustomEvent('echo-transcription-error',{{detail:{{meetingId:{},error:'Speech processing is still loading. Please try again.'}}}}));}}",json!(text(v,"id")),json!(text(v,"speechModel")),json!(text(v,"id"))));
+    js(&format!("if(window.echoInference){{window.echoInference.transcribeMeeting({},{}).catch(()=>{{}});}}else{{window.dispatchEvent(new CustomEvent('echo-transcription-error',{{detail:{{meetingId:{},error:'Speech processing is still loading. Please try again.'}}}}));}}",json!(text(v,"id")),json!(text(v,"speechModel")),json!(text(v,"id"))));
 }
 
 #[component]
@@ -392,7 +392,7 @@ pub fn MeetingReview(
                         id: "review-keep-meeting",
                         kind: ButtonKind::Secondary,
                         disabled: busy(),
-                        onclick: move |_| js("document.getElementById('review-delete-dialog').close()".into()),
+                        onclick: move |_| js("document.getElementById('review-delete-dialog').close()"),
                         "Keep meeting"
                     }
                     button {
@@ -404,9 +404,7 @@ pub fn MeetingReview(
                             spawn(async move {
                                 match api::delete(&path).await {
                                     Ok(_) => {
-                                        js(
-                                            "document.getElementById('review-delete-dialog')?.close()".into(),
-                                        );
+                                        js("document.getElementById('review-delete-dialog')?.close()");
                                         notify.call("Meeting and its local files deleted.".into());
                                         on_back.call(());
                                     }
@@ -485,7 +483,7 @@ fn NotesPane(
             return;
         }
         let body = json!({"meetingId":text(&meeting(), "id"), "provider":"ollama"});
-        js(format!(
+        js(&format!(
             "window.dispatchEvent(new CustomEvent('echo-notes-request',{{detail:{body}}}))"
         ));
     };
@@ -948,8 +946,7 @@ fn TranscriptPane(
                             kind: ButtonKind::Ghost,
                             class: "review-follow",
                             onclick: move |_| js(
-                                "window.echoReviewFollow=true;document.querySelector('.review-passage-playing')?.scrollIntoView({behavior:'smooth',block:'center'})"
-                                    .into(),
+                                "window.echoReviewFollow=true;document.querySelector('.review-passage-playing')?.scrollIntoView({behavior:'smooth',block:'center'})",
                             ),
                             Icon { name: "volume", size: 14 }
                             "Follow playback"
@@ -963,11 +960,9 @@ fn TranscriptPane(
                 }
                 div {
                     class: "review-passages",
-                    onwheel: move |_| js("window.echoReviewFollow=false".into()),
-                    ontouchmove: move |_| js("window.echoReviewFollow=false".into()),
-                    onmouseup: move |_| js(
-                        "if(window.getSelection()?.toString())window.echoReviewFollow=false".into(),
-                    ),
+                    onwheel: move |_| js("window.echoReviewFollow=false"),
+                    ontouchmove: move |_| js("window.echoReviewFollow=false"),
+                    onmouseup: move |_| js("if(window.getSelection()?.toString())window.echoReviewFollow=false"),
                     for (index, passage) in shown.into_iter().enumerate() {
                         {
                             let pid = text(&passage, "id");
@@ -1017,8 +1012,7 @@ fn TranscriptPane(
                                                     speaker.set(rename_label.clone());
                                                     speaker_name.set(rename_label.clone());
                                                     js(
-                                                        "const dialog=document.getElementById('review-speaker-dialog');dialog.onclose=()=>document.getElementById('review-speaker-sample')?.pause();dialog.showModal();document.getElementById('review-speaker-name').focus()"
-                                                            .into(),
+                                                        "const dialog=document.getElementById('review-speaker-dialog');dialog.onclose=()=>document.getElementById('review-speaker-sample')?.pause();dialog.showModal();document.getElementById('review-speaker-name').focus()",
                                                     );
                                                 },
                                                 "{speaker_label}"
@@ -1102,7 +1096,7 @@ fn TranscriptPane(
                                                                     .call(
                                                                         "Select the text and use your browser’s Copy command."
                                                                             .into(),
-                                                                    )
+                                                                    );
                                                             }
                                                         }
                                                     });
@@ -1226,7 +1220,7 @@ fn TranscriptPane(
                                 )
                                 .await
                             {
-                                js("document.getElementById('review-speaker-dialog').close()".into());
+                                js("document.getElementById('review-speaker-dialog').close()");
                             }
                             busy.set(false);
                         });
@@ -1245,7 +1239,7 @@ fn TranscriptPane(
                         ActionButton {
                             button_type: "button",
                             kind: ButtonKind::Secondary,
-                            onclick: move |_| js("document.getElementById('review-speaker-dialog').close()".into()),
+                            onclick: move |_| js("document.getElementById('review-speaker-dialog').close()"),
                             "Cancel"
                         }
                         ActionButton {
@@ -1345,7 +1339,7 @@ fn SpeakerSamples(
                     aria_label: "Next speaker sample",
                     disabled: unavailable || samples.len() < 2,
                     onclick: move |_| {
-                        js("document.getElementById('review-speaker-sample')?.pause()".into());
+                        js("document.getElementById('review-speaker-sample')?.pause()");
                         index += 1;
                     },
                     "Next sample"
@@ -1426,11 +1420,11 @@ fn MomentsPane(
                                             button {
                                                 class: "review-timestamp",
                                                 onclick: move |_| {
-                                                    if !passage.is_empty() {
+                                                    if passage.is_empty() {
+                                                        seek(start, None);
+                                                    } else {
                                                         tab.set("transcript".into());
                                                         seek(start, Some(passage.clone()));
-                                                    } else {
-                                                        seek(start, None)
                                                     }
                                                 },
                                                 "{api::time(start)}"
@@ -1808,7 +1802,7 @@ fn DetailsPane(
                                                         kind: ButtonKind::Ghost,
                                                         disabled: locked,
                                                         onclick: move |_| {
-                                                            js("document.getElementById('review-audio')?.pause()".into());
+                                                            js("document.getElementById('review-audio')?.pause()");
                                                             let path = format!("/meetings/{}", text(&meeting(), "id"));
                                                             let body = json!({ active_id : vid });
                                                             busy.set(true);
@@ -1872,8 +1866,7 @@ fn DetailsPane(
                     class: "button review-delete-button",
                     disabled: locked,
                     onclick: move |_| js(
-                        "document.getElementById('review-delete-dialog').showModal();document.getElementById('review-keep-meeting').focus()"
-                            .into(),
+                        "document.getElementById('review-delete-dialog').showModal();document.getElementById('review-keep-meeting').focus()",
                     ),
                     Icon { name: "trash", size: 15 }
                     "Delete meeting"
@@ -1966,8 +1959,7 @@ fn AudioPlayer(
                         aria_label: "Back five seconds",
                         disabled: failed(),
                         onclick: move |_| js(
-                            "const a=document.getElementById('review-audio');if(a)a.currentTime=Math.max(0,a.currentTime-5)"
-                                .into(),
+                            "const a=document.getElementById('review-audio');if(a)a.currentTime=Math.max(0,a.currentTime-5)",
                         ),
                         Icon { name: "refresh", size: 20 }
                         span { "5" }
@@ -1977,8 +1969,7 @@ fn AudioPlayer(
                         aria_label: "Forward five seconds",
                         disabled: failed(),
                         onclick: move |_| js(
-                            "const a=document.getElementById('review-audio');if(a)a.currentTime=Math.min(a.duration||0,a.currentTime+5)"
-                                .into(),
+                            "const a=document.getElementById('review-audio');if(a)a.currentTime=Math.min(a.duration||0,a.currentTime+5)",
                         ),
                         Icon { name: "refresh", size: 20 }
                         span { "5" }
@@ -1994,7 +1985,7 @@ fn AudioPlayer(
                                 let next = event.value();
                                 if let Ok(rate) = next.parse::<f64>() {
                                     js(
-                                        format!(
+                                        &format!(
                                             "const a=document.getElementById('review-audio');if(a)a.playbackRate={rate}",
                                         ),
                                     );
@@ -2029,7 +2020,7 @@ fn AudioPlayer(
                 onerror: move |_| failed.set(true),
                 onloadedmetadata: move |_| {
                     js(
-                        format!(
+                        &format!(
                             "const a=document.getElementById('review-audio');if(a){{a.playbackRate={};a.ontimeupdate=()=>{{document.querySelectorAll('.review-passage').forEach(p=>{{const active=a.currentTime>=Number(p.dataset.start)&&a.currentTime<Number(p.dataset.end);const changed=active&&!p.classList.contains('review-passage-playing');p.classList.toggle('review-passage-playing',active);if(changed&&window.echoReviewFollow)p.scrollIntoView({{behavior:'smooth',block:'center'}});}});}};}}",
                             speed(),
                         ),

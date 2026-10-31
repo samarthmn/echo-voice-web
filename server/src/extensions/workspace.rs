@@ -93,7 +93,7 @@ pub(super) async fn lease(Path(id): Path<String>, Json(v): Json<Value>) -> Resul
                 "Another Echo tab is processing this recording.",
             ));
         }
-        let generation = r["generation"].as_u64().unwrap_or(0) + if active { 0 } else { 1 };
+        let generation = r["generation"].as_u64().unwrap_or(0) + u64::from(!active);
         let expires = seconds() + 60;
         r["generation"] = json!(generation);
         r["lease"] = json!({"ownerId":owner,"generation":generation,"expiresAt":expires});
@@ -135,13 +135,14 @@ pub(super) async fn pcm(Path(id): Path<String>, Query(q): Query<PcmQuery>) -> Re
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut cursor = 0;
-        let mut out = Vec::with_capacity(q.frame_count as usize * 2);
+        let expected_bytes = pcm_bytes(q.frame_count)?;
+        let mut out = Vec::with_capacity(expected_bytes);
         for (frames, digest, file) in rows {
             let part_end = cursor + frames;
             if part_end > q.start_frame && cursor < end {
                 let data = read_chunk(&chunk_path(&id, &file)?, frames, &digest)?;
-                let a = q.start_frame.saturating_sub(cursor) as usize * 2;
-                let b = (end.min(part_end) - cursor) as usize * 2;
+                let a = pcm_bytes(q.start_frame.saturating_sub(cursor))?;
+                let b = pcm_bytes(end.min(part_end) - cursor)?;
                 out.extend_from_slice(&data[a..b]);
             }
             cursor = part_end;
@@ -149,7 +150,7 @@ pub(super) async fn pcm(Path(id): Path<String>, Query(q): Query<PcmQuery>) -> Re
                 break;
             }
         }
-        if out.len() != q.frame_count as usize * 2 {
+        if out.len() != expected_bytes {
             return Err(ApiError::new(410, "PCM data is incomplete."));
         }
         Ok(out)
@@ -207,7 +208,7 @@ pub(super) async fn meeting_audio(
     })
     .await?;
     let total = 44 + frames * 2;
-    let header_bytes = wav_header(frames);
+    let header_bytes = wav_header(frames)?;
     let (start, end, partial) = match audio_range(
         headers.get(header::RANGE).and_then(|h| h.to_str().ok()),
         total,
@@ -224,7 +225,13 @@ pub(super) async fn meeting_audio(
         }
     };
     let stream = async_stream::stream! {
-        if start < 44 { yield Ok::<Vec<u8>,std::io::Error>(header_bytes[start as usize..(end+1).min(44) as usize].to_vec()); }
+        if start < 44 {
+            let range = usize::try_from(start).and_then(|from| usize::try_from((end+1).min(44)).map(|until| from..until));
+            match range {
+                Ok(range) => yield Ok::<Vec<u8>,std::io::Error>(header_bytes[range].to_vec()),
+                Err(error) => { yield Err(std::io::Error::other(error)); return; }
+            }
+        }
         let mut offset = 44;
         for (path, skip, size) in sources {
             let part_start = offset; let part_end = offset + size; offset = part_end;
@@ -232,7 +239,10 @@ pub(super) async fn meeting_audio(
             let from = start.saturating_sub(part_start); let until = (end+1).min(part_end)-part_start;
             let mut cursor = from;
             while cursor < until {
-                let length = (until-cursor).min(65536) as usize;
+                let length = match usize::try_from((until-cursor).min(65_536)) {
+                    Ok(length) => length,
+                    Err(error) => { yield Err(std::io::Error::other(error)); return; }
+                };
                 match store::protected_range(path.clone(), skip+cursor, length).await {
                     Ok(bytes)=>{cursor += bytes.len() as u64; yield Ok(bytes);},
                     Err(error)=>{ yield Err(error); return; }

@@ -3,6 +3,10 @@ use dioxus::prelude::*;
 
 /// Presentation only: unknown capability checks never become a ready claim.
 /// These values are recomputed from the browser/runtime, not saved preferences.
+#[allow(
+    clippy::struct_field_names,
+    reason = "Each field represents an independent capability readiness check."
+)]
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct SetupReadiness {
     pub recording_ready: Option<bool>,
@@ -153,7 +157,7 @@ pub fn use_poll_every(ms: u32, callback: impl FnMut() + Copy + 'static) {
         let mut callback = callback;
         async move {
             let mut eval = document::eval(&format!(
-                r#"const id={}; window.echoPolls ||= {{}}; const tick=()=>{{if(!document.hidden)dioxus.send(true)}}; const timer=setInterval(tick,{}); window.echoPolls[id]=()=>clearInterval(timer); window.echoPollStop=(id)=>{{window.echoPolls[id]?.(); delete window.echoPolls[id];}};"#,
+                r"const id={}; window.echoPolls ||= {{}}; const tick=()=>{{if(!document.hidden)dioxus.send(true)}}; const timer=setInterval(tick,{}); window.echoPolls[id]=()=>clearInterval(timer); window.echoPollStop=(id)=>{{window.echoPolls[id]?.(); delete window.echoPolls[id];}};",
                 serde_json::json!(id),
                 ms
             ));

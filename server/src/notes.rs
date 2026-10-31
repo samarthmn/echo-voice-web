@@ -17,14 +17,14 @@ use std::{
 };
 
 /// Register local model operations and evidence-linked notes generation.
-pub fn routes() -> Router {
+pub(crate) fn routes() -> Router {
     Router::new()
         .route("/notes", get(status).post(generate))
         .route("/notes/models", post(pull).delete(remove))
 }
 
 /// Accept only credential-free HTTP loopback destinations for local inference.
-pub fn local_provider_url(value: &str) -> Result<String, ApiError> {
+pub(crate) fn local_provider_url(value: &str) -> Result<String, ApiError> {
     let mut url = url::Url::parse(value)
         .map_err(|_| ApiError::bad("Enter a local Ollama URL, such as http://127.0.0.1:11434."))?;
     if !matches!(url.scheme(), "http" | "https")
@@ -74,7 +74,7 @@ fn client(timeout: u64) -> Result<reqwest::Client, ApiError> {
 }
 
 /// Translate local-provider connection failures into concise setup or timeout guidance.
-fn provider_error(error: reqwest::Error) -> ApiError {
+fn provider_error(error: &reqwest::Error) -> ApiError {
     if error.is_timeout() {
         ApiError::new(504, "The local notes model took too long to respond. Try a smaller model. Previous notes are unchanged.")
     } else {
@@ -84,7 +84,10 @@ fn provider_error(error: reqwest::Error) -> ApiError {
 
 /// Require a successful provider response before consuming its body.
 async fn checked(request: reqwest::RequestBuilder) -> Result<reqwest::Response, ApiError> {
-    let response = request.send().await.map_err(provider_error)?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| provider_error(&error))?;
     if !response.status().is_success() {
         return Err(match response.status().as_u16() {
             404 => ApiError::new(409, "The selected notes model is unavailable. Download it in Models first."),
@@ -101,7 +104,7 @@ async fn bounded_json(response: reqwest::Response) -> Result<Value, ApiError> {
     let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();
     while let Some(part) = stream.next().await {
-        let part = part.map_err(provider_error)?;
+        let part = part.map_err(|error| provider_error(&error))?;
         if bytes.len() + part.len() > 2 * 1024 * 1024 {
             return Err(ApiError::new(
                 502,
@@ -387,7 +390,7 @@ fn source_unchanged(meeting_id: &str, transcript_id: &str) -> Result<(), ApiErro
     Ok(())
 }
 /// Combine chunk results while preserving distinct evidence and action owners.
-fn merge_evidence(result: &mut Value, notes: Value) -> Result<(), ApiError> {
+fn merge_evidence(result: &mut Value, notes: &Value) -> Result<(), ApiError> {
     for key in ["summary", "decisions", "actions"] {
         let target = result[key]
             .as_array_mut()
@@ -515,7 +518,7 @@ async fn generate(Json(input): Json<GenerateRequest>) -> Result<Json<Value>, Api
             return Err(ApiError::new(502,"The notes provider changed models during generation. Earlier notes are unchanged; select a model explicitly and retry."));
         }
         actual_model = Some(model);
-        merge_evidence(&mut result, parse_evidence(&content, chunk)?)?;
+        merge_evidence(&mut result, &parse_evidence(&content, chunk)?)?;
         usage.add(&chunk_usage)?;
     }
     result["provider"] = json!("ollama");
@@ -632,7 +635,7 @@ mod tests {
         .is_err());
         let large = vec![passage("p1", &"x".repeat(MAX_LOCAL_TEXT_BYTES + 1))];
         assert_eq!(generation_chunks(&large).unwrap_err().status.as_u16(), 413);
-        let many = (0..MAX_LOCAL_CHUNKS + 1)
+        let many = (0..=MAX_LOCAL_CHUNKS)
             .map(|i| passage(&format!("passage-{i}"), &"x".repeat(6000)))
             .collect::<Vec<_>>();
         assert_eq!(generation_chunks(&many).unwrap_err().status.as_u16(), 413);
@@ -644,8 +647,8 @@ mod tests {
         let mut result = json!({"summary":[],"decisions":[],"actions":[]});
         let first=parse_evidence(r#"{"summary":[],"decisions":[],"actions":[{"text":"Review the draft","passageIds":["p1"],"owner":"Asha","dueDate":null}]}"#,&[passage("p1","Asha, review the draft")]).unwrap();
         let second=parse_evidence(r#"{"summary":[],"decisions":[],"actions":[{"text":"Review the draft","passageIds":["p2"],"owner":"Sam","dueDate":null}]}"#,&[passage("p2","Sam, review the draft")]).unwrap();
-        merge_evidence(&mut result, first).unwrap();
-        merge_evidence(&mut result, second).unwrap();
+        merge_evidence(&mut result, &first).unwrap();
+        merge_evidence(&mut result, &second).unwrap();
         assert_eq!(result["actions"].as_array().unwrap().len(), 2);
     }
 

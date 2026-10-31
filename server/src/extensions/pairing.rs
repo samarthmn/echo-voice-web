@@ -1,6 +1,10 @@
 //! One-approval browser pairing (protocol v2) and single-use Echo-initiated intents.
 //! Only SHA-256 digests of claim secrets, credentials, and intents are stored.
-use super::*;
+use super::{
+    extension_origin, fields, hash, json, library, params, reply, seconds, store, text, uid,
+    ApiError, Connection, HeaderMap, IntoResponse, Json, OptionalExtension, Path, Response, Result,
+    StatusCode, Uuid, Value, LIBRARY_ID,
+};
 use rand::{rngs::OsRng, RngCore};
 use std::sync::{Mutex, OnceLock};
 
@@ -36,7 +40,7 @@ fn cleanup(db: &Connection, now: i64) -> Result<()> {
 }
 /// Delete pairing rows that outlived their retry window even when no extension calls again.
 pub(crate) async fn cleanup_loop() {
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    let mut interval = tokio::time::interval(std::time::Duration::from_mins(1));
     loop {
         interval.tick().await;
         if let Err(error) = store::run(|db| cleanup(db, seconds())).await {
@@ -83,7 +87,11 @@ fn consume_intent(value: &str, now: i64) -> Result<bool> {
 pub(super) async fn intent() -> Result<Json<Value>> {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
-    let value = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let value = bytes
+        .iter()
+        .flat_map(|byte| [byte >> 4, byte & 0x0f])
+        .map(|nibble| char::from(b"0123456789abcdef"[usize::from(nibble)]))
+        .collect::<String>();
     let now = seconds();
     let expires = now + INTENT_SECONDS;
     let mut intents = intents()?;

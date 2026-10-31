@@ -68,7 +68,7 @@ pub fn Models(
                 native_speech.set(value);
             }
             if let Ok(v) = get("/notes").await {
-                notes.set(v)
+                notes.set(v);
             }
         }
     });
@@ -191,8 +191,8 @@ pub fn Models(
                             }
                         }
                         div { class: "model-status",
-                            span { class: if installed().contains(&id.to_string()) { "connection-dot ready" } else { "connection-dot" } }
-                            if installed().contains(&id.to_string()) {
+                            span { class: if installed().contains(&id.clone()) { "connection-dot ready" } else { "connection-dot" } }
+                            if installed().contains(&id.clone()) {
                                 "Downloaded · ready to use"
                             } else if speech_downloading && download_id == id {
                                 "Downloading"
@@ -219,7 +219,7 @@ pub fn Models(
                                 }
                                 progress { value: progress.to_string(), max: "100" }
                             }
-                        } else if installed().contains(&id.to_string()) {
+                        } else if installed().contains(&id.clone()) {
                             div { class: "model-card-actions",
                                 ActionButton {
                                     kind: ButtonKind::Secondary,

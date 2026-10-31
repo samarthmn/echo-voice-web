@@ -46,7 +46,7 @@ fn old_database_drops_extension_vaults_and_library_backup_still_round_trips() {
     reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", imported.path());
     test_key();
-    import_library(backup).unwrap();
+    import_library(&backup).unwrap();
     assert_eq!(get_meeting(meeting_id).unwrap().unwrap(), meeting);
     with_db(|db| {
         let count: i64 = db.query_row(
@@ -420,17 +420,17 @@ fn retired_bot_data_survives_deletion_and_recovery() {
 #[test]
 fn receiving_extension_blocks_deletion_after_server_restart() {
     let _guard = TEST_LIBRARY_LOCK.blocking_lock();
-    let directory = crate::store::test_directory();
+    let directory = test_directory();
     reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    test_key();
     init().unwrap();
     let meeting =
         create_meeting(json!({"title":"Still capturing","mode":"online","consent":true})).unwrap();
     let key = meeting["id"].as_str().unwrap();
-    update_meeting(key, json!({"status":"recording"})).unwrap();
-    let recording_id = uuid::Uuid::new_v4().to_string();
-    let installation_id = uuid::Uuid::new_v4().to_string();
+    update_meeting(key, &json!({"status":"recording"})).unwrap();
+    let recording_id = Uuid::new_v4().to_string();
+    let installation_id = Uuid::new_v4().to_string();
     let mut receipt = json!({"recordingId":recording_id,"installationId":installation_id,"meetingId":key,"status":"receiving","controls":[]});
     with_db(|db| {
         db.execute(
@@ -444,7 +444,7 @@ fn receiving_extension_blocks_deletion_after_server_restart() {
     init().unwrap();
     assert_eq!(get_meeting(key).unwrap().unwrap()["status"], "interrupted");
     let error = delete_meeting(key).unwrap_err();
-    assert_eq!(error.status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(error.status, http::StatusCode::CONFLICT);
     assert!(get_meeting(key).unwrap().is_some());
     with_db(|db| {
         let data: String = db.query_row(
@@ -478,9 +478,9 @@ fn receiving_extension_blocks_deletion_after_server_restart() {
 #[test]
 fn durable_recording_versions_backup_validation_and_recovery() {
     let _guard = TEST_LIBRARY_LOCK.blocking_lock();
-    let directory = crate::store::test_directory();
+    let directory = test_directory();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    test_key();
     init().unwrap();
     let competing = fs::OpenOptions::new()
         .read(true)
@@ -501,15 +501,15 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     )
     .unwrap();
     let key = m["id"].as_str().unwrap();
-    let cancelled = update_meeting(key, json!({"autoTranscribeSuppressed":true})).unwrap();
+    let cancelled = update_meeting(key, &json!({"autoTranscribeSuppressed":true})).unwrap();
     assert_eq!(
         get_meeting(key).unwrap().unwrap()["autoTranscribeSuppressed"],
         true
     );
     assert!(validate_meeting(&cancelled).is_ok());
-    assert!(update_meeting(key, json!({"autoTranscribeSuppressed":"yes"})).is_err());
+    assert!(update_meeting(key, &json!({"autoTranscribeSuppressed":"yes"})).is_err());
     assert_eq!(
-        update_meeting(key, json!({"autoTranscribeSuppressed":false})).unwrap()
+        update_meeting(key, &json!({"autoTranscribeSuppressed":false})).unwrap()
             ["autoTranscribeSuppressed"],
         false
     );
@@ -581,8 +581,8 @@ fn durable_recording_versions_backup_validation_and_recovery() {
         create_meeting(json!({"title":"Abandoned server work","mode":"in-person","consent":true}))
             .unwrap();
     let orphan_id = orphan["id"].as_str().unwrap();
-    update_meeting(key, json!({"status":"processing"})).unwrap();
-    update_meeting(orphan_id, json!({"status":"processing"})).unwrap();
+    update_meeting(key, &json!({"status":"processing"})).unwrap();
+    update_meeting(orphan_id, &json!({"status":"processing"})).unwrap();
     with_db(recover).unwrap();
     assert_eq!(get_meeting(key).unwrap().unwrap()["status"], "error");
     assert_eq!(resume_browser_processing(&[key.into()]).unwrap(), vec![key]);
@@ -591,7 +591,7 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     assert_eq!(get_meeting(orphan_id).unwrap().unwrap()["status"], "error");
     update_meeting(
         key,
-        json!({"status":"error","error":"The speech runtime failed."}),
+        &json!({"status":"error","error":"The speech runtime failed."}),
     )
     .unwrap();
     assert!(resume_browser_processing(&[key.into()]).unwrap().is_empty());
@@ -601,7 +601,7 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     );
     update_meeting(
         key,
-        json!({"status":"error","error":PROCESSING_RESTART_ERROR}),
+        &json!({"status":"error","error":PROCESSING_RESTART_ERROR}),
     )
     .unwrap();
     delete_meeting(orphan_id).unwrap();
@@ -664,7 +664,7 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     );
     assert!(update_meeting(
         key,
-        json!({"activeTranscriptId":"some-other-meeting-version"})
+        &json!({"activeTranscriptId":"some-other-meeting-version"})
     )
     .is_err());
     let marked = add_moment(
@@ -673,13 +673,13 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     )
     .unwrap();
     let moment_id = marked["moments"][0]["id"].as_str().unwrap();
-    update_moment(key, moment_id, json!({"label":"Verify release"})).unwrap();
+    update_moment(key, moment_id, &json!({"label":"Verify release"})).unwrap();
     update_meeting(
         key,
-        json!({"liveTranscription":false,"gaps":[{"start":2,"end":3,"reason":"Microphone muted"}]}),
+        &json!({"liveTranscription":false,"gaps":[{"start":2,"end":3,"reason":"Microphone muted"}]}),
     )
     .unwrap();
-    assert!(update_meeting(key, json!({"liveTranscription":true})).is_err());
+    assert!(update_meeting(key, &json!({"liveTranscription":true})).is_err());
     let (markdown, _, _) = export_meeting(key, "md").unwrap();
     assert!(markdown.contains("Notes provider: chatgpt"));
     assert!(markdown.contains("earlier transcript"));
@@ -690,8 +690,8 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     let backup = export_library().unwrap();
     assert!(backup["settings"].get("ollamaUrl").is_none());
     assert_eq!(backup["meetings"][0]["notes"][2]["provider"], "chatgpt");
-    assert!(import_library(backup.clone()).is_err());
-    update_meeting(key, json!({"status":"recording"})).unwrap();
+    assert!(import_library(&backup).is_err());
+    update_meeting(key, &json!({"status":"recording"})).unwrap();
     assert!(delete_meeting(key).is_err());
     with_db(recover).unwrap();
     let recovered = get_meeting(key).unwrap().unwrap();
@@ -704,13 +704,13 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     assert!(!data_dir().unwrap().join("audio").join(key).exists());
     let mut malformed = backup.clone();
     malformed["credentials"] = json!({"token":"must-not-import"});
-    assert!(import_library(malformed).is_err());
+    assert!(import_library(&malformed).is_err());
     let mut traversal = backup.clone();
     traversal["meetings"][0]["id"] = json!("../../credentials");
-    assert!(import_library(traversal).is_err());
+    assert!(import_library(&traversal).is_err());
     let mut executable = backup.clone();
     executable["audio"][0]["data"] = json!(STANDARD.encode(b"#!/bin/sh\nrm -rf /"));
-    assert!(import_library(executable).is_err());
+    assert!(import_library(&executable).is_err());
     assert_eq!(list_meetings().unwrap().len(), 0);
     let mut legacy = backup.clone();
     legacy["settings"]
@@ -726,7 +726,7 @@ fn durable_recording_versions_backup_validation_and_recovery() {
         note.as_object_mut().unwrap().remove("usage");
     }
     update_settings(json!({"notesProvider":"chatgpt","chatgptModel":"gpt-5.4"})).unwrap();
-    import_library(legacy).unwrap();
+    import_library(&legacy).unwrap();
     assert_eq!(get_settings().unwrap()["notesProvider"], "ollama");
     assert!(get_settings().unwrap().get("chatgptModel").is_none());
     delete_meeting(key).unwrap();
@@ -736,7 +736,7 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     let mut backup = backup;
     backup["settings"]["notesProvider"] = json!("chatgpt");
     backup["settings"]["chatgptModel"] = json!("gpt-5.4");
-    let restored = import_library(backup).unwrap();
+    let restored = import_library(&backup).unwrap();
     assert_eq!(get_settings().unwrap()["notesProvider"], "ollama");
     assert!(get_settings().unwrap().get("chatgptModel").is_none());
     assert_eq!(restored["meetings"], 1);

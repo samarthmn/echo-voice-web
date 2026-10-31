@@ -28,12 +28,14 @@ async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value,
             .as_ref()
             .ok()
             .and_then(|v| v["error"].as_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                format!(
+            .map_or_else(
+                || {
+                    format!(
                     "The server could not complete this request (HTTP {status}). Please try again."
                 )
-            }));
+                },
+                str::to_owned,
+            ));
     }
     let value = value.map_err(|_| "The server returned an unreadable response.".to_string())?;
     Ok(value)
@@ -59,6 +61,11 @@ pub fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or_default().to_string()
 }
 /// Format nonnegative audio seconds as minutes and seconds.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Display seconds are clamped nonnegative and intentionally truncated; float casts saturate at u64 bounds."
+)]
 pub fn time(seconds: f64) -> String {
     let n = seconds.max(0.) as u64;
     format!("{}:{:02}", n / 60, n % 60)
@@ -107,12 +114,12 @@ pub fn bytes(n: f64) -> String {
     let n = if n.is_finite() && n > 0. { n } else { 0. };
     if n < 1024. {
         format!("{n:.0} B")
-    } else if n < 1048576. {
+    } else if n < 1_048_576. {
         format!("{:.1} KB", n / 1024.)
-    } else if n < 1073741824. {
-        format!("{:.1} MB", n / 1048576.)
+    } else if n < 1_073_741_824. {
+        format!("{:.1} MB", n / 1_048_576.)
     } else {
-        format!("{:.1} GB", n / 1073741824.)
+        format!("{:.1} GB", n / 1_073_741_824.)
     }
 }
 
@@ -120,7 +127,7 @@ pub fn bytes(n: f64) -> String {
 /// the JSON bridge, and preserve actionable browser errors as plain text.
 pub async fn evaluate(script: &str) -> Result<Value, String> {
     let source = format!(
-        r#"try {{ const value = await (async () => {{ {script} }})(); return {{ok:true,value:value === undefined ? null : value}}; }} catch(error) {{ return {{ok:false,error:error?.message || String(error)}}; }}"#
+        r"try {{ const value = await (async () => {{ {script} }})(); return {{ok:true,value:value === undefined ? null : value}}; }} catch(error) {{ return {{ok:false,error:error?.message || String(error)}}; }}"
     );
     let result = dioxus::document::eval(&source)
         .await

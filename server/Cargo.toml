@@ -2,6 +2,10 @@
 name = "echo-server"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }

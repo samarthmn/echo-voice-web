@@ -129,7 +129,7 @@ pub(crate) fn associated_calendar_event(raw: &str, recorded_at: &str) -> Option<
 }
 
 /// Register optional Calendar OAuth and read-only authorization operations.
-pub fn routes() -> Router {
+pub(crate) fn routes() -> Router {
     Router::new()
         .route("/integrations/status", get(status))
         .route("/integrations/calendar", get(calendar))
@@ -183,11 +183,7 @@ fn read_tokens() -> Result<Option<Tokens>, ApiError> {
     }
     let bytes = zeroize::Zeroizing::new(reader.read_all().map_err(|_| invalid())?);
     let tokens: Tokens = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-    if tokens.access_token.is_empty()
-        || tokens
-            .refresh_token
-            .as_ref()
-            .is_some_and(|token| token.is_empty())
+    if tokens.access_token.is_empty() || tokens.refresh_token.as_ref().is_some_and(String::is_empty)
     {
         return Err(invalid());
     }
@@ -278,7 +274,7 @@ async fn bounded_oauth_error(mut response: reqwest::Response) -> ApiError {
     loop {
         match response.chunk().await {
             Ok(Some(chunk)) if bytes.len() + chunk.len() <= LIMIT => {
-                bytes.extend_from_slice(&chunk)
+                bytes.extend_from_slice(&chunk);
             }
             Ok(None) => return oauth_error(&bytes),
             _ => return oauth_error(&[]),
@@ -434,7 +430,7 @@ async fn refresh_token(mut saved: Tokens, c: &oauth::Config) -> Result<Tokens, A
     let token = match result {
         Ok(value) => value,
         Err(error) => {
-            if error.status == axum::http::StatusCode::UNAUTHORIZED {
+            if error.status == http::StatusCode::UNAUTHORIZED {
                 saved.reconnect_required = true;
                 let to_save = saved.clone();
                 store::blocking(move || save_tokens(&to_save)).await?;
@@ -523,7 +519,7 @@ fn normalize_event(event: &Value) -> Option<Value> {
         .as_str()
         .or_else(|| event["end"]["date"].as_str())?;
     let url = event_url(event);
-    let mut value = json!({"id":id,"title":event["summary"].as_str().unwrap_or("Untitled meeting"),"start":start,"end":end,"provider":url.as_deref().map(meeting_provider).unwrap_or("other"),"attendees":event["attendees"].as_array().map(Vec::len).unwrap_or(0)});
+    let mut value = json!({"id":id,"title":event["summary"].as_str().unwrap_or("Untitled meeting"),"start":start,"end":end,"provider":url.as_deref().map_or("other", meeting_provider),"attendees":event["attendees"].as_array().map_or(0, Vec::len)});
     if let Some(url) = url {
         value["url"] = json!(url);
     }
@@ -564,7 +560,7 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
     let data = match result {
         Ok(value) => value,
         Err(error) => {
-            if error.status == axum::http::StatusCode::UNAUTHORIZED {
+            if error.status == http::StatusCode::UNAUTHORIZED {
                 let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
                 let access = tokens.access_token.clone();
                 store::blocking(move || mark_revoked(&access)).await?;
@@ -660,7 +656,7 @@ mod tests {
                 let output = output.clone();
                 async move {
                     (
-                        axum::http::StatusCode::BAD_REQUEST,
+                        http::StatusCode::BAD_REQUEST,
                         output.lock().unwrap().clone(),
                     )
                 }
@@ -841,7 +837,7 @@ mod tests {
             None
         );
         assert_eq!(
-            cached_calendar_event(&cache, library, "authorized-account", 302000, url, time),
+            cached_calendar_event(&cache, library, "authorized-account", 302_000, url, time),
             None
         );
         assert_eq!(
@@ -882,7 +878,7 @@ mod tests {
             Query(HashMap::from([("code".into(), "untrusted".into())])),
         )
         .await;
-        assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
+        assert_eq!(response.status(), http::StatusCode::SEE_OTHER);
         assert!(response.headers()[header::LOCATION]
             .to_str()
             .unwrap()

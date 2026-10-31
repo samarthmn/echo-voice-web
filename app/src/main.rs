@@ -1,3 +1,8 @@
+#![allow(
+    unused_qualifications,
+    reason = "Dioxus RSX event attributes expand to qualified paths; rustc suggests invalid RSX edits."
+)]
+
 mod api;
 mod calendar;
 mod extension;
@@ -99,7 +104,7 @@ mod processing_tests {
     #[test]
     fn receiving_progress_updates_duration_without_overwriting_local_review_content() {
         let existing = serde_json::json!({"id":"meeting","title":"Edited title","duration":100,"transcripts":[{"text":"final"}]});
-        let incoming = serde_json::json!({"id":"meeting","title":"Old title","duration":360,"transcripts":[],"extensionRecording":{"totalFrames":5760000}});
+        let incoming = serde_json::json!({"id":"meeting","title":"Old title","duration":360,"transcripts":[],"extensionRecording":{"totalFrames":5_760_000}});
         let merged = merge_extension_progress(&existing, &incoming);
         assert_eq!(merged["duration"], 360);
         assert_eq!(merged["title"], "Edited title");
@@ -174,7 +179,7 @@ mod processing_tests {
 
 /// Launch the browser-rendered Dioxus workspace.
 fn main() {
-    dioxus::launch(App);
+    launch(App);
 }
 
 #[component]
@@ -264,10 +269,10 @@ fn App() -> Element {
         match get("/meetings").await {
             Ok(v) => meetings.set(v["meetings"].as_array().cloned().unwrap_or_default()),
             Err(e) => load_error.set(e),
-        };
+        }
         if let Ok(v) = get("/settings").await {
-            settings.set(v)
-        };
+            settings.set(v);
+        }
         loading.set(false);
         if let Ok(params) = document::eval("const p=new URLSearchParams(location.search);const v={calendar:p.get('calendar'),message:p.get('message'),library:p.get('library'),meeting:p.get('meeting')};if(v.calendar||v.library||v.meeting){for(const key of ['calendar','message','library','meeting'])p.delete(key);history.replaceState(null,'',location.pathname+(p.size?'?'+p.toString():'')+location.hash);}return v;").await {
             if params["calendar"] == "connected" {
@@ -383,15 +388,15 @@ fn App() -> Element {
                     page.set("review".into());
                     toast.set("Recording saved.".into());
                     if let Ok(v) = get("/meetings").await {
-                        meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
+                        meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());
                     }
                 }
                 "echo-library-changed" => {
                     if let Ok(v) = get("/meetings").await {
-                        meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
+                        meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());
                     }
                     if let Ok(v) = get("/settings").await {
-                        settings.set(v)
+                        settings.set(v);
                     }
                 }
                 "echo-transcription-complete" | "echo-transcript-saved" => {
@@ -409,17 +414,17 @@ fn App() -> Element {
                         cancelling_processing.set(false);
                     }
                     if detail["id"].is_string() && detail["id"] == selected()["id"] {
-                        selected.set(detail.clone())
+                        selected.set(detail.clone());
                     } else if let Some(id) = detail["meetingId"].as_str() {
                         if let Ok(m) = get(&format!("/meetings/{id}")).await {
                             if m["id"] == selected()["id"] {
-                                selected.set(m)
+                                selected.set(m);
                             }
                         }
                     }
                     toast.set("Transcript ready.".into());
                     if let Ok(v) = get("/meetings").await {
-                        meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
+                        meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());
                     }
                 }
                 "echo-transcription-error" => {
@@ -476,7 +481,7 @@ fn App() -> Element {
                         Some("recording" | "paused" | "saving")
                     ) && !state["hasPendingAudio"].as_bool().unwrap_or(false)
                     {
-                        new_meeting.set(true)
+                        new_meeting.set(true);
                     }
                 }
                 _ => {}
@@ -653,7 +658,7 @@ fn App() -> Element {
                                         match get("/meetings").await {
                                             Ok(v) => {
                                                 meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());
-                                                load_error.set(String::new())
+                                                load_error.set(String::new());
                                             }
                                             Err(e) => load_error.set(e),
                                         }
@@ -733,8 +738,8 @@ fn App() -> Element {
                                     settings,
                                     download: model_download,
                                     meetings,
-                                    on_models: move |_| page.set("models".into()),
-                                    on_record: move |_| new_meeting.set(true),
+                                    on_models: move |()| page.set("models".into()),
+                                    on_record: move |()| new_meeting.set(true),
                                     on_open: move |m| {
                                         selected.set(m);
                                         page.set("review".into());
@@ -804,9 +809,9 @@ fn App() -> Element {
                                                     spawn(async move {
                                                         if let Ok(v) = get("/demo").await {
                                                             selected.set(v);
-                                                            page.set("review".into())
+                                                            page.set("review".into());
                                                         } else {
-                                                            toast.set("Sample meeting is unavailable.".into())
+                                                            toast.set("Sample meeting is unavailable.".into());
                                                         }
                                                     });
                                                 },
@@ -907,7 +912,7 @@ fn App() -> Element {
                                             query.set(String::new());
                                             filter.set("all".into());
                                             if count == 0 {
-                                                new_meeting.set(true)
+                                                new_meeting.set(true);
                                             }
                                         },
                                         if count == 0 {
@@ -949,11 +954,11 @@ fn App() -> Element {
                                     meeting: selected,
                                     transcribing: processing_jobs().contains(&selected_id),
                                     generating_notes: notes_jobs().get(&selected_id).cloned().unwrap_or_default(),
-                                    on_back: move |_| {
+                                    on_back: move |()| {
                                         page.set("meetings".into());
                                         spawn(async move {
                                             if let Ok(v) = get("/meetings").await {
-                                                meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
+                                                meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());
                                             }
                                         });
                                     },
@@ -963,7 +968,7 @@ fn App() -> Element {
                                         }
                                         spawn(async move {
                                             if let Ok(v) = get("/meetings").await {
-                                                meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
+                                                meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());
                                             }
                                         });
                                     },
@@ -974,7 +979,7 @@ fn App() -> Element {
                     } else if current_page == "calendar" {
                         calendar::Calendar {
                             notify: move |s| toast.set(s),
-                            on_extension: move |_| {
+                            on_extension: move |()| {
                                 settings_section.set("extension".into());
                                 page.set("settings".into());
                             },
@@ -1061,7 +1066,7 @@ fn App() -> Element {
         if is_recording {
             RecorderBar {
                 recorder,
-                on_open: move |_| {
+                on_open: move |()| {
                     let id = text(&recorder(), "meetingId");
                     spawn(async move {
                         if let Ok(m) = get(&format!("/meetings/{id}")).await {
@@ -1076,8 +1081,8 @@ fn App() -> Element {
         if new_meeting() {
             NewMeeting {
                 settings,
-                on_close: move |_| new_meeting.set(false),
-                on_calendar: move |_| {
+                on_close: move |()| new_meeting.set(false),
+                on_calendar: move |()| {
                     new_meeting.set(false);
                     settings_section.set("extension".into());
                     page.set("settings".into());
@@ -1087,7 +1092,7 @@ fn App() -> Element {
                     page.set("review".into());
                     spawn(async move {
                         if let Ok(v) = get("/meetings").await {
-                            meetings.set(v["meetings"].as_array().cloned().unwrap_or_default())
+                            meetings.set(v["meetings"].as_array().cloned().unwrap_or_default());
                         }
                     });
                 },
@@ -1119,8 +1124,7 @@ fn MeetingCard(meeting: Value, on_open: EventHandler<Value>) -> Element {
         notes
             .last()
             .and_then(|n| n["actions"].as_array())
-            .map(|v| v.len())
-            .unwrap_or(0)
+            .map_or(0, std::vec::Vec::len)
     } else {
         0
     };
@@ -1253,7 +1257,7 @@ fn NewMeeting(
                                 {
                                     Ok(v) => {
                                         devices.set(v.as_array().cloned().unwrap_or_default());
-                                        tested.set(true)
+                                        tested.set(true);
                                     }
                                     Err(e) => {
                                         error
@@ -1261,7 +1265,7 @@ fn NewMeeting(
                                                 format!(
                                                     "Microphone access failed. Check your browser permissions. {e}",
                                                 ),
-                                            )
+                                            );
                                     }
                                 }
                                 busy.set(false);
@@ -1345,7 +1349,7 @@ fn NewMeeting(
                                     let script = format!(
                                         "return await window.echoRecorder.start({{meeting:{},deviceId:{},startMuted:{}}})",
                                         m,
-                                        serde_json::to_string(&device()).unwrap(),
+                                        json!(device()),
                                         muted(),
                                     );
                                     match crate::api::evaluate(&script).await {
@@ -1354,7 +1358,7 @@ fn NewMeeting(
                                                 .await
                                                 .unwrap_or(m);
                                             on_start.call(latest);
-                                            on_close.call(())
+                                            on_close.call(());
                                         }
                                         Err(e) => {
                                             let msg = format!("Could not start recording: {e}");
@@ -1363,7 +1367,7 @@ fn NewMeeting(
                                                     json!({ "status" : "error", "error" : msg }),
                                                 )
                                                 .await;
-                                            error.set(msg)
+                                            error.set(msg);
                                         }
                                     }
                                 }
@@ -1428,7 +1432,7 @@ fn RecorderBar(
                 "aria-label": "Microphone audio level",
                 for i in 0..12 {
                     span {
-                        class: if level * 12. > i as f64 { "lit" } else { "" },
+                        class: if level * 12. > f64::from(i) { "lit" } else { "" },
                         style: format!("height:{}px", 8 + (i % 5) * 3),
                     }
                 }

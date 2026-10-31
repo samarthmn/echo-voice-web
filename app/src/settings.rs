@@ -25,11 +25,11 @@ async fn choose_json_file() -> Result<Option<(String, Value)>, String> {
 /// Download a JSON document using a temporary browser object URL.
 async fn download_json(value: Value, name: &str) -> Result<(), String> {
     let mut eval = document::eval(
-        r#"
+        r"
         try { const p=await dioxus.recv(); const blob=new Blob([JSON.stringify(p.value,null,2)],{type:'application/json'});
         const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=p.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);dioxus.send({ok:true});
         }catch(e){dioxus.send({error:e.message});}
-    "#,
+    ",
     );
     eval.send(json!({"value":value,"name":name}))
         .map_err(|_| "Could not prepare the download.".to_string())?;
@@ -326,7 +326,7 @@ fn GeneralSettings(
                     Toggle {
                         checked: draft()["autoTranscribe"].as_bool().unwrap_or(true),
                         label: "Transcribe after recording",
-                        onchange: move |_| {
+                        onchange: move |()| {
                             let enabled = draft()["autoTranscribe"].as_bool().unwrap_or(true);
                             draft.write()["autoTranscribe"] = json!(! enabled);
                         },
@@ -816,7 +816,7 @@ fn VocabularyRow(
                     checked: enabled,
                     label: format!("Enable {term}"),
                     disabled: busy(),
-                    onchange: move |_| {
+                    onchange: move |()| {
                         let id = toggle_id.clone();
                         busy.set(true);
                         error.set(String::new());
@@ -965,7 +965,7 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
                     storage.set(data);
                     match get("/vocabulary").await {
                         Ok(words) => vocabulary_count
-                            .set(Some(words["entries"].as_array().map(Vec::len).unwrap_or(0))),
+                            .set(Some(words["entries"].as_array().map_or(0, Vec::len))),
                         Err(message) => error.set(message),
                     }
                 }
@@ -1085,7 +1085,7 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
                                         .call(
                                             "Library backup prepared. Check your browser downloads."
                                                 .into(),
-                                        )
+                                        );
                                 }
                                 Err(message) => error.set(message),
                             }
@@ -1201,7 +1201,12 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
                                         Ok(restored) => {
                                             vocabulary_count
                                                 .set(
-                                                    Some(restored["vocabulary"].as_u64().unwrap_or(0) as usize),
+                                                    Some(
+                                                        restored["vocabulary"]
+                                                            .as_u64()
+                                                            .and_then(|n| usize::try_from(n).ok())
+                                                            .unwrap_or(0),
+                                                    ),
                                                 );
                                             archive.set(None);
                                             if let Ok(data) = get("/storage").await {
@@ -1243,7 +1248,7 @@ fn StorageSettings(notify: EventHandler<String>) -> Element {
 /// Download the server's portable library archive, including audio but excluding credentials.
 async fn export_library() -> Result<(), String> {
     let mut eval = document::eval(
-        r#"try{const r=await fetch('/api/storage/export');if(!r.ok){const v=await r.json().catch(()=>({}));throw new Error(v.error||'Could not create the backup. Your library is unchanged.');}const blob=await r.blob();if(!blob.size)throw new Error('The backup was empty. Please try again.');const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='echo-voice-library-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);dioxus.send({ok:true});}catch(e){dioxus.send({error:e.message});}"#,
+        r"try{const r=await fetch('/api/storage/export');if(!r.ok){const v=await r.json().catch(()=>({}));throw new Error(v.error||'Could not create the backup. Your library is unchanged.');}const blob=await r.blob();if(!blob.size)throw new Error('The backup was empty. Please try again.');const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='echo-voice-library-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);dioxus.send({ok:true});}catch(e){dioxus.send({error:e.message});}",
     );
     let value: Value = eval
         .recv()

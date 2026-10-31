@@ -20,7 +20,7 @@ use zeroize::Zeroizing;
 
 pub(super) const SCOPE: &str = "openid email https://www.googleapis.com/auth/calendar.readonly";
 const COOKIE: &str = "echo_google_oauth";
-const LIFETIME: Duration = Duration::from_secs(600);
+const LIFETIME: Duration = Duration::from_mins(10);
 static SESSION: OnceLock<Mutex<Option<Arc<Session>>>> = OnceLock::new();
 
 pub(super) struct Config {
@@ -31,14 +31,24 @@ pub(super) struct Config {
     pub endpoints: Option<(String, String)>,
 }
 impl Config {
-    pub fn token_url(&self) -> &str {
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_literal_bound,
+        reason = "Tests override OAuth endpoints with values borrowed from this config."
+    )]
+    pub(super) fn token_url(&self) -> &str {
         #[cfg(test)]
         if let Some((token, _)) = &self.endpoints {
             return token;
         }
         "https://oauth2.googleapis.com/token"
     }
-    pub fn profile_url(&self) -> &str {
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_literal_bound,
+        reason = "Tests override OAuth endpoints with values borrowed from this config."
+    )]
+    pub(super) fn profile_url(&self) -> &str {
         #[cfg(test)]
         if let Some((_, profile)) = &self.endpoints {
             return profile;
@@ -215,7 +225,7 @@ fn outcome(origin: &str, result: Result<(), ApiError>) -> Response {
         .insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     response
 }
-async fn begin(config: Config, origin: String, lifetime: Duration) -> Result<Response, ApiError> {
+fn begin(config: Config, origin: String, lifetime: Duration) -> Result<Response, ApiError> {
     let (stop, mut stopped) = watch::channel(false);
     let session = Arc::new(Session {
         config,
@@ -235,7 +245,7 @@ async fn begin(config: Config, origin: String, lifetime: Duration) -> Result<Res
         }
     }
     tokio::spawn(async move {
-        tokio::select! { _ = tokio::time::sleep(lifetime) => {}, _ = stopped.changed() => {} }
+        tokio::select! { () = tokio::time::sleep(lifetime) => {}, _ = stopped.changed() => {} }
         clear_matching(&session);
     });
     Ok(response)
@@ -254,7 +264,7 @@ pub(super) async fn connect(headers: HeaderMap) -> Result<Response, ApiError> {
             Redirect::to(&format!("{origin}/api/integrations/google/connect")).into_response(),
         );
     }
-    begin(config, origin, LIFETIME).await
+    begin(config, origin, LIFETIME)
 }
 async fn complete(
     session: Arc<Session>,
@@ -446,10 +456,8 @@ mod tests {
         .unwrap();
         fs::read(integrations::credentials_file().unwrap()).unwrap()
     }
-    async fn launch(provider: &Provider, lifetime: Duration) -> Arc<Session> {
-        let response = begin(provider.config(), "http://localhost:3000".into(), lifetime)
-            .await
-            .unwrap();
+    fn launch(provider: &Provider, lifetime: Duration) -> Arc<Session> {
+        let response = begin(provider.config(), "http://localhost:3000".into(), lifetime).unwrap();
         let auth = Url::parse(response.headers()[header::LOCATION].to_str().unwrap()).unwrap();
         assert_eq!(auth.host_str(), Some("accounts.google.com"));
         let fields: HashMap<_, _> = auth.query_pairs().into_owned().collect();
@@ -506,7 +514,7 @@ mod tests {
         let _directory = fixture();
         let original = previous();
         let provider = Provider::start().await;
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         for (state, cookie) in [
             ("wrong".into(), browser(&session)),
             (session.state.to_string(), "echo_google_oauth=wrong".into()),
@@ -537,7 +545,7 @@ mod tests {
         );
         assert!(provider.forms.lock().unwrap().is_empty());
         assert!(!pending());
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         *provider.challenge.lock().unwrap() = "wrong-pkce-challenge".into();
         let denied = response(
             session.clone(),
@@ -555,7 +563,7 @@ mod tests {
             original
         );
         provider.forms.lock().unwrap().clear();
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         let success = response(
             session.clone(),
             &session.state,
@@ -584,7 +592,7 @@ mod tests {
             .status(),
             StatusCode::BAD_REQUEST
         );
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         assert!(cancel());
         assert_eq!(
             response(
@@ -597,7 +605,7 @@ mod tests {
             .status(),
             StatusCode::BAD_REQUEST
         );
-        let session = launch(&provider, Duration::from_millis(20)).await;
+        let session = launch(&provider, Duration::from_millis(20));
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(!pending());
         assert_eq!(
@@ -624,7 +632,7 @@ mod tests {
         let original = previous();
         let provider = Provider::start().await;
         provider.mode.store(2, Ordering::SeqCst);
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         let request = tokio::spawn(async move {
             response(
                 session.clone(),
@@ -759,7 +767,6 @@ mod tests {
             "http://localhost:3000".into(),
             Duration::from_secs(10),
         )
-        .await
         .unwrap();
         let auth = Url::parse(response.headers()[header::LOCATION].to_str().unwrap()).unwrap();
         let fields: HashMap<_, _> = auth.query_pairs().into_owned().collect();

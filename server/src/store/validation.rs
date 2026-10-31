@@ -49,8 +49,7 @@ pub(super) fn number(v: &Value, key: &str, required: bool) -> Result<Option<f64>
         None if !required => Ok(None),
         Some(n)
             if n.as_f64()
-                .map(|n| n.is_finite() && (0.0..=31536000.0).contains(&n))
-                .unwrap_or(false) =>
+                .is_some_and(|n| n.is_finite() && (0.0..=31_536_000.0).contains(&n)) =>
         {
             Ok(n.as_f64())
         }
@@ -128,8 +127,7 @@ pub(super) fn validate_vocabulary(v: &Value, with_id: bool) -> Result<()> {
     for alias in arr(v, "aliases", 50)? {
         if alias
             .as_str()
-            .map(|s| !s.trim().is_empty() && s.len() <= 200)
-            != Some(true)
+            .is_none_or(|s| s.trim().is_empty() || s.len() > 200)
         {
             return Err(ApiError::bad(
                 "Vocabulary aliases must be nonempty text under 200 characters.",
@@ -206,8 +204,8 @@ pub(super) fn validate_note_usage(usage: &Value) -> Result<()> {
     for value in values.values() {
         if value
             .as_u64()
-            .filter(|value| *value <= 9_007_199_254_740_991)
-            .is_none()
+            .as_ref()
+            .is_none_or(|value| *value > 9_007_199_254_740_991)
         {
             return Err(ApiError::bad(
                 "Notes usage must contain known nonnegative integer token counts.",
@@ -491,8 +489,8 @@ pub(crate) fn validate_meeting(m: &Value) -> Result<()> {
         string(t, "url", 500, true)?;
         if t["bytes"]
             .as_u64()
-            .filter(|b| *b <= 2 * 1024 * 1024 * 1024)
-            .is_none()
+            .as_ref()
+            .is_none_or(|b| *b > 2 * 1024 * 1024 * 1024)
         {
             return Err(ApiError::bad("Invalid audio track size."));
         }

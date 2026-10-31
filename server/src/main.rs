@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![warn(unreachable_pub)]
 mod api;
 mod config;
 mod extensions;
@@ -22,9 +22,9 @@ use tower_http::{
     set_header::SetResponseHeaderLayer,
 };
 
-async fn not_found() -> (axum::http::StatusCode, axum::Json<serde_json::Value>) {
+async fn not_found() -> (http::StatusCode, axum::Json<serde_json::Value>) {
     (
-        axum::http::StatusCode::NOT_FOUND,
+        http::StatusCode::NOT_FOUND,
         axum::Json(serde_json::json!({"error": "Not found"})),
     )
 }
@@ -50,7 +50,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
     config::init(&root).map_err(|e| e.to_string())?;
-    let runtime_paths = paths::RuntimePaths::resolve_at(root).map_err(|e| e.to_string())?;
+    let runtime_paths = paths::RuntimePaths::resolve_at(root);
     paths::private_directory(&runtime_paths.runtime_dir).map_err(|e| e.to_string())?;
     paths::init(runtime_paths.clone());
     if std::env::args().nth(1).as_deref() == Some("--recover-library") {
@@ -67,7 +67,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(serde_json::Value::as_str)
             .ok_or("Enter the library recovery phrase.")?;
         recovery::recover_library(&runtime_paths.data_dir, phrase)?;
-        println!("Library recovery completed. Reopen Echo.");
+
+        #[allow(
+            clippy::print_stdout,
+            reason = "Report successful CLI library recovery to the caller."
+        )]
+        {
+            println!("Library recovery completed. Reopen Echo.");
+        }
         return Ok(());
     }
     let bind = config::loopback_bind(
@@ -77,7 +84,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     store::init()?;
     if std::env::args().nth(1).as_deref() == Some("--check-library") {
         library_validation::verify()?;
-        println!("Library validation completed.");
+
+        #[allow(
+            clippy::print_stdout,
+            reason = "Report successful CLI library validation to the caller."
+        )]
+        {
+            println!("Library validation completed.");
+        }
         return Ok(());
     }
     speech::recover_spools()?;
@@ -152,7 +166,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tokio::pin!(server);
     tokio::select! {
         result = &mut server => result?,
-        _ = shutdown_signal() => {
+        () = shutdown_signal() => {
             let _ = shutdown_tx.send(());
             if tokio::time::timeout(std::time::Duration::from_secs(10), &mut server).await.is_err() {
                 tracing::warn!("Server drain exceeded shutdown deadline");

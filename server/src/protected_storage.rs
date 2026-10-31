@@ -54,7 +54,8 @@ impl LibraryKey {
             "x'{}'",
             self.0
                 .iter()
-                .map(|value| format!("{value:02x}"))
+                .flat_map(|byte| [byte >> 4, byte & 0x0f])
+                .map(|nibble| char::from(b"0123456789abcdef"[usize::from(nibble)]))
                 .collect::<String>()
         ))
     }
@@ -445,7 +446,8 @@ impl Reader {
         while offset < end {
             let index = offset / BLOCK as u64;
             let block_start = index * BLOCK as u64;
-            let block_length = (self.len - block_start).min(BLOCK as u64) as usize;
+            let block_length = usize::try_from((self.len - block_start).min(BLOCK as u64))
+                .map_err(|_| invalid())?;
             self.file.seek(SeekFrom::Start(
                 HEADER_BYTES as u64 + index * (BLOCK as u64 + 16),
             ))?;
@@ -462,19 +464,20 @@ impl Reader {
                     )
                     .map_err(|_| invalid())?,
             );
-            let from = (offset - block_start) as usize;
-            let count = (end - offset).min((block_length - from) as u64) as usize;
+            let from = usize::try_from(offset - block_start).map_err(|_| invalid())?;
+            let count = usize::try_from((end - offset).min((block_length - from) as u64))
+                .map_err(|_| invalid())?;
             output.extend_from_slice(&plaintext[from..from + count]);
             offset += count as u64;
         }
         Ok(output)
     }
     pub(crate) fn read_all(&mut self) -> Result<Vec<u8>> {
-        let mut output = Vec::with_capacity(self.len as usize);
-        while output.len() < (self.len as usize) {
+        let length = usize::try_from(self.len).map_err(|_| invalid())?;
+        let mut output = Vec::with_capacity(length);
+        while output.len() < length {
             let start = output.len() as u64;
-            output
-                .extend(self.read_range(start, (self.len - start).min(8 * 1024 * 1024) as usize)?);
+            output.extend(self.read_range(start, (length - output.len()).min(8 * 1024 * 1024))?);
         }
         Ok(output)
     }
@@ -498,7 +501,7 @@ mod tests {
         std::env::remove_var("ECHO_DATA_DIR");
     }
     fn fixture() -> tempfile::TempDir {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
             .join("tmp");
@@ -558,7 +561,9 @@ mod tests {
     fn ranges_and_empty_files_are_authenticated() {
         let dir = fixture();
         let key = LibraryKey::from_bytes([7; 32]);
-        let data: Vec<_> = (0..BLOCK * 3 + 12).map(|i| (i % 251) as u8).collect();
+        let data: Vec<_> = (0..BLOCK * 3 + 12)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
         let path = dir.path().join("audio");
         write_file(&key, &path, "audio:recording-1:part-1", &data).unwrap();
         let mut reader = Reader::open(&key, &path, "audio:recording-1:part-1").unwrap();

@@ -71,7 +71,7 @@ pub fn FirstTranscript(
             // Capability probes. No microphone request, model download, account login,
             // or inference is started by opening Overview. Optional notes never block it.
             evaluate(&format!(
-                r#"
+                r"
                 async function bounded(work) {{
                     let timer;
                     try {{ return await Promise.race([work, new Promise((_, reject) => {{ timer=setTimeout(() => reject(new Error('Check timed out')), 5000); }})]); }}
@@ -86,7 +86,7 @@ pub fn FirstTranscript(
                 return {{recordingReady, microphonePermission:microphone?.state ?? 'unknown',
                     models:window.echoInference.models, downloadedModels,
                     notesReady:notes ? Boolean(notes.available && notes.models?.includes({notes_model})) : null}};
-                "#,
+                ",
                 notes_model = serde_json::json!(notes_model),
             ))
             .await
@@ -171,7 +171,7 @@ pub fn FirstTranscript(
                                                 .set(
                                                     "Allow microphone access in your browser's site settings, then check again."
                                                         .into(),
-                                                )
+                                                );
                                         }
                                     }
                                 });

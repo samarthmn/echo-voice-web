@@ -44,15 +44,15 @@ pub(super) fn list_db(db: &Connection) -> Result<Vec<Value>> {
     Ok(meetings)
 }
 /// Return the saved library through serialized database access.
-pub fn list_meetings() -> Result<Vec<Value>> {
+pub(crate) fn list_meetings() -> Result<Vec<Value>> {
     with_db(|db| list_db(db))
 }
 /// Validate the meeting ID and return its current persisted document if present.
-pub fn get_meeting(key: &str) -> Result<Option<Value>> {
+pub(crate) fn get_meeting(key: &str) -> Result<Option<Value>> {
     with_db(|db| read_meeting(db, key))
 }
 /// Atomically reconcile only restart errors; late heartbeats cannot undo completed transcripts.
-pub fn resume_browser_processing(ids: &[String]) -> Result<Vec<String>> {
+pub(crate) fn resume_browser_processing(ids: &[String]) -> Result<Vec<String>> {
     for key in ids {
         valid_id(key)?;
     }
@@ -78,7 +78,7 @@ pub fn resume_browser_processing(ids: &[String]) -> Result<Vec<String>> {
     })
 }
 /// Validate creation input and persist a meeting with empty version and audio histories.
-pub fn create_meeting(input: Value) -> Result<Value> {
+pub(crate) fn create_meeting(input: Value) -> Result<Value> {
     object(
         &input,
         &[
@@ -129,7 +129,7 @@ pub fn create_meeting(input: Value) -> Result<Value> {
             m[key] = json!([]);
         }
         for key in ["speechModel", "notesModel"] {
-            if m.get(key).map(Value::is_null).unwrap_or(true) {
+            if m.get(key).is_none_or(Value::is_null) {
                 m[key] = settings[key].clone();
             }
         }
@@ -144,9 +144,9 @@ pub fn create_meeting(input: Value) -> Result<Value> {
     })
 }
 /// Apply an allowlisted patch atomically while preserving consent and reference invariants.
-pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
+pub(crate) fn update_meeting(key: &str, patch: &Value) -> Result<Value> {
     object(
-        &patch,
+        patch,
         &[
             "title",
             "status",
@@ -163,32 +163,32 @@ pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
             "autoTranscribeSuppressed",
         ],
     )?;
-    boolean(&patch, "consent", false)?;
-    boolean(&patch, "autoTranscribeSuppressed", false)?;
-    if let Some(url) = string(&patch, "meetingUrl", 2000, false)? {
+    boolean(patch, "consent", false)?;
+    boolean(patch, "autoTranscribeSuppressed", false)?;
+    if let Some(url) = string(patch, "meetingUrl", 2000, false)? {
         validate_meeting_url(url)?;
     }
     for key in ["speechModel", "notesModel"] {
         if patch.get(key).is_some() {
-            string(&patch, key, 200, true)?;
+            string(patch, key, 200, true)?;
         }
     }
-    string(&patch, "title", 300, false)?;
+    string(patch, "title", 300, false)?;
     if patch.get("title").is_some() {
-        string(&patch, "title", 300, true)?;
+        string(patch, "title", 300, true)?;
     }
     if !patch.get("error").is_some_and(Value::is_null) {
-        string(&patch, "error", 4000, false)?;
+        string(patch, "error", 4000, false)?;
     }
-    number(&patch, "duration", false)?;
-    boolean(&patch, "liveTranscription", false)?;
-    identifier(&patch, "activeTranscriptId", false)?;
-    identifier(&patch, "activeNotesId", false)?;
+    number(patch, "duration", false)?;
+    boolean(patch, "liveTranscription", false)?;
+    identifier(patch, "activeTranscriptId", false)?;
+    identifier(patch, "activeNotesId", false)?;
     if patch.get("status").is_some() {
         status(&patch["status"])?;
     }
     if patch.get("gaps").is_some() {
-        validate_gaps(&patch)?;
+        validate_gaps(patch)?;
     }
     with_db(|db| {
         let tx = db.transaction()?;
@@ -222,7 +222,7 @@ pub fn update_meeting(key: &str, patch: Value) -> Result<Value> {
     })
 }
 /// Reject active recording work, then durably delete the meeting and its managed audio copies.
-pub fn delete_meeting(key: &str) -> Result<()> {
+pub(crate) fn delete_meeting(key: &str) -> Result<()> {
     valid_id(key)?;
     with_db(|db| {
         let tx = db.transaction()?;
@@ -275,7 +275,7 @@ pub fn delete_meeting(key: &str) -> Result<()> {
     })
 }
 /// Append a validated transcript version with the vocabulary snapshot that produced it.
-pub fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
+pub(crate) fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
     object(&input, &["model", "passages", "vocabulary", "label"])?;
     with_db(|db| {
         if input.get("vocabulary").is_none() {
@@ -317,12 +317,16 @@ pub fn add_transcript(key: &str, mut input: Value) -> Result<Value> {
     })
 }
 /// Append manually supplied notes after validating their evidence against a transcript version.
-pub fn add_notes(key: &str, input: Value) -> Result<Value> {
+pub(crate) fn add_notes(key: &str, input: Value) -> Result<Value> {
     add_notes_checked(key, input, None)
 }
 /// Generated notes may commit only against the source version explicitly reviewed for this run.
 /// Manual edits can still save a historical version with its original evidence and provenance.
-pub fn add_generated_notes(key: &str, input: Value, expected_transcript: &str) -> Result<Value> {
+pub(crate) fn add_generated_notes(
+    key: &str,
+    input: Value,
+    expected_transcript: &str,
+) -> Result<Value> {
     add_notes_checked(key, input, Some(expected_transcript))
 }
 /// Validate note provenance and evidence, then update the active notes version atomically.
@@ -393,7 +397,7 @@ fn add_notes_checked(
     })
 }
 /// Create a timestamped bookmark with an optional validated passage reference.
-pub fn add_moment(key: &str, mut input: Value) -> Result<Value> {
+pub(crate) fn add_moment(key: &str, mut input: Value) -> Result<Value> {
     validate_moment(&input, false)?;
     with_db(|db| {
         let tx = db.transaction()?;
@@ -418,9 +422,9 @@ pub fn add_moment(key: &str, mut input: Value) -> Result<Value> {
     })
 }
 /// Apply an allowlisted bookmark patch without losing its stable identity.
-pub fn update_moment(key: &str, moment_id: &str, patch: Value) -> Result<Value> {
+pub(crate) fn update_moment(key: &str, moment_id: &str, patch: &Value) -> Result<Value> {
     valid_id(moment_id)?;
-    object(&patch, &["time", "label", "passageId", "kind"])?;
+    object(patch, &["time", "label", "passageId", "kind"])?;
     with_db(|db| {
         let tx = db.transaction()?;
         let mut m = require_meeting(&tx, key)?;
@@ -444,7 +448,7 @@ pub fn update_moment(key: &str, moment_id: &str, patch: Value) -> Result<Value> 
     })
 }
 /// Remove one bookmark while preserving recording and transcript history.
-pub fn delete_moment(key: &str, moment_id: &str) -> Result<Value> {
+pub(crate) fn delete_moment(key: &str, moment_id: &str) -> Result<Value> {
     valid_id(moment_id)?;
     with_db(|db| {
         let tx = db.transaction()?;

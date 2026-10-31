@@ -7,11 +7,11 @@ pub(super) fn vocabulary_db(db: &Connection) -> Result<Vec<Value>> {
     rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
 }
 /// Return the shared vocabulary used during local transcription.
-pub fn list_vocabulary() -> Result<Vec<Value>> {
+pub(crate) fn list_vocabulary() -> Result<Vec<Value>> {
     with_db(|db| vocabulary_db(db))
 }
 /// Create a validated term and aliases with a stable identity.
-pub fn add_vocabulary(mut input: Value) -> Result<Value> {
+pub(crate) fn add_vocabulary(mut input: Value) -> Result<Value> {
     object(&input, &["term", "aliases", "enabled"])?;
     if input.get("aliases").is_none() {
         input["aliases"] = json!([]);
@@ -36,9 +36,9 @@ pub fn add_vocabulary(mut input: Value) -> Result<Value> {
     })
 }
 /// Apply a validated vocabulary patch to an existing term.
-pub fn update_vocabulary(key: &str, patch: Value) -> Result<Value> {
+pub(crate) fn update_vocabulary(key: &str, patch: &Value) -> Result<Value> {
     valid_id(key)?;
-    object(&patch, &["term", "aliases", "enabled"])?;
+    object(patch, &["term", "aliases", "enabled"])?;
     with_db(|db| {
         let source: Option<String> = db
             .query_row("SELECT data FROM vocabulary WHERE id=?", [key], |r| {
@@ -64,7 +64,7 @@ pub fn update_vocabulary(key: &str, patch: Value) -> Result<Value> {
     })
 }
 /// Remove a term without altering the snapshots attached to saved transcripts.
-pub fn delete_vocabulary(key: &str) -> Result<()> {
+pub(crate) fn delete_vocabulary(key: &str) -> Result<()> {
     valid_id(key)?;
     with_db(|db| {
         if db.execute("DELETE FROM vocabulary WHERE id=?", [key])? == 0 {

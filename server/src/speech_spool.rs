@@ -7,10 +7,10 @@ use aes_gcm::{
 use rand::{rngs::OsRng, RngCore};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
-pub const BLOCK: usize = 65_536;
-pub struct Writer {
+pub(super) const BLOCK: usize = 65_536;
+pub(super) struct Writer {
     file: tokio::fs::File,
     cipher: Aes256Gcm,
     key: Zeroizing<[u8; 32]>,
@@ -20,7 +20,7 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub async fn create(path: &Path) -> std::io::Result<Self> {
+    pub(super) async fn create(path: &Path) -> std::io::Result<Self> {
         let mut key = Zeroizing::new([0; 32]);
         OsRng.fill_bytes(key.as_mut());
         let cipher = Aes256Gcm::new_from_slice(key.as_ref())
@@ -40,7 +40,7 @@ impl Writer {
             pending: Zeroizing::new(Vec::with_capacity(BLOCK)),
         })
     }
-    pub async fn append(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+    pub(super) async fn append(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         let mut remaining = bytes;
         while !remaining.is_empty() {
             let count = (BLOCK - self.pending.len()).min(remaining.len());
@@ -58,7 +58,11 @@ impl Writer {
             let block = self.pending.as_slice();
             let mut binding = [0u8; 12];
             binding[..8].copy_from_slice(&self.index.to_le_bytes());
-            binding[8..].copy_from_slice(&(block.len() as u32).to_le_bytes());
+            binding[8..].copy_from_slice(
+                &u32::try_from(block.len())
+                    .map_err(std::io::Error::other)?
+                    .to_le_bytes(),
+            );
             let mut nonce = [0; 12];
             nonce[4..].copy_from_slice(&self.index.to_le_bytes());
             let encrypted = self
@@ -74,12 +78,11 @@ impl Writer {
             self.file.write_all(&binding[8..]).await?;
             self.file.write_all(&encrypted).await?;
             self.index += 1;
-            use zeroize::Zeroize;
             self.pending.zeroize();
         }
         Ok(())
     }
-    pub async fn finish(mut self) -> std::io::Result<(Zeroizing<[u8; 32]>, usize)> {
+    pub(super) async fn finish(mut self) -> std::io::Result<(Zeroizing<[u8; 32]>, usize)> {
         self.seal().await?;
         self.file.flush().await?;
         Ok((self.key, self.bytes))

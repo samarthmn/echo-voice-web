@@ -39,8 +39,7 @@ pub(super) fn audio_header(data: &[u8], mime: &str) -> Result<()> {
         data.get(4..8) == Some(b"ftyp")
     } else {
         data.starts_with(b"ID3")
-            || (data.first() == Some(&0xff)
-                && data.get(1).map(|b| b & 0xe0 == 0xe0).unwrap_or(false))
+            || (data.first() == Some(&0xff) && data.get(1).is_some_and(|b| b & 0xe0 == 0xe0))
     };
     if !valid {
         return Err(ApiError::new(415,"This file does not contain a supported audio recording. Choose an original audio file."));
@@ -52,7 +51,7 @@ pub(super) fn audio_url(meeting: &str, track: &str) -> String {
     format!("/api/meetings/{meeting}/audio/{track}")
 }
 /// Append a durable audio chunk; identical sequence/hash retries do not duplicate bytes.
-pub fn add_audio(
+pub(crate) fn add_audio(
     key: &str,
     data: &[u8],
     track_id: Option<&str>,
@@ -79,10 +78,7 @@ pub fn add_audio(
             "Each audio upload must be smaller than 128 MB.",
         ));
     }
-    if sequence
-        .map(|s| !(0..=1_000_000).contains(&s))
-        .unwrap_or(false)
-    {
+    if sequence.is_some_and(|s| !(0..=1_000_000).contains(&s)) {
         return Err(ApiError::bad("Invalid audio sequence."));
     }
     let digest = format!("{:x}", Sha256::digest(data));
@@ -107,7 +103,7 @@ pub fn add_audio(
             params![key, track_id],
             |r| r.get(0),
         )?;
-        let seq = sequence.unwrap_or(last.map(|s| s + 1).unwrap_or(0));
+        let seq = sequence.unwrap_or(last.map_or(0, |s| s + 1));
         let existing: Option<(String, String, u64)> = tx
             .query_row(
                 "SELECT digest,file,bytes FROM audio_chunks WHERE meeting_id=? AND track_id=? AND sequence=?",
@@ -140,7 +136,7 @@ pub fn add_audio(
                 ApiError::new(500, "The audio index is damaged. Restore from a backup.")
             });
         }
-        if seq != last.map(|s| s + 1).unwrap_or(0) {
+        if seq != last.map_or(0, |s| s + 1) {
             return Err(ApiError::new(
                 409,
                 "Audio arrived out of order. Retry the missing chunk before continuing.",
@@ -191,7 +187,15 @@ pub fn add_audio(
         .sync_all()?;
         tx.execute(
             "INSERT INTO audio_chunks VALUES(?,?,?,?,?,?)",
-            params![key, track_id, seq, name, data.len() as i64, digest],
+            params![
+                key,
+                track_id,
+                seq,
+                name,
+                i64::try_from(data.len())
+                    .map_err(|_| ApiError::bad("Audio chunk is too large."))?,
+                digest
+            ],
         )?;
         let track = json!({"id":track_id,"label":label,"mimeType":mime,"bytes":bytes,"url":audio_url(key,track_id)});
         let tracks = m["tracks"]
@@ -214,12 +218,12 @@ pub fn add_audio(
     result
 }
 #[derive(Debug, Clone)]
-pub struct AudioPart {
+pub(crate) struct AudioPart {
     pub path: PathBuf,
     pub bytes: u64,
 }
 /// Resolve ordered track chunks and verify their managed files for streaming playback.
-pub fn get_audio_parts(key: &str, track_id: &str) -> Result<(Value, Vec<AudioPart>)> {
+pub(crate) fn get_audio_parts(key: &str, track_id: &str) -> Result<(Value, Vec<AudioPart>)> {
     valid_id(track_id)?;
     with_db(|db| {
         let m = require_meeting(db, key)?;

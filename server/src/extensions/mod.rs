@@ -20,7 +20,20 @@ mod pairing;
 pub(crate) use pairing::cleanup_loop as cleanup_pairing_loop;
 use pairing::{approve, cancel, claim, hello, intent, pair, reject, request_metadata};
 type Result<T> = std::result::Result<T, ApiError>;
-const RATE: u64 = 16000;
+const RATE: u64 = 16_000;
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "Recording frames are bounded to eight hours at 16 kHz, well within exact f64 integers."
+)]
+fn frame_seconds(frames: u64) -> f64 {
+    frames as f64 / RATE as f64
+}
+fn pcm_bytes(frames: u64) -> Result<usize> {
+    frames
+        .checked_mul(2)
+        .and_then(|bytes| usize::try_from(bytes).ok())
+        .ok_or_else(|| ApiError::bad("PCM audio size exceeds the supported range."))
+}
 const MAX_FRAMES: u64 = RATE * 8 * 3600;
 const PART_FRAMES: u64 = RATE * 30 * 60;
 static LIBRARY_ID: OnceLock<RwLock<Option<String>>> = OnceLock::new();
@@ -96,8 +109,10 @@ fn recording(db: &Connection, id: &str) -> Result<Value> {
             |r| r.get(0),
         )
         .optional()?;
-    raw.map(|s| serde_json::from_str(&s).map_err(Into::into))
-        .unwrap_or_else(|| Err(ApiError::not_found()))
+    raw.map_or_else(
+        || Err(ApiError::not_found()),
+        |s| serde_json::from_str(&s).map_err(Into::into),
+    )
 }
 fn save_recording(db: &Connection, r: &Value) -> Result<()> {
     db.execute(
@@ -355,9 +370,9 @@ async fn access(req: Request, next: Next) -> Response {
     response
 }
 fn reply_error(e: ApiError) -> Response {
-    (e.status, reply(json!({"error":e.message}))).into_response()
+    e.into_response()
 }
-pub fn extension_routes() -> Router {
+pub(crate) fn extension_routes() -> Router {
     Router::new()
         .route("/connection", get(connection).delete(disconnect))
         .route("/hello", get(hello))
@@ -372,7 +387,7 @@ pub fn extension_routes() -> Router {
         .layer(DefaultBodyLimit::max(256 * 1024))
         .layer(axum::middleware::from_fn(access))
 }
-pub fn workspace_routes() -> Router {
+pub(crate) fn workspace_routes() -> Router {
     Router::new()
         .route("/extensions/meetings/{id}/audio", get(meeting_audio))
         .route("/extensions/intent", post(intent))

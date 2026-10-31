@@ -25,7 +25,7 @@ pub fn Calendar(notify: EventHandler<String>, on_extension: EventHandler<()>) ->
                     if s["google"]["connected"] == true {
                         match get("/integrations/calendar").await {
                             Ok(v) => {
-                                events.set(v["events"].as_array().cloned().unwrap_or_default())
+                                events.set(v["events"].as_array().cloned().unwrap_or_default());
                             }
                             Err(e) => {
                                 events.set(Vec::new());
@@ -101,7 +101,7 @@ pub fn Calendar(notify: EventHandler<String>, on_extension: EventHandler<()>) ->
                                         "window.location.assign('/api/integrations/google/connect')",
                                     );
                                 } else {
-                                    setup.set(true)
+                                    setup.set(true);
                                 }
                             },
                             if reconnect {

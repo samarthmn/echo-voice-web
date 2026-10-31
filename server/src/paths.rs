@@ -3,15 +3,15 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-pub type PathError = Box<dyn std::error::Error + Send + Sync>;
+pub(crate) type PathError = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Clone, Debug)]
-pub struct RuntimePaths {
+pub(crate) struct RuntimePaths {
     pub resource_root: PathBuf,
     pub data_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub runtime_dir: PathBuf,
 }
-pub fn resource_root() -> Result<PathBuf, PathError> {
+pub(crate) fn resource_root() -> Result<PathBuf, PathError> {
     if let Some(root) = std::env::var_os("ECHO_RESOURCE_ROOT") {
         return Ok(fs::canonicalize(PathBuf::from(root))?);
     }
@@ -33,31 +33,30 @@ pub fn resource_root() -> Result<PathBuf, PathError> {
 }
 impl RuntimePaths {
     #[cfg(test)]
-    pub fn resolve() -> Result<Self, PathError> {
-        Self::resolve_at(resource_root()?)
+    pub(crate) fn resolve() -> Result<Self, PathError> {
+        Ok(Self::resolve_at(resource_root()?))
     }
-    pub fn resolve_at(resource_root: PathBuf) -> Result<Self, PathError> {
+    pub(crate) fn resolve_at(resource_root: PathBuf) -> Self {
         let data_dir = std::env::var_os("ECHO_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| crate::config::get().data_dir.clone());
+            .map_or_else(|| crate::config::get().data_dir.clone(), PathBuf::from);
         let data_dir = if data_dir.is_absolute() {
             data_dir
         } else {
             resource_root.join(data_dir)
         };
-        Ok(Self {
+        Self {
             cache_dir: data_dir.join("models"),
             runtime_dir: resource_root.join("tmp"),
             resource_root,
             data_dir,
-        })
+        }
     }
 }
 #[cfg(not(test))]
 static PATHS: std::sync::OnceLock<RuntimePaths> = std::sync::OnceLock::new();
 #[cfg(test)]
 static TEST_PATHS: std::sync::Mutex<Option<RuntimePaths>> = std::sync::Mutex::new(None);
-pub fn init(paths: RuntimePaths) {
+pub(crate) fn init(paths: RuntimePaths) {
     #[cfg(not(test))]
     {
         let _ = PATHS.set(paths);
@@ -69,7 +68,7 @@ pub fn init(paths: RuntimePaths) {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(paths);
     }
 }
-pub fn get() -> Result<RuntimePaths, crate::security::ApiError> {
+pub(crate) fn get() -> Result<RuntimePaths, crate::security::ApiError> {
     #[cfg(not(test))]
     {
         PATHS.get().cloned().ok_or_else(|| {
@@ -87,7 +86,7 @@ pub fn get() -> Result<RuntimePaths, crate::security::ApiError> {
             })
     }
 }
-pub fn private_directory(path: &Path) -> Result<(), PathError> {
+pub(crate) fn private_directory(path: &Path) -> Result<(), PathError> {
     // Reject symlinks in every existing component, including an attacker-controlled parent.
     let mut current = PathBuf::new();
     for part in path.components() {
@@ -102,7 +101,13 @@ pub fn private_directory(path: &Path) -> Result<(), PathError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        if fs::metadata(path)?.uid() != unsafe { libc::geteuid() } {
+        #[allow(
+            unsafe_code,
+            reason = "Read the effective user ID to check private directory ownership."
+        )]
+        // SAFETY: geteuid takes no arguments, has no preconditions, and only reads the effective user ID.
+        let effective_uid = unsafe { libc::geteuid() };
+        if fs::metadata(path)?.uid() != effective_uid {
             return Err("Private directory belongs to another account".into());
         }
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;

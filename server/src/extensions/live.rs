@@ -73,7 +73,7 @@ pub(super) fn live_snapshot(r: &Value, meeting: &Value, lib: &str, now: i64) -> 
     tail.reverse();
     json!({"recordingId":r["recordingId"],"meetingId":r["meetingId"],"libraryId":lib,"status":status,
         "throughFrame":through,"committedThroughFrame":r["draft"]["committedThroughFrame"].as_u64().unwrap_or(if finalized { total } else { 0 }),
-        "totalFrames":total,"backlogSeconds":total.saturating_sub(through) as f64 / RATE as f64,
+        "totalFrames":total,"backlogSeconds":frame_seconds(total.saturating_sub(through)),
         "preview":tail.join(" "),"provisional":r["draft"]["words"].as_array().is_some_and(|words| words.iter().any(|word| word["provisional"] == true))})
 }
 /// A status heartbeat is advisory; it never changes draft text or acquires a processing lease.
@@ -168,7 +168,7 @@ pub(super) async fn draft(Path(id): Path<String>, Json(v): Json<Value>) -> Resul
         .ok_or_else(|| ApiError::bad("Invalid committed cursor."))?;
     let words = v["words"]
         .as_array()
-        .filter(|w| w.len() <= 100000)
+        .filter(|w| w.len() <= 100_000)
         .ok_or_else(|| ApiError::bad("Draft is too large."))?;
     let mut previous = 0;
     for word in words {

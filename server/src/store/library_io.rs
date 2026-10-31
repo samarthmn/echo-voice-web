@@ -1,4 +1,11 @@
-use super::*;
+use super::{
+    arr, audio_header, audio_url, data_dir, defaults, fs, get_meeting, id, identifier, init, json,
+    list_db, list_meetings, migrate_legacy_notes_settings, mkdir, now, object, params,
+    read_protected, settings_db, string, timestamp, unique, valid_id, validate_meeting,
+    validate_settings, validate_vocabulary, vocabulary_db, with_db, write_protected_for, ApiError,
+    Digest, Engine, HashMap, Path, PathBuf, Result, Sha256, Value, MAX_AUDIO, MAX_BACKUP, STANDARD,
+};
+use std::fmt::Write as _;
 
 /// Measure managed disk usage recursively without following symbolic links.
 fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
@@ -15,7 +22,7 @@ fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
     Ok(bytes)
 }
 /// Summarize meeting counts and library disk usage for storage settings.
-pub fn storage_info() -> Result<Value> {
+pub(crate) fn storage_info() -> Result<Value> {
     init()?;
     let root = data_dir()?;
     let bytes = directory_bytes(&root)?;
@@ -26,11 +33,11 @@ pub fn storage_info() -> Result<Value> {
 }
 
 /// Build a portable backup of meeting data and audio while excluding account credentials.
-pub fn export_library() -> Result<Value> {
+pub(crate) fn export_library() -> Result<Value> {
     with_db(|db| {
         let meetings = list_db(db)?;
         let count: i64 = db.query_row("SELECT COUNT(*) FROM meetings", [], |r| r.get(0))?;
-        if count as usize != meetings.len() {
+        if usize::try_from(count).ok() != Some(meetings.len()) {
             return Err(ApiError::new(410,"A meeting record is damaged. Restore it from a backup before exporting the complete library. Healthy meetings remain available."));
         }
         let mut stmt=db.prepare("SELECT meeting_id,track_id,sequence,file,bytes,digest FROM audio_chunks ORDER BY meeting_id,track_id,sequence")?;
@@ -87,9 +94,9 @@ struct PreparedChunk {
     data: Vec<u8>,
 }
 /// Validate a complete backup before transactionally importing its records and audio.
-pub fn import_library(input: Value) -> Result<Value> {
+pub(crate) fn import_library(input: &Value) -> Result<Value> {
     object(
-        &input,
+        input,
         &[
             "format",
             "version",
@@ -104,9 +111,9 @@ pub fn import_library(input: Value) -> Result<Value> {
     if input["format"] != "echo-voice-web" || input["version"] != 1 {
         return Err(ApiError::bad("Choose an Echo Voice web backup (format echo-voice-web, version 1). Desktop library migration is not supported."));
     }
-    timestamp(&input, "exportedAt")?;
-    let meetings = arr(&input, "meetings", 10000)?;
-    let vocabulary = arr(&input, "vocabulary", 10000)?;
+    timestamp(input, "exportedAt")?;
+    let meetings = arr(input, "meetings", 10000)?;
+    let vocabulary = arr(input, "vocabulary", 10000)?;
     let receipts = match input.get("extensionRecordings") {
         Some(v) => crate::extensions::validate_receipts(v, meetings)?,
         None => crate::extensions::validate_receipts(&json!([]), meetings)?,
@@ -164,15 +171,15 @@ pub fn import_library(input: Value) -> Result<Value> {
             );
         }
     }
-    let mut chunks = arr(&input, "audio", 100000)?.iter().collect::<Vec<_>>();
+    let mut chunks = arr(input, "audio", 100_000)?.iter().collect::<Vec<_>>();
     for chunk in &chunks {
         object(chunk, &["meetingId", "trackId", "sequence", "data"])?;
         identifier(chunk, "meetingId", true)?;
         identifier(chunk, "trackId", true)?;
         if chunk["sequence"]
             .as_i64()
-            .filter(|v| (0..=1_000_000).contains(v))
-            .is_none()
+            .as_ref()
+            .is_none_or(|v| !(0..=1_000_000).contains(v))
         {
             return Err(ApiError::bad(
                 "The backup contains an invalid chunk sequence.",
@@ -328,7 +335,8 @@ pub fn import_library(input: Value) -> Result<Value> {
                         chunk.track,
                         chunk.sequence,
                         chunk.filename,
-                        chunk.data.len() as i64,
+                        i64::try_from(chunk.data.len())
+                            .map_err(|_| ApiError::bad("Audio chunk is too large."))?,
                         format!("{:x}", Sha256::digest(&chunk.data))
                     ],
                 )?;
@@ -355,6 +363,11 @@ pub fn import_library(input: Value) -> Result<Value> {
     outcome
 }
 /// Format transcript timestamps for subtitle or readable text exports.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Subtitle timestamps intentionally truncate whole seconds and round clamped milliseconds; float casts saturate at u64 bounds."
+)]
 fn stamp(seconds: f64, srt: bool) -> String {
     let whole = seconds.floor() as u64;
     let base = format!(
@@ -377,7 +390,7 @@ fn strv<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
 /// Render a saved meeting as a supported document or subtitle download.
-pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, String)> {
+pub(crate) fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, String)> {
     let m = get_meeting(key)?.ok_or_else(ApiError::not_found)?;
     let name = m["title"]
         .as_str()
@@ -440,18 +453,18 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
         strv(&m, "createdAt"),
         strv(&m, "mode"),
         stamp(m["duration"].as_f64().unwrap_or(0.0), false),
-        transcript
-            .map(|t| strv(t, "model"))
-            .unwrap_or("No transcript"),
-        transcript.map(|t| strv(t, "id")).unwrap_or("None")
+        transcript.map_or("No transcript", |t| strv(t, "model")),
+        transcript.map_or("None", |t| strv(t, "id"))
     );
     if let Some(notes) = notes {
-        body.push_str(&format!(
+        write!(
+            body,
             "\nNotes provider: {}\nNotes model: {}\nNotes source transcript: {}\n",
             notes["provider"].as_str().unwrap_or("ollama"),
             strv(notes, "model"),
             strv(notes, "transcriptVersionId")
-        ));
+        )
+        .map_err(|error| ApiError::new(500, error.to_string()))?;
         if notes["transcriptVersionId"] != m["activeTranscriptId"] {
             body.push_str("These notes refer to an earlier transcript version.\n");
         }
@@ -460,13 +473,15 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             ("decisions", "Decisions"),
             ("actions", "Action items"),
         ] {
-            body.push_str(&format!("\n## {title}\n"));
+            write!(body, "\n## {title}\n")
+                .map_err(|error| ApiError::new(500, error.to_string()))?;
             for n in notes[group]
                 .as_array()
                 .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
             {
-                body.push_str(&format!(
-                    "- {}{}{}{} [Evidence: {}]\n",
+                writeln!(
+                    body,
+                    "- {}{}{}{} [Evidence: {}]",
                     if n["done"] == true { "[x] " } else { "" },
                     strv(n, "text"),
                     n.get("owner")
@@ -484,20 +499,23 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
                         .filter_map(Value::as_str)
                         .collect::<Vec<_>>()
                         .join(", ")
-                ));
+                )
+                .map_err(|error| ApiError::new(500, error.to_string()))?;
             }
         }
     }
     body.push_str("\n## Transcript\n");
     for p in passages {
-        body.push_str(&format!(
+        write!(
+            body,
             "\n[{}–{}] {}: {} [{}]\n",
             stamp(p["start"].as_f64().unwrap_or(0.0), false),
             stamp(p["end"].as_f64().unwrap_or(0.0), false),
             strv(p, "speaker"),
             strv(p, "text"),
             strv(p, "id")
-        ));
+        )
+        .map_err(|error| ApiError::new(500, error.to_string()))?;
     }
     if !m["moments"]
         .as_array()
@@ -509,13 +527,15 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             .as_array()
             .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
         {
-            body.push_str(&format!(
-                "- [{}] {}: {} [{}]\n",
+            writeln!(
+                body,
+                "- [{}] {}: {} [{}]",
                 stamp(moment["time"].as_f64().unwrap_or(0.0), false),
                 strv(moment, "kind"),
                 strv(moment, "label"),
                 strv(moment, "passageId")
-            ));
+            )
+            .map_err(|error| ApiError::new(500, error.to_string()))?;
         }
     }
     if !m["gaps"]
@@ -528,12 +548,14 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             .as_array()
             .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
         {
-            body.push_str(&format!(
-                "- {}–{}: {}\n",
+            writeln!(
+                body,
+                "- {}–{}: {}",
                 stamp(gap["start"].as_f64().unwrap_or(0.0), false),
                 stamp(gap["end"].as_f64().unwrap_or(0.0), false),
                 strv(gap, "reason")
-            ));
+            )
+            .map_err(|error| ApiError::new(500, error.to_string()))?;
         }
     }
     if !m["tracks"]
@@ -546,12 +568,14 @@ pub fn export_meeting(key: &str, format: &str) -> Result<(String, &'static str, 
             .as_array()
             .ok_or_else(|| ApiError::bad("Invalid or corrupted saved data."))?
         {
-            body.push_str(&format!(
-                "- {} ({}, {} bytes); download separately from Echo Voice.\n",
+            writeln!(
+                body,
+                "- {} ({}, {} bytes); download separately from Echo Voice.",
                 strv(t, "label"),
                 strv(t, "mimeType"),
                 t["bytes"]
-            ));
+            )
+            .map_err(|error| ApiError::new(500, error.to_string()))?;
         }
     }
     Ok((

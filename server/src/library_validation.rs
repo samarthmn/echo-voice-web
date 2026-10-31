@@ -248,7 +248,7 @@ mod tests {
         store::test_key();
         let audio = b"RIFF\x24\0\0\0WAVEfmt legacy-audio-secret";
         let meeting = json!({"id":"legacy_meeting-1","title":"Legacy backup","mode":"import","consent":false,"status":"saved","createdAt":store::now(),"updatedAt":store::now(),"duration":0,"speechModel":"local","notesModel":"local","liveTranscription":false,"tracks":[{"id":"room","label":"Room","mimeType":"audio/wav","bytes":audio.len(),"url":"/api/meetings/legacy_meeting-1/audio/room"}],"transcripts":[],"notes":[],"moments":[],"gaps":[]});
-        store::import_library(json!({"format":"echo-voice-web","version":1,"exportedAt":store::now(),"meetings":[meeting],"vocabulary":[],"audio":[{"meetingId":"legacy_meeting-1","trackId":"room","sequence":0,"data":STANDARD.encode(audio)}]})).unwrap();
+        store::import_library(&json!({"format":"echo-voice-web","version":1,"exportedAt":store::now(),"meetings":[meeting],"vocabulary":[],"audio":[{"meetingId":"legacy_meeting-1","trackId":"room","sequence":0,"data":STANDARD.encode(audio)}]})).unwrap();
         verify().unwrap();
         for invalid in [
             "../outside.chunk",

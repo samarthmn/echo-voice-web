@@ -5,23 +5,26 @@ use std::{fs, net::SocketAddr, path::PathBuf, sync::OnceLock};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Config {
+pub(crate) struct Config {
     pub bind: String,
     pub data_dir: PathBuf,
     #[serde(default)]
     pub google_redirect_uri: Option<String>,
+    #[allow(
+        clippy::zero_sized_map_values,
+        reason = "Serde flatten needs a map to retain unknown key names while discarding their values."
+    )]
     #[serde(flatten)]
     unknown: std::collections::BTreeMap<String, serde::de::IgnoredAny>,
 }
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Load settings before serving so malformed configuration is reported as an error.
-pub fn init(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub(crate) fn init(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let override_path = std::env::var_os("ECHO_CONFIG_FILE");
     let path = override_path
         .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("echo.config.json"));
+        .map_or_else(|| PathBuf::from("echo.config.json"), PathBuf::from);
     let path = if path.is_absolute() {
         path
     } else {
@@ -50,27 +53,29 @@ fn parse_config(path: &std::path::Path, source: &str) -> Result<Config, String> 
     Ok(config)
 }
 
-pub fn get() -> &'static Config {
+#[allow(
+    clippy::zero_sized_map_values,
+    reason = "Serde flatten needs a map to retain unknown key names while discarding their values."
+)]
+pub(crate) fn get() -> &'static Config {
     CONFIG.get_or_init(|| Config {
         bind: "127.0.0.1:3000".into(),
         data_dir: ".echo-data".into(),
         google_redirect_uri: None,
-        unknown: Default::default(),
+        unknown: std::collections::BTreeMap::default(),
     })
 }
 
-pub fn redirect_uri() -> String {
+pub(crate) fn redirect_uri() -> String {
     get().google_redirect_uri.clone().unwrap_or_else(|| {
         let raw = std::env::var("ECHO_BIND").unwrap_or_else(|_| get().bind.clone());
-        let port = loopback_bind(&raw)
-            .map(|address| address.port())
-            .unwrap_or(3000);
+        let port = loopback_bind(&raw).map_or(3000, |address| address.port());
         format!("http://localhost:{port}/api/integrations/google/callback")
     })
 }
 
 /// Reject public interfaces before opening a listener, including wildcard IPs.
-pub fn loopback_bind(raw: &str) -> Result<SocketAddr, ApiError> {
+pub(crate) fn loopback_bind(raw: &str) -> Result<SocketAddr, ApiError> {
     let address: SocketAddr = raw.parse().map_err(|_| {
         ApiError::bad("The bind address must be a loopback IP and port, such as 127.0.0.1:3000.")
     })?;
@@ -107,7 +112,7 @@ mod tests {
                 Ok(())
             }
         }
-        let log = Log(Default::default());
+        let log = Log(std::sync::Arc::default());
         let writer = log.clone();
         let subscriber = tracing_subscriber::fmt()
             .without_time()

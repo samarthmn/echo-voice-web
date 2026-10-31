@@ -48,7 +48,7 @@ pub(crate) fn settings_db(db: &Connection) -> Result<Value> {
     })
 }
 /// Return current workspace preferences with migrations applied.
-pub fn get_settings() -> Result<Value> {
+pub(crate) fn get_settings() -> Result<Value> {
     with_db(|db| settings_db(db))
 }
 /// Validate preference fields and enforce local provider URLs and supported provider choices.
@@ -99,7 +99,7 @@ pub(super) fn validate_settings(v: &Value, full: bool) -> Result<()> {
     Ok(())
 }
 /// Merge an allowlisted preference patch and persist the validated result.
-pub fn update_settings(mut patch: Value) -> Result<Value> {
+pub(crate) fn update_settings(mut patch: Value) -> Result<Value> {
     migrate_legacy_notes_settings(&mut patch);
     validate_settings(&patch, false)?;
     with_db(|db| {

@@ -71,7 +71,7 @@ pub fn NotesModelSelect(
                     onclick: move |_| refresh += 1,
                     "Check connection"
                 }
-            } else if status()["models"].as_array().is_none_or(|items| items.is_empty()) {
+            } else if status()["models"].as_array().is_none_or(std::vec::Vec::is_empty) {
                 p { class: "small-muted",
                     "No models installed yet — download one in "
                     button {

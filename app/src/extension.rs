@@ -172,7 +172,7 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                                                 .set(
                                                     "Could not copy. Select and copy brave://extensions manually."
                                                         .into(),
-                                                )
+                                                );
                                         }
                                     }
                                 });
@@ -212,7 +212,7 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                                                     .set(
                                                         "Could not copy the folder. Select and copy the path manually."
                                                             .into(),
-                                                    )
+                                                    );
                                             }
                                         }
                                     });
@@ -269,7 +269,7 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                                                 .set(
                                                     "Could not connect. Open the extension and try again."
                                                         .into(),
-                                                )
+                                                );
                                         }
                                         Err(e) => {
                                             error
@@ -277,7 +277,7 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                                                     format!(
                                                         "Could not reach the extension: {e}. Open it and try again.",
                                                     ),
-                                                )
+                                                );
                                         }
                                     }
                                 }
@@ -289,7 +289,7 @@ pub fn ExtensionConnectionPanel(notify: EventHandler<String>) -> Element {
                                             } else {
                                                 e
                                             },
-                                        )
+                                        );
                                 }
                             }
                             busy.set(false);
@@ -491,7 +491,7 @@ pub fn ExtensionRecordingStatus(meeting: Signal<Value>, notify: EventHandler<Str
                                                                             { "recordingId" : id, "commandId" : command, "action" :
                                                                             action }
                                                                         ),
-                                                                    )
+                                                                    );
                                                             }
                                                             Err(e) => error.set(e),
                                                         }

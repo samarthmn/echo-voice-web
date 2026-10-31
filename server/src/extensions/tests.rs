@@ -133,8 +133,8 @@ fn input() -> Value {
 }
 #[test]
 fn live_status_snapshot_bounds_preview_and_expires_heartbeats() {
-    let mut r = json!({"recordingId":"r","meetingId":"m","status":"receiving","liveTranscription":true,"generation":2,"totalFrames":640000,
-            "draft":{"throughFrame":320000,"committedThroughFrame":280000,"words":[{"text":"é".repeat(1000),"provisional":true}]},
+    let mut r = json!({"recordingId":"r","meetingId":"m","status":"receiving","liveTranscription":true,"generation":2,"totalFrames":640_000,
+            "draft":{"throughFrame":320_000,"committedThroughFrame":280_000,"words":[{"text":"é".repeat(1000),"provisional":true}]},
             "liveStatus":{"status":"catching-up","updatedAt":100,"generation":2}});
     let current = live_snapshot(&r, &json!({}), "library", 110);
     assert_eq!(current["status"], "catching-up");
@@ -177,10 +177,10 @@ fn live_status_snapshot_bounds_preview_and_expires_heartbeats() {
 #[tokio::test]
 async fn live_preview_ownership_status_fencing_and_connection_revocation() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-    let directory = crate::store::test_directory();
+    let directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    store::test_key();
     store::init().unwrap();
     let app = app();
     let first = Uuid::new_v4().to_string();
@@ -349,10 +349,10 @@ async fn live_preview_ownership_status_fencing_and_connection_revocation() {
 #[tokio::test]
 async fn completed_receipts_authenticate_every_audio_block_and_manifest_digest() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-    let directory = crate::store::test_directory();
+    let directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    store::test_key();
     store::init().unwrap();
     let app = app();
     let (token, _, _) = pair(&app, &Uuid::new_v4().to_string()).await;
@@ -457,10 +457,10 @@ async fn completed_receipts_authenticate_every_audio_block_and_manifest_digest()
 #[tokio::test]
 async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-    let directory = crate::store::test_directory();
+    let directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    store::test_key();
     store::init().unwrap();
     store::with_db(|db| {
         assert_eq!(
@@ -912,7 +912,7 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(&bytes[..44], &wav_header(4));
+    assert_eq!(&bytes[..44], &wav_header(4).unwrap());
     assert_eq!(&bytes[44..], &data);
     let (status, headers, bytes) = send(
         &app,
@@ -938,7 +938,7 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert!(store::with_db(|db| Ok(recording(db, &id)?["draft"].is_object())).unwrap());
-    store::update_meeting(&meeting, json!({"status":"processing"})).unwrap();
+    store::update_meeting(&meeting, &json!({"status":"processing"})).unwrap();
     assert!(store::with_db(|db| Ok(recording(db, &id)?["draft"].is_object())).unwrap());
     store::add_transcript(
         &meeting,
@@ -975,7 +975,7 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
     )
     .await;
     assert_eq!(r["status"], "deleted");
-    assert!(store::import_library(backup).is_err());
+    assert!(store::import_library(&backup).is_err());
     let tombstone_backup = store::export_library().unwrap();
     assert_eq!(
         tombstone_backup["extensionRecordings"][0]["status"],
@@ -1053,10 +1053,10 @@ async fn pairing_durable_ingest_security_replay_recovery_tombstones_and_leases()
 #[tokio::test]
 async fn thirty_minute_parts_form_one_stream_and_portable_receipts_restore() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-    let directory = crate::store::test_directory();
+    let directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    store::test_key();
     store::init().unwrap();
     let app = app();
     let install = Uuid::new_v4().to_string();
@@ -1066,7 +1066,7 @@ async fn thirty_minute_parts_form_one_stream_and_portable_receipts_restore() {
     let (status, r) = json_request(&app, "PUT", &path, ORIGIN, Some(&token), input()).await;
     assert_eq!(status, StatusCode::OK);
     let meeting = r["meetingId"].as_str().unwrap().to_string();
-    let block = vec![17u8; (RATE * 2) as usize];
+    let block = vec![17u8; pcm_bytes(RATE).unwrap()];
     let tail = vec![29u8; 2];
     store::mkdir(&pcm_dir(&id).unwrap()).unwrap();
     store::write_protected(&pcm_dir(&id).unwrap().join("fixture-block.pcm"), &block).unwrap();
@@ -1109,7 +1109,7 @@ async fn thirty_minute_parts_form_one_stream_and_portable_receipts_restore() {
     assert_eq!(m["tracks"].as_array().unwrap().len(), 2);
     assert_eq!(m["tracks"][0]["bytes"], 44 + PART_FRAMES * 2);
     assert_eq!(m["tracks"][1]["bytes"], 46);
-    assert_eq!(m["duration"], (PART_FRAMES + 1) as f64 / RATE as f64);
+    assert_eq!(m["duration"], frame_seconds(PART_FRAMES + 1));
     let boundary = 44 + PART_FRAMES * 2;
     let (status, _, bytes) = send(
         &app,
@@ -1125,11 +1125,11 @@ async fn thirty_minute_parts_form_one_stream_and_portable_receipts_restore() {
     assert_eq!(bytes, vec![17, 17, 29, 29]);
     let backup = store::export_library().unwrap();
     assert_eq!(backup["extensionRecordings"][0]["recordingId"], id);
-    let restored_directory = crate::store::test_directory();
+    let restored_directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", restored_directory.path());
     store::test_key();
-    store::import_library(backup.clone()).unwrap();
+    store::import_library(&backup).unwrap();
     let restored = store::get_meeting(&meeting).unwrap().unwrap();
     assert_eq!(restored["extensionRecording"], m["extensionRecording"]);
     assert_eq!(
@@ -1166,11 +1166,11 @@ async fn thirty_minute_parts_form_one_stream_and_portable_receipts_restore() {
     .is_err());
     store::delete_meeting(&meeting).unwrap();
     let tombstones = store::export_library().unwrap();
-    let tombstone_directory = crate::store::test_directory();
+    let tombstone_directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", tombstone_directory.path());
     store::test_key();
-    store::import_library(tombstones).unwrap();
+    store::import_library(&tombstones).unwrap();
     assert_eq!(
         store::with_db(|db| Ok(recording(db, &id)?["status"].clone())).unwrap(),
         "deleted"
@@ -1181,10 +1181,10 @@ async fn thirty_minute_parts_form_one_stream_and_portable_receipts_restore() {
 #[tokio::test]
 async fn start_accepts_current_and_legacy_meeting_hosts_but_rejects_lookalikes() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-    let directory = crate::store::test_directory();
+    let directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    store::test_key();
     store::init().unwrap();
     let app = app();
     let (token, _, _) = pair(&app, &Uuid::new_v4().to_string()).await;
@@ -1245,10 +1245,10 @@ async fn start_accepts_current_and_legacy_meeting_hosts_but_rejects_lookalikes()
 #[tokio::test]
 async fn orphan_retries_resync_files_and_directories_before_durable_ack() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-    let directory = crate::store::test_directory();
+    let directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    store::test_key();
     store::init().unwrap();
     let app = app();
     let (token, _, _) = pair(&app, &Uuid::new_v4().to_string()).await;
@@ -1342,7 +1342,7 @@ async fn orphan_retries_resync_files_and_directories_before_durable_ack() {
         assert_eq!(status, StatusCode::OK);
         let dir = store::data_dir().unwrap().join("audio").join(meeting);
         store::mkdir(&dir).unwrap();
-        let mut wav = wav_header(4);
+        let mut wav = wav_header(4).unwrap();
         wav.extend_from_slice(&pcm);
         let file = dir.join(format!("extension-0-{}.wav", hash(&wav)));
         fs::write(&file, &wav).unwrap();
@@ -1479,10 +1479,10 @@ fn pairing_migration_preserves_connections() {
 #[tokio::test]
 async fn pairing_v2_discovery_decisions_intents_and_existing_connections() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
-    let directory = crate::store::test_directory();
+    let directory = store::test_directory();
     store::reset_for_tests();
     std::env::set_var("ECHO_DATA_DIR", directory.path());
-    crate::store::test_key();
+    store::test_key();
     store::init().unwrap();
     let app = app();
     let changes_before = store::with_db(|db| Ok(db.total_changes())).unwrap();
@@ -1727,7 +1727,7 @@ async fn pairing_v2_discovery_decisions_intents_and_existing_connections() {
         json!({}),
     )
     .await;
-    super::pairing::expire_intents_for_test();
+    pairing::expire_intents_for_test();
     let (_, expired_intent) = json_request(&app,"POST","/extension/v1/pair","chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",None,json!({"installationId":Uuid::new_v4().to_string(),"name":"Browser","claimSecret":hash("fifth"),"intent":intent["intent"]})).await;
     assert_eq!(expired_intent["status"], "pending");
     let token = hash("legacy credential");
@@ -1962,7 +1962,7 @@ async fn discovery_responds_while_database_is_locked_and_tracks_reopened_library
             release_rx.recv().unwrap();
             Ok(())
         })
-        .unwrap()
+        .unwrap();
     });
     ready_rx.recv().unwrap();
     let response = tokio::time::timeout(
@@ -2014,4 +2014,13 @@ async fn removed_vault_route_returns_not_found() {
     }
     store::reset_for_tests();
     std::env::remove_var("ECHO_DATA_DIR");
+}
+
+#[test]
+fn wav_sizes_reject_riff_and_integer_overflow() {
+    let largest_frames = (u64::from(u32::MAX) - 36) / 2;
+    assert_eq!(wav_header(largest_frames).unwrap().len(), 44);
+    assert!(wav_header(largest_frames + 1).is_err());
+    assert!(wav_header(u64::MAX).is_err());
+    assert!(pcm_bytes(u64::MAX).is_err());
 }

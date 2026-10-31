@@ -32,7 +32,7 @@ fn id() -> String {
     Uuid::new_v4().to_string()
 }
 /// Resolve the library location from a developer override or shared runtime config.
-pub fn data_dir() -> Result<PathBuf> {
+pub(crate) fn data_dir() -> Result<PathBuf> {
     Ok(crate::paths::get()?.data_dir)
 }
 #[cfg(unix)]
@@ -71,7 +71,7 @@ pub(crate) fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 /// Access the unlocked key only after initialization has acquired the workspace lock.
-/// Callers inside with_db must not recursively initialize the database.
+/// Callers inside `with_db` must not recursively initialize the database.
 pub(crate) fn with_key<T>(f: impl FnOnce(&LibraryKey) -> std::io::Result<T>) -> std::io::Result<T> {
     let guard = LIBRARY_KEY
         .get_or_init(|| Mutex::new(None))
@@ -213,7 +213,7 @@ fn preflight_plaintext_schema(root: &Path) -> Result<()> {
     }
     Ok(())
 }
-/// Checkpoint and export plaintext SQLite into a verified encrypted sibling.
+/// Checkpoint and export plaintext `SQLite` into a verified encrypted sibling.
 /// The original remains authoritative until the single atomic replacement.
 fn open_protected_database(root: &Path, key: &LibraryKey) -> Result<Connection> {
     use std::io::Read;
@@ -357,7 +357,7 @@ pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result
             .get_or_init(|| Mutex::new(None))
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(key);
-        if let Err(error) = migrate_protected_files(&db).and_then(|_| recover(&mut db)) {
+        if let Err(error) = migrate_protected_files(&db).and_then(|()| recover(&mut db)) {
             LIBRARY_KEY
                 .get_or_init(|| Mutex::new(None))
                 .lock()
@@ -395,7 +395,7 @@ pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result
 }
 
 /// Execute serialized database work away from asynchronous worker threads.
-pub async fn run<T: Send + 'static>(
+pub(crate) async fn run<T: Send + 'static>(
     f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
 ) -> Result<T> {
     tokio::task::spawn_blocking(move || with_db(f))
@@ -406,7 +406,7 @@ pub async fn run<T: Send + 'static>(
         })?
 }
 /// Run synchronous storage work without blocking an async worker.
-pub async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
     tokio::task::spawn_blocking(f).await.map_err(|error| {
@@ -415,7 +415,7 @@ pub async fn blocking<T: Send + 'static>(
     })?
 }
 /// Read and authenticate one bounded range on a blocking worker.
-pub async fn protected_range(
+pub(crate) async fn protected_range(
     path: PathBuf,
     offset: u64,
     length: usize,
@@ -425,7 +425,7 @@ pub async fn protected_range(
         .map_err(std::io::Error::other)?
 }
 /// Open the library and complete startup recovery before accepting requests.
-pub fn init() -> Result<()> {
+pub(crate) fn init() -> Result<()> {
     with_db(|_| Ok(()))
 }
 #[cfg(test)]
@@ -627,7 +627,7 @@ fn recover(db: &mut Connection) -> Result<()> {
             db.execute("DELETE FROM meetings WHERE id=?", [&key])?;
             db.execute("DELETE FROM deletion_jobs WHERE id=?", [&key])?;
         } else {
-            eprintln!("[Echo Voice] Pending deletion could not finish: {key}");
+            tracing::error!("[Echo Voice] Pending deletion could not finish: {key}");
         }
     }
     let tx = db.transaction()?;
@@ -667,11 +667,11 @@ mod meetings;
 mod settings;
 mod validation;
 mod vocabulary;
-pub use audio::*;
-pub use library_io::*;
-pub use meetings::*;
-pub use settings::*;
+pub(crate) use audio::*;
+pub(crate) use library_io::*;
+pub(crate) use meetings::*;
+pub(crate) use settings::*;
 pub(crate) use validation::*;
-pub use vocabulary::*;
+pub(crate) use vocabulary::*;
 #[cfg(test)]
 mod tests;
