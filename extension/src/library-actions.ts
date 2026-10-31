@@ -4,6 +4,7 @@ import { deleteRecording, recording } from './storage';
 import { withRecordingLock } from './recording-lock';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** @dynamicImport Used by filename-bundled extension tests. */
 export function echoURL(pair: Pair | undefined, row?: Recording): string {
   const libraryId = row?.receipt?.libraryId ?? row?.libraryId ?? pair?.libraryId;
   if (!libraryId || !uuid.test(libraryId))

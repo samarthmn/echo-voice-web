@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip/schema.json",
+  "entry": [
+    "web/{bridge,inference-worker,extension-connect}.js",
+    "extension/src/{background,popup,setup,offscreen,content,worklet}.ts",
+    "scripts/*.mjs",
+    "tests/**/*.mjs"
+  ],
+  "project": ["web/**/*.js", "extension/src/**/*.ts", "scripts/*.mjs", "tests/**/*.mjs"],
+  "includeEntryExports": true,
+  "tags": ["-dynamicImport"],
+  "ignoreDependencies": ["onnxruntime-node"]
+}

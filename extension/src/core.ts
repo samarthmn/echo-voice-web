@@ -1,9 +1,9 @@
-export const SAMPLE_RATE = 16000;
+const SAMPLE_RATE = 16000;
 export const MAX_FRAMES = SAMPLE_RATE * 60 * 60 * 8;
 export const MAX_PENDING_BYTES = 2 * 1024 ** 3;
 export const MAX_BACKLOG_FRAMES = SAMPLE_RATE * 5;
 export const PART_FRAMES = SAMPLE_RATE * 60 * 30;
-export const MIC_FRESH_MS = 2000;
+const MIC_FRESH_MS = 2000;
 export type Provider = 'meet' | 'zoom' | 'teams';
 /** Meeting sites and the optional host permissions that let Echo read and record them. */
 export const MEETING_SITES: { id: Provider; name: string; origins: string[] }[] = [
@@ -19,8 +19,8 @@ export const MEETING_SITES: { id: Provider; name: string; origins: string[] }[] 
     ],
   },
 ];
-export type CaptureState = 'idle' | 'recording' | 'paused' | 'stopped' | 'interrupted';
-export type TransferState = 'saved-local' | 'transferring' | 'saved-echo' | 'attention';
+type CaptureState = 'idle' | 'recording' | 'paused' | 'stopped' | 'interrupted';
+type TransferState = 'saved-local' | 'transferring' | 'saved-echo' | 'attention';
 export const INTERRUPTION_DESCRIPTIONS = {
   'tab-closed': 'The meeting tab closed.',
   'document-changed': 'The meeting document changed.',

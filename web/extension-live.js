@@ -7,9 +7,9 @@ import {
 } from './inference.js';
 
 export const LIVE_SAMPLE_RATE = 16000;
-export const LIVE_WINDOW_FRAMES = 20 * LIVE_SAMPLE_RATE;
-export const LIVE_STRIDE_FRAMES = 15 * LIVE_SAMPLE_RATE;
-export const LIVE_TAIL_FRAMES = 2.5 * LIVE_SAMPLE_RATE;
+const LIVE_WINDOW_FRAMES = 20 * LIVE_SAMPLE_RATE;
+const LIVE_STRIDE_FRAMES = 15 * LIVE_SAMPLE_RATE;
+const LIVE_TAIL_FRAMES = 2.5 * LIVE_SAMPLE_RATE;
 const statusText = {
   live: 'Live transcription',
   'catching-up': 'Catching up',

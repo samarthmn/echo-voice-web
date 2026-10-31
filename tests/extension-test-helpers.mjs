@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 export const library = '22222222-2222-4222-8222-222222222222';
 export const endpoint = 'http://127.0.0.1:3111';
 export const reply = (body, status = 200) => new Response(JSON.stringify(body), { status });
-export function locks() {
+function locks() {
   const queue = new Map();
   return {
     request(id, _options, work) {

@@ -3,14 +3,14 @@ export type Ciphertext = { version: 1; nonce: string; ciphertext: string };
 export type Binding = ReadonlyArray<string | number>;
 const LIMIT = 8 * 1024 * 1024;
 const encoder = new TextEncoder();
-export function base64(value: ArrayBuffer | Uint8Array): string {
+function base64(value: ArrayBuffer | Uint8Array): string {
   const data = value instanceof Uint8Array ? value : new Uint8Array(value);
   let text = '';
   for (let offset = 0; offset < data.length; offset += 8192)
     text += String.fromCharCode(...data.subarray(offset, offset + 8192));
   return btoa(text);
 }
-export function decode(value: unknown, max = LIMIT + 16): Uint8Array<ArrayBuffer> {
+function decode(value: unknown, max = LIMIT + 16): Uint8Array<ArrayBuffer> {
   if (
     typeof value !== 'string' ||
     value.length > Math.ceil(max / 3) * 4 ||
@@ -21,7 +21,7 @@ export function decode(value: unknown, max = LIMIT + 16): Uint8Array<ArrayBuffer
   if (raw.length > max) throw new Error('Encrypted data exceeds its size limit.');
   return Uint8Array.from(raw, (ch) => ch.charCodeAt(0));
 }
-export function aad(binding: Binding): Uint8Array<ArrayBuffer> {
+function aad(binding: Binding): Uint8Array<ArrayBuffer> {
   if (
     !Array.isArray(binding) ||
     binding.length > 12 ||

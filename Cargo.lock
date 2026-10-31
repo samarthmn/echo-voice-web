@@ -330,7 +330,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -1139,10 +1138,8 @@ dependencies = [
  "dioxus",
  "gloo-net",
  "js-sys",
- "serde",
  "serde_json",
  "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -1155,7 +1152,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bip39",
- "bytes",
  "chrono",
  "dotenvy",
  "fs2",
@@ -1172,7 +1168,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tower",
  "tower-http",
@@ -3284,7 +3279,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -3399,7 +3393,6 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
  "url",
 ]
 
@@ -3615,7 +3608,6 @@ checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
- "serde_core",
  "wasm-bindgen",
 ]
 

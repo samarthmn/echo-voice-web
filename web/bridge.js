@@ -175,7 +175,7 @@ async function finishImport(session) {
 }
 
 /** Validate a user-selected audio file and create a resumable local import session. */
-export async function upload(input) {
+async function upload(input) {
   const file = input?.files?.[0];
   if (!file) return;
   // Copy the File reference, then reset the existing input so choosing it again can resume.
@@ -221,7 +221,9 @@ export async function upload(input) {
   }
 }
 
-/** Start local transcription only when the configured model is downloaded and enabled. */
+/** Start local transcription only when the configured model is downloaded and enabled.
+ * @dynamicImport Used by filename-bundled automatic-transcription tests.
+ */
 export async function autoTranscribeMeeting(meeting) {
   if (!automaticTranscriptionEligible(meeting)) return;
   const key = `${meeting.id}:${meeting.tracks.map((track) => `${track.id}:${track.bytes}`).join(',')}`;

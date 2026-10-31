@@ -82,9 +82,6 @@ select {
   font-size: 23px;
   overflow-wrap: anywhere;
 }
-:root[data-theme='dark'] .review-waveform {
-  opacity: 0.8;
-}
 :root[data-theme='dark'] .button-primary {
   color: var(--on-accent);
 }
@@ -145,12 +142,9 @@ select {
 .event-info h3,
 .meeting-card h3,
 .settings-card-heading h2,
-.settings-provider-heading h3,
-.settings-provider-bottom strong,
 .review-version strong,
 .review-track-list strong,
-.review-player-source strong,
-.review-notes-provider-info strong {
+.review-player-source strong {
   color: var(--ink);
 }
 .quick-action small,
@@ -162,19 +156,13 @@ select {
 .model-status,
 .ollama-copy p,
 .calendar-empty p,
-.calendar-explainer p,
 .connection-panel p,
 .event-info p,
-.dialog-description,
-.dialog-footnote,
 .privacy-note p,
 .check-row,
 .empty-library p,
 .empty-library > .small-muted,
 .review-track-list small,
-.review-cloud-dialog > p,
-.review-cloud-facts p,
-.review-cloud-status,
 .review-no-evidence,
 .review-note-count {
   color: var(--muted);
@@ -185,9 +173,7 @@ select {
 .field-label > span,
 .mic-setup > div,
 .review-processing-card label,
-.review-processing-card .input,
-.review-notes-provider > label,
-.review-notes-provider .input {
+.review-processing-card .input {
   color: var(--ink);
 }
 .stat-item strong {
@@ -412,19 +398,15 @@ select {
     min-width: 0;
     width: 100%;
   }
-  .settings-page-heading,
   .settings-card-heading {
     flex-wrap: wrap;
   }
   .settings-form,
-  .settings-fields-grid,
-  .settings-workspace-grid,
   .review-processing-card form {
     min-width: 0;
   }
   .review-track-list strong,
-  .review-title,
-  .review-passage-text {
+  .review-title {
     overflow-wrap: anywhere;
   }
   .review-dialog {
@@ -488,8 +470,6 @@ select {
     font-size: 13px;
   }
 }
-@media (max-width: 700px) {
-}
 
 /* Extension management shares the workspace control and spacing scale. */
 .extension-panel {
@@ -513,17 +493,6 @@ select {
 .extension-panel .section-heading {
   margin: 0;
 }
-.extension-pair-code {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-wrap: anywhere;
-}
-.extension-pair-code code {
-  font-size: 16px;
-  user-select: all;
-}
-.extension-pair-code small,
 .extension-connection-row small {
   color: var(--muted);
 }
@@ -565,9 +534,6 @@ select {
   }
   .extension-panel .section-heading {
     flex-wrap: wrap;
-  }
-  .extension-pair-code code {
-    font-size: 13px;
   }
 }
 
@@ -694,7 +660,6 @@ select {
 .app-shell .settings-tabs button span,
 .app-shell .global-search span,
 .app-shell .settings-page span,
-.app-shell .models-page span,
 .app-shell .model-card span {
   font-size: 13px !important;
 }

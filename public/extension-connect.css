@@ -55,10 +55,6 @@
   margin: 6px 0;
   overflow-wrap: anywhere;
 }
-.connection-footer {
-  font-size: 12px;
-  margin-top: 22px;
-}
 .connection-card #error {
   color: var(--danger);
   background: var(--danger-soft);

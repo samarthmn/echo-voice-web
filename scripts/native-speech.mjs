@@ -20,7 +20,7 @@ import { correctWhisperAlignment, validatedWhisperWords } from '../web/whisper-a
 export const MODEL_ID = 'onnx-community/whisper-large-v3';
 export const CHECKPOINT = 'Xenova/whisper-large-v3';
 export const REVISION = '67bf02d92b7754a1ff82a7f8545f8b8c378b2ef0';
-export const WEIGHTS = {
+const WEIGHTS = {
   'encoder_model_quantized.onnx': 645260435,
   'decoder_model_merged_quantized.onnx': 915059840,
 };
@@ -51,7 +51,7 @@ export function correctPinnedAlignment(model) {
   correctWhisperAlignment(model, LARGE_V3_ALIGNMENT_HEADS);
 }
 
-export const LANGUAGES = {
+const LANGUAGES = {
   en: 'english',
   es: 'spanish',
   fr: 'french',
@@ -343,7 +343,7 @@ export async function validateReady(cache) {
   await validateWeights(cache);
 }
 
-export async function runNative(request, emit) {
+async function runNative(request, emit) {
   validateRequest(request);
   const downloading = request.operation === 'download';
   await mkdir(request.cacheDir, { recursive: true, mode: 0o700 });

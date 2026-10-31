@@ -22,12 +22,17 @@ There is no hot reload. After changing Rust UI or `web/` code, rerun `./scripts/
 | Command                           | What it runs                                                                                                                                                                                                                                                                                                                   |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `cargo test --locked --workspace` | Rust unit and server tests                                                                                                                                                                                                                                                                                                     |
+| `pnpm knip`                       | Unused JS/TS files, exports and dependencies; configured entry points include browser bundles, extension bundles, scripts and tests |
 | `pnpm test`                       | Node unit tests (`tests/*.test.mjs` listed in `package.json`)                                                                                                                                                                                                                                                                  |
 | `pnpm test:integration`           | Server and extension integration tests (`tests/rest.test.mjs`, `server-lifecycle`, `extension-browser`, ...). Needs a debug server at `target/debug/echo-server` (`cargo build -p echo-server`, or `ECHO_TEST_BINARY`) and Playwright Chromium (`pnpm exec playwright install chromium`; `CHROMIUM_PATH` is set by `check.sh`) |
 | `pnpm test:e2e`                   | Browser end to end tests via `scripts/test-browser.mjs` (needs the debug server binary, the built assets from `setup.sh`, and Chromium)                                                                                                                                                                                        |
 | `pnpm test:speakers`              | Loads the real PyAnnote and WavLM models and runs speaker grouping on sample audio; downloads models, needs internet                                                                                                                                                                                                           |
 
-`check.sh` also runs `cargo clippy` (native and wasm, warnings denied).
+`check.sh` also runs `cargo clippy` (native and wasm, warnings denied). Run `pnpm knip` separately; it is not part of `check.sh`.
+
+Native speech HTTP lifecycle tests live in `tests/native-speech-http.test.mjs` and run with `pnpm test:integration`. They use sparse model fixtures, without downloading or running speech models.
+
+Knip checks entry-point exports too. `@dynamicImport` marks exports exercised by tests that bundle modules by filename, which static analysis cannot follow. `onnxruntime-node` is retained explicitly because the Rust speech service loads it from a Node command; `onnxruntime-web` is a direct dependency because `copy-wasm.mjs` resolves its assets.
 
 ## Formatting and types
 

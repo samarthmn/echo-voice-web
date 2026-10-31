@@ -1,5 +1,5 @@
 /** Send a message to the installed extension, using the ID generated at build time. */
-export async function extensionMessage(message) {
+async function extensionMessage(message) {
   const response = await fetch('/js/extension-id.json', { cache: 'no-store' });
   if (!response.ok) throw new Error('Extension ID is unavailable');
   const { id } = await response.json();

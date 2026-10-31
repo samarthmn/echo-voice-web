@@ -8,11 +8,15 @@ type Clock = {
   setTimeout(callback: () => void, ms: number): ReturnType<typeof setTimeout>;
   clearTimeout(id: ReturnType<typeof setTimeout>): void;
 };
-/** Minimum spacing between passes triggered by committed audio while recording. */
+/** Minimum spacing between passes triggered by committed audio while recording.
+ * @dynamicImport Used by filename-bundled extension tests.
+ */
 export const UPLOAD_INTERVAL_MS = 2_000;
-export const CONTROL_POLL_MS = 3_000;
+const CONTROL_POLL_MS = 3_000;
 const BACKOFF_BASE_MS = 10_000;
+/** @dynamicImport Used by filename-bundled extension tests. */
 export const BACKOFF_MAX_MS = 5 * 60_000;
+/** @dynamicImport Used by filename-bundled extension tests. */
 export function backoffDelay(failures: number): number {
   return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** Math.max(0, failures - 1));
 }

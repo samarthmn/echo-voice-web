@@ -82,7 +82,9 @@ function checkStatus(status: any, row: Recording, pair: Pair): void {
       'Echo returned an inconsistent recording acknowledgement. Audio is retained.',
     );
 }
-/** Upload one bounded turn of a recording. True when committed audio is still waiting. */
+/** Upload one bounded turn of a recording. True when committed audio is still waiting.
+ * @dynamicImport Used by filename-bundled extension tests.
+ */
 export async function transferOne(
   row: Recording,
   pair: Pair,

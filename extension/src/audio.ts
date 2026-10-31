@@ -30,7 +30,9 @@ export class PCMResampler {
   }
 }
 const KNEE = 0.8;
-/** Unity below the knee, then a smooth tanh curve that never exceeds full scale. */
+/** Unity below the knee, then a smooth tanh curve that never exceeds full scale.
+ * @dynamicImport Used by filename-bundled extension tests.
+ */
 export function softClip(value: number): number {
   const magnitude = Math.abs(value);
   if (magnitude <= KNEE) return value;

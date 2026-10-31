@@ -11,6 +11,7 @@ import {
 import { database, result, committed, storageLock } from './vault-db';
 import { Ciphertext, encryptPayload, decryptPayload } from './encryption';
 import { wrapRecordingKey, unwrapRecordingKey } from './device-secrets';
+/** @dynamicImport Used by journal test APIs inside Playwright page.evaluate. */
 export { database } from './vault-db';
 // Storage v3 row: plaintext summary for lists and badges, a per-recording AES key wrapped by
 // the device key (AAD ["recording-key", id]), and encrypted metadata. Chunks use

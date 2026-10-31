@@ -2,7 +2,7 @@ import { Provider } from './core';
 export type MeetingState = 'unmuted' | 'muted' | 'prejoin' | 'ended' | 'unknown';
 type MicState = 'unmuted' | 'muted';
 /** One candidate microphone control: its label and any language-independent state attribute. */
-export type MicControl = { label: string; toggle?: MicState | null };
+type MicControl = { label: string; toggle?: MicState | null };
 // English labels: the fallback when a provider exposes no language-independent state.
 const labels: Record<Provider, { on: RegExp; off: RegExp }> = {
   meet: {
@@ -64,7 +64,7 @@ function controlState(provider: Provider, control: MicControl): MicState | 'conf
   if (control.toggle && fromLabel && control.toggle !== fromLabel) return 'conflict';
   return control.toggle ?? fromLabel;
 }
-export function stateFromControls(
+function stateFromControls(
   provider: Provider,
   controls: MicControl[],
   texts: string[],
@@ -78,6 +78,7 @@ export function stateFromControls(
   // Multiple or conflicting controls are ambiguous. Never infer from a page's default state.
   return states.length === 1 && states[0] !== 'conflict' ? states[0] : 'unknown';
 }
+/** @dynamicImport Used by filename-bundled extension tests. */
 export function stateFromLabels(
   provider: Provider,
   controls: string[],

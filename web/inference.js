@@ -16,7 +16,6 @@ import {
 import { createProcessingHeartbeat } from './processing-heartbeat.js';
 import { getNativeSpeechStatus, runNativeSpeech, cancelNativeSpeech } from './native-speech.js';
 import { validatedWhisperWords } from './whisper-alignment.js';
-export { MODELS } from './models.js';
 
 let worker = null;
 let queue = Promise.resolve();
@@ -512,7 +511,7 @@ export function transcribeAudio(blob, modelId, onProgress, options = {}) {
 
 const processingMeetings = new Map();
 const cancellationSaves = new Map();
-export function suppressAutomaticTranscription(meetingIds) {
+function suppressAutomaticTranscription(meetingIds) {
   return Promise.all(
     meetingIds.map((id) => {
       if (!cancellationSaves.has(id)) {
