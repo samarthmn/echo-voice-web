@@ -357,10 +357,7 @@ pub(crate) fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T>) -> Result
             .get_or_init(|| Mutex::new(None))
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(key);
-        if let Err(error) = migrate_protected_files(&db)
-            .and_then(|_| crate::chatgpt::protect_legacy_state())
-            .and_then(|_| recover(&mut db))
-        {
+        if let Err(error) = migrate_protected_files(&db).and_then(|_| recover(&mut db)) {
             LIBRARY_KEY
                 .get_or_init(|| Mutex::new(None))
                 .lock()

@@ -84,8 +84,7 @@ struct KeyReference {
 }
 
 /// Run before creating an OS key entry. Missing descriptors cannot authorize a
-/// replacement key while any encrypted library data remains, including optional
-/// ChatGPT state after partial loss of the database and key reference.
+/// replacement key while any encrypted data remains in active library areas.
 #[cfg(target_os = "macos")]
 fn preflight_new_library_key(root: &Path) -> Result<()> {
     let database = root.join("workspace.sqlite");
@@ -99,8 +98,8 @@ fn preflight_new_library_key(root: &Path) -> Result<()> {
     if root.join("recovery.json").exists() || root.join(".workspace-encrypted.sqlite").exists() {
         return Err(key_error());
     }
-    for area in ["audio", "extension-pcm", "credentials", "chatgpt"] {
-        if contains_encrypted_file(&root.join(area), area == "chatgpt", area == "credentials")? {
+    for area in ["audio", "extension-pcm", "credentials"] {
+        if contains_encrypted_file(&root.join(area), area == "credentials")? {
             return Err(key_error());
         }
     }
@@ -298,11 +297,7 @@ pub(crate) fn restore_library_key(root: &Path, master: &[u8; 32]) -> Result<()> 
     }
 }
 #[cfg(target_os = "macos")]
-fn contains_encrypted_file(
-    directory: &Path,
-    chatgpt_root: bool,
-    credentials_root: bool,
-) -> Result<bool> {
+fn contains_encrypted_file(directory: &Path, credentials_root: bool) -> Result<bool> {
     let metadata = match fs::symlink_metadata(directory) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -316,9 +311,6 @@ fn contains_encrypted_file(
     }
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
-        if chatgpt_root && entry.file_name() == "tmp" {
-            continue;
-        }
         if entry.file_type()?.is_symlink() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -338,7 +330,7 @@ fn contains_encrypted_file(
             continue;
         }
         if entry.file_type()?.is_dir() {
-            if contains_encrypted_file(&entry.path(), false, false)? {
+            if contains_encrypted_file(&entry.path(), false)? {
                 return Ok(true);
             }
         } else if entry.file_type()?.is_file() && is_encrypted(&entry.path())? {
@@ -518,57 +510,49 @@ mod tests {
     }
     #[test]
     #[cfg(target_os = "macos")]
-    fn missing_key_reference_rejects_chatgpt_remnants_before_key_or_database_creation() {
-        for relative in ["chatgpt/auth.json", "chatgpt/sessions/history.jsonl"] {
+    fn missing_key_reference_rejects_encrypted_active_areas() {
+        for area in ["audio", "extension-pcm", "credentials"] {
             let dir = fixture();
-            let root = dir.path();
-            // This is the exact guard invoked before Entry::new/set_password.
-            // Calling it directly never reaches an OS credential provider.
-            preflight_new_library_key(root).unwrap();
-            let path = root.join(relative);
+            let path = dir.path().join(area).join("nested/state");
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             let key = LibraryKey::from_bytes([31; 32]);
-            write_file(&key, &path, "synthetic-chatgpt-state", b"synthetic state").unwrap();
+            write_file(&key, &path, "synthetic-state", b"synthetic state").unwrap();
             let before = fs::read(&path).unwrap();
-            let error = preflight_new_library_key(root).unwrap_err();
-            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            assert_eq!(
+                preflight_new_library_key(dir.path()).unwrap_err().kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
             assert_eq!(fs::read(&path).unwrap(), before);
-            assert!(!root.join("protection.json").exists());
-            assert!(!root.join("workspace.sqlite").exists());
-            // A remaining plaintext database must not bypass the same guard.
-            let database = root.join("workspace.sqlite");
-            fs::write(&database, b"SQLite format 3\0synthetic legacy database").unwrap();
-            let database_before = fs::read(&database).unwrap();
-            assert!(preflight_new_library_key(root).is_err());
-            assert_eq!(fs::read(&database).unwrap(), database_before);
-            assert_eq!(fs::read(&path).unwrap(), before);
-            assert!(!root.join("protection.json").exists());
+            assert!(!dir.path().join("protection.json").exists());
+            assert!(!dir.path().join("workspace.sqlite").exists());
         }
     }
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn preflight_allows_only_unprotected_chatgpt_state_for_legacy_migration() {
+    fn legacy_chatgpt_state_is_ignored_before_key_creation() {
         let dir = fixture();
         let path = dir.path().join("chatgpt/auth.json");
         fs::create_dir(path.parent().unwrap()).unwrap();
-        fs::write(&path, b"{\"fixture\":true}").unwrap();
+        let key = LibraryKey::from_bytes([31; 32]);
+        write_file(&key, &path, "legacy-state", b"synthetic state").unwrap();
+        let encrypted = fs::read(&path).unwrap();
+        for bytes in [encrypted, b"legacy plaintext".to_vec()] {
+            fs::write(&path, &bytes).unwrap();
+            preflight_new_library_key(dir.path()).unwrap();
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+            assert!(!dir.path().join("protection.json").exists());
+            assert!(!dir.path().join("workspace.sqlite").exists());
+        }
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink("missing-legacy-state", &path).unwrap();
         preflight_new_library_key(dir.path()).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"{\"fixture\":true}");
-        assert!(!dir.path().join("protection.json").exists());
-        assert!(!dir.path().join("workspace.sqlite").exists());
-    }
-    #[test]
-    #[cfg(unix)]
-    fn codex_transient_symlinks_do_not_block_preflight() {
-        use std::os::unix::fs::symlink;
-        let dir = fixture();
-        let transient = dir.path().join("chatgpt/tmp/arg0/codex-arg123");
-        fs::create_dir_all(&transient).unwrap();
-        symlink("/missing/codex", transient.join("apply_patch")).unwrap();
-        preflight_new_library_key(dir.path()).unwrap();
-        symlink("/missing/secret", dir.path().join("chatgpt/auth.json")).unwrap();
-        assert!(preflight_new_library_key(dir.path()).is_err());
+        for area in ["audio", "extension-pcm", "credentials"] {
+            let active = dir.path().join(area);
+            std::os::unix::fs::symlink("missing-sensitive-state", &active).unwrap();
+            assert!(preflight_new_library_key(dir.path()).is_err());
+            fs::remove_file(active).unwrap();
+        }
     }
     #[test]
     fn ranges_and_empty_files_are_authenticated() {

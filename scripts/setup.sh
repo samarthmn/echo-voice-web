@@ -15,10 +15,6 @@ command -v pnpm >/dev/null || { echo 'Install pnpm: corepack enable or brew inst
 if [[ ${1:-} != --build-only ]]; then
   rustup target add wasm32-unknown-unknown || { echo 'Could not install Rust wasm target; check rustup.' >&2; exit 1; }
   pnpm install --frozen-lockfile || { echo 'Dependency install failed; check pnpm and network access.' >&2; exit 1; }
-  helper="$ROOT/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-  if [[ ! -x "$helper" ]] || [[ "$("$helper" --version 2>/dev/null || true)" != 'codex-cli 0.160.0' ]]; then
-    echo 'Warning: Codex 0.160.0 helper unavailable; ChatGPT notes will be unavailable.' >&2
-  fi
   bindgen_version="$(awk '/name = "wasm-bindgen"/{getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
   if ! command -v wasm-bindgen >/dev/null || [[ "$(wasm-bindgen --version)" != "wasm-bindgen $bindgen_version" ]]; then
     cargo install wasm-bindgen-cli --version "$bindgen_version" --locked || { echo 'Could not install wasm-bindgen-cli; check Rust and network access.' >&2; exit 1; }

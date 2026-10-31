@@ -1,6 +1,6 @@
 # Echo
 
-Echo is a single-user meeting recorder and transcriber that runs entirely on your Mac. A local server keeps an encrypted library; transcription runs on-device with Whisper; a Brave/Chrome extension records meeting tabs (Meet, Zoom web, Teams web) and uploads them to the server. Notes come from local Ollama. ChatGPT notes are currently disabled in the UI.
+Echo is a single-user meeting recorder and transcriber that runs entirely on your Mac. A local server keeps an encrypted library; transcription runs on-device with Whisper; a Brave/Chrome extension records meeting tabs (Meet, Zoom web, Teams web) and uploads them to the server. Notes come from local Ollama.
 
 ## Requirements
 
@@ -36,7 +36,7 @@ Prerequisite details: [docs/install.md](docs/install.md). Extension setup: [docs
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
 | [docs/install.md](docs/install.md)                           | Prerequisites, setup and start scripts, configuration, auto-start, updating, uninstalling, troubleshooting |
 | [docs/extension.md](docs/extension.md)                       | Installing and using the browser extension, offline behaviour, wire protocol, security                     |
-| [docs/integrations.md](docs/integrations.md)                 | Speech models, speaker grouping, Ollama and ChatGPT notes, Google Calendar                                 |
+| [docs/integrations.md](docs/integrations.md)                 | Speech models, speaker grouping, Ollama notes, Google Calendar                                 |
 | [docs/storage-and-recovery.md](docs/storage-and-recovery.md) | Where data lives, encryption, recovery phrase, backups, library recovery                                   |
 | [docs/architecture.md](docs/architecture.md)                 | Components, request flow, module maps, recording data flow                                                 |
 | [docs/development.md](docs/development.md)                   | Dev loop, checks and tests, formatting, packaging, CI, conventions                                         |

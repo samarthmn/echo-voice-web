@@ -512,6 +512,32 @@ fn decode_backup(backup: &Backup, key: &[u8; 32]) -> Result<Value> {
 mod tests {
     use super::*;
     #[test]
+    fn library_recovery_ignores_legacy_chatgpt_files() {
+        let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = store::test_directory();
+        store::reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        store::test_key();
+        store::init().unwrap();
+        let (recovery, phrase) = make_recovery(&[42; 32]).unwrap();
+        write_recovery(directory.path(), &recovery).unwrap();
+        let path = directory.path().join("chatgpt/auth.json");
+        store::mkdir(path.parent().unwrap()).unwrap();
+        store::write_protected(&path, b"legacy state").unwrap();
+        let encrypted = std::fs::read(&path).unwrap();
+        store::reset_for_tests();
+        for bytes in [encrypted, b"legacy plaintext".to_vec()] {
+            std::fs::write(&path, &bytes).unwrap();
+            recover_library(directory.path(), &phrase).unwrap();
+            store::init().unwrap();
+            crate::library_validation::verify().unwrap();
+            store::reset_for_tests();
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        std::env::remove_var("ECHO_DATA_DIR");
+    }
+
+    #[test]
     fn copied_recovery_metadata_authenticates_envelope_without_phrase_and_preserves_damage() {
         let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();
         let directory = store::test_directory();

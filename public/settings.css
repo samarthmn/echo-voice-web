@@ -1553,23 +1553,6 @@
   line-height: 1.7;
   margin-top: 5px;
 }
-.settings-help-chatgpt {
-  border-left: 2px solid var(--line);
-  padding-left: 15px;
-  margin-top: 20px;
-}
-.settings-help-chatgpt h4 {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent-text);
-  margin: 0;
-}
-.settings-help-chatgpt p {
-  max-width: 580px;
-}
-.settings-help-chatgpt .settings-text-button {
-  margin-top: 10px;
-}
 @media (max-width: 650px) {
   .settings-local-notes-field {
     max-width: none;
@@ -1587,9 +1570,6 @@
   }
   .settings-provider-card > p {
     font-size: 10px;
-  }
-  .settings-help-chatgpt {
-    padding-left: 12px;
   }
 }
 

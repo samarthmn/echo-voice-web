@@ -23,7 +23,7 @@ Speaker labels come from PyAnnote segmentation (`onnx-community/pyannote-segment
 
 ## Notes
 
-Notes are generated locally with Ollama from a completed transcript on the meeting's **Notes** tab. ChatGPT notes are currently disabled in the UI.
+Notes are generated locally with Ollama from a completed transcript on the meeting's **Notes** tab.
 
 ### Local notes (Ollama)
 

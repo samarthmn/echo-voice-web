@@ -1,6 +1,5 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 mod api;
-mod chatgpt;
 mod config;
 mod extensions;
 mod integrations;
@@ -44,6 +43,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let root = paths::resource_root().map_err(|e| e.to_string())?;
     dotenvy::from_path(root.join(".env")).ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "echo_server=info,tower_http=info".into()),
+        )
+        .init();
     config::init(&root).map_err(|e| e.to_string())?;
     let runtime_paths = paths::RuntimePaths::resolve_at(root).map_err(|e| e.to_string())?;
     paths::private_directory(&runtime_paths.runtime_dir).map_err(|e| e.to_string())?;
@@ -65,12 +70,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("Library recovery completed. Reopen Echo.");
         return Ok(());
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "echo_server=info,tower_http=info".into()),
-        )
-        .init();
     let bind = config::loopback_bind(
         &std::env::var("ECHO_BIND").unwrap_or_else(|_| config::get().bind.clone()),
     )?;
@@ -89,7 +88,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .merge(recovery::routes())
                 .merge(integrations::routes())
                 .merge(notes::routes())
-                .merge(chatgpt::routes())
                 .merge(speech::routes())
                 .merge(extensions::workspace_routes())
                 .route(
@@ -155,18 +153,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tokio::select! {
         result = &mut server => result?,
         _ = shutdown_signal() => {
-            chatgpt::begin_shutdown();
             let _ = shutdown_tx.send(());
             if tokio::time::timeout(std::time::Duration::from_secs(10), &mut server).await.is_err() {
                 tracing::warn!("Server drain exceeded shutdown deadline");
             }
             let limit = std::time::Duration::from_secs(5);
-            let (integration_result, speech_result, chatgpt_result) = tokio::join!(
+            let (integration_result, speech_result) = tokio::join!(
                 tokio::time::timeout(limit, tokio::task::spawn_blocking(integrations::shutdown)),
                 tokio::time::timeout(limit, speech::shutdown()),
-                tokio::time::timeout(limit, chatgpt::shutdown()),
             );
-            if integration_result.is_err() || speech_result.is_err() || chatgpt_result.is_err() {
+            if integration_result.is_err() || speech_result.is_err() {
                 tracing::warn!("Shutdown cleanup exceeded its deadline");
             }
         }

@@ -253,27 +253,25 @@ fn migration_does_not_replace_corrupt_plaintext_or_downgrade_tampered_ciphertext
 fn settings_migrate_to_local_and_usage_metadata_is_strict() {
     let mut legacy = defaults();
     legacy.as_object_mut().unwrap().remove("notesProvider");
-    legacy.as_object_mut().unwrap().remove("chatgptModel");
-    let migrated = normalized_settings(legacy).unwrap();
-    assert_eq!(migrated["notesProvider"], "ollama");
-    assert_eq!(migrated["chatgptModel"], "");
     assert_eq!(
-        normalized_settings(json!({"notesProvider":"chatgpt"})).unwrap()["chatgptModel"],
-        ""
+        normalized_settings(legacy).unwrap()["notesProvider"],
+        "ollama"
     );
+    for model in [json!("gpt-5.4"), json!(12), json!(null)] {
+        let migrated =
+            normalized_settings(json!({"notesProvider":"chatgpt","chatgptModel":model})).unwrap();
+        assert_eq!(migrated["notesProvider"], "ollama");
+        assert!(migrated.get("chatgptModel").is_none());
+        let migrated = normalized_settings(json!({"chatgptModel":model})).unwrap();
+        assert_eq!(migrated["notesProvider"], "ollama");
+        assert!(migrated.get("chatgptModel").is_none());
+    }
     for value in [
         json!({"notesProvider":"api-key"}),
         json!({"notesProvider":null}),
-        json!({"chatgptModel":12}),
-        json!({"chatgptModel":"bad\nmodel"}),
     ] {
         assert!(validate_settings(&value, false).is_err());
     }
-    assert!(validate_settings(
-        &json!({"notesProvider":"chatgpt","chatgptModel":"gpt-5.4"}),
-        false
-    )
-    .is_ok());
     for usage in [
         json!({"inputTokens":-1}),
         json!({"outputTokens":1.5}),
@@ -291,6 +289,28 @@ fn settings_migrate_to_local_and_usage_metadata_is_strict() {
     assert!(validate_notes(&note, false).is_ok());
     note["provider"] = json!("api-key");
     assert!(validate_notes(&note, false).is_err());
+}
+
+#[test]
+fn saved_legacy_notes_settings_load_as_local() {
+    let _guard = TEST_LIBRARY_LOCK.blocking_lock();
+    let directory = test_directory();
+    reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", directory.path());
+    test_key();
+    init().unwrap();
+    with_db(|db| {
+        db.execute("INSERT INTO preferences VALUES('settings',?)", [json!({"notesProvider":"chatgpt","chatgptModel":"gpt-5.4","notesModel":"qwen2.5:3b"}).to_string()])?;
+        Ok(())
+    }).unwrap();
+    reset_for_tests();
+    init().unwrap();
+    let settings = get_settings().unwrap();
+    assert_eq!(settings["notesProvider"], "ollama");
+    assert_eq!(settings["notesModel"], "qwen2.5:3b");
+    assert!(settings.get("chatgptModel").is_none());
+    reset_for_tests();
+    std::env::remove_var("ECHO_DATA_DIR");
 }
 
 #[test]
@@ -597,6 +617,7 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     .unwrap();
     assert!(update_meeting(key, json!({"liveTranscription":true})).is_err());
     let (markdown, _, _) = export_meeting(key, "md").unwrap();
+    assert!(markdown.contains("Notes provider: chatgpt"));
     assert!(markdown.contains("earlier transcript"));
     assert!(markdown.contains("Microphone muted"));
     assert!(markdown.contains("Verify release"));
@@ -604,6 +625,7 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     assert!(srt.contains("00:00:00,000 --> 00:00:02,000"));
     let backup = export_library().unwrap();
     assert!(backup["settings"].get("ollamaUrl").is_none());
+    assert_eq!(backup["meetings"][0]["notes"][2]["provider"], "chatgpt");
     assert!(import_library(backup.clone()).is_err());
     update_meeting(key, json!({"status":"recording"})).unwrap();
     assert!(delete_meeting(key).is_err());
@@ -642,12 +664,17 @@ fn durable_recording_versions_backup_validation_and_recovery() {
     update_settings(json!({"notesProvider":"chatgpt","chatgptModel":"gpt-5.4"})).unwrap();
     import_library(legacy).unwrap();
     assert_eq!(get_settings().unwrap()["notesProvider"], "ollama");
-    assert_eq!(get_settings().unwrap()["chatgptModel"], "");
+    assert!(get_settings().unwrap().get("chatgptModel").is_none());
     delete_meeting(key).unwrap();
     for entry in list_vocabulary().unwrap() {
         delete_vocabulary(entry["id"].as_str().unwrap()).unwrap();
     }
+    let mut backup = backup;
+    backup["settings"]["notesProvider"] = json!("chatgpt");
+    backup["settings"]["chatgptModel"] = json!("gpt-5.4");
     let restored = import_library(backup).unwrap();
+    assert_eq!(get_settings().unwrap()["notesProvider"], "ollama");
+    assert!(get_settings().unwrap().get("chatgptModel").is_none());
     assert_eq!(restored["meetings"], 1);
     let restored_meeting = get_meeting(key).unwrap().unwrap();
     assert_eq!(restored_meeting["notes"][2]["provider"], "chatgpt");

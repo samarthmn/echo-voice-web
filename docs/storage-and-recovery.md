@@ -12,10 +12,11 @@ Everything is under the data folder: `.echo-data` by default, resolved relative 
 | `workspace.lock`                          | Held by the running server; never delete it to get around a running process |
 | `recovery.json`                           | Sealed data for the recovery phrase                                         |
 | `credentials/`                            | Encrypted Google Calendar tokens                                            |
-| `chatgpt/`, `chatgpt-runtime.sparseimage` | ChatGPT helper state                                                        |
 | `models/`                                 | Native Large V3 files (not backed up)                                       |
 
 Only one server may use a library at a time.
+
+Older libraries may contain a `chatgpt/` folder and `chatgpt-runtime.sparseimage` from the retired notes provider. Echo ignores these files and never creates, migrates, protects or deletes them. They do not block opening, checking or recovering the library. To reclaim their space, stop Echo, ensure any old helper volume is unmounted, and remove only these legacy items by hand. Saved notes remain in the database and display as "ChatGPT (legacy)".
 
 ## Encryption
 
@@ -32,7 +33,7 @@ In **Settings → Storage → Protect your library**, choose **Save recovery phr
 - Restore does not merge with existing meetings.
 - To use a copied data folder instead, stop the server, copy the folder while it is stopped, point `dataDir` or `ECHO_DATA_DIR` at the copy, and start. Never copy a live database. Optionally validate it first with `./target/release/echo-server --check-library` (this can migrate an older library, so run it on the copy).
 
-**Not in backups:** Google and ChatGPT credentials (reconnect afterwards), downloaded models, extension connections (re-pair), and recordings still pending in the browser extension.
+**Not in backups:** Google credentials (reconnect afterwards), downloaded models, extension connections (re-pair), and recordings still pending in the browser extension.
 
 ## Recovering a library
 

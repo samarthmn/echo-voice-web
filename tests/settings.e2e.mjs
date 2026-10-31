@@ -135,7 +135,7 @@ test(
       });
 
       await t.test(
-        'Notes model choices follow Ollama and legacy cloud preferences save locally',
+        'Notes model choices follow installed Ollama models and preferences save locally',
         async () => {
           let status = { available: false, models: [] };
           await page.route('**/api/notes', (route) => route.fulfill({ json: status }));
@@ -143,7 +143,7 @@ test(
             if (route.request().method() !== 'GET') return route.continue();
             const response = await route.fetch();
             const settings = await response.json();
-            settings.notesProvider = 'chatgpt';
+            settings.notesProvider = 'ollama';
             settings.notesModel = 'missing:latest';
             await route.fulfill({ response, json: settings });
           });

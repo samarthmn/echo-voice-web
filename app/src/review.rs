@@ -426,7 +426,7 @@ pub fn MeetingReview(
 /// Label the provider that produced a saved notes version.
 fn notes_source(notes: &Value) -> &'static str {
     if text(notes, "provider") == "chatgpt" {
-        "ChatGPT · OpenAI"
+        "ChatGPT (legacy)"
     } else {
         "Local · Ollama"
     }
@@ -443,18 +443,14 @@ fn notes_usage(notes: &Value) -> String {
     .filter_map(|(key, label)| usage[*key].as_u64().map(|count| format!("{count} {label}")))
     .collect();
     if parts.is_empty() {
-        if text(notes, "provider") == "chatgpt" {
-            "Token usage was not reported by ChatGPT.".into()
-        } else {
-            String::new()
-        }
+        String::new()
     } else {
         format!("Reported token usage: {}", parts.join(" · "))
     }
 }
 
 #[component]
-/// Review and edit evidence-linked notes, with explicit consent for cloud generation.
+/// Review and edit evidence-linked notes generated locally.
 fn NotesPane(
     meeting: Signal<Value>,
     #[props(default)] transcribing: bool,
@@ -2048,5 +2044,22 @@ fn AudioPlayer(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_chatgpt_notes_display_legacy_provenance_and_known_usage() {
+        let notes = json!({"provider":"chatgpt","model":"gpt-5.4","usage":{"inputTokens":12}});
+        assert_eq!(notes_source(&notes), "ChatGPT (legacy)");
+        assert_eq!(notes_usage(&notes), "Reported token usage: 12 input");
+        assert!(notes_usage(&json!({"provider":"chatgpt"})).is_empty());
+        assert_eq!(
+            notes_source(&json!({"provider":"ollama"})),
+            "Local · Ollama"
+        );
     }
 }

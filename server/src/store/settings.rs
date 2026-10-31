@@ -2,10 +2,20 @@ use super::*;
 
 /// Define initial workspace preferences for local speech and notes processing.
 pub(super) fn defaults() -> Value {
-    json!({"name":"","speechModel":"onnx-community/whisper-large-v3-turbo","notesModel":"qwen2.5:3b","notesProvider":"ollama","chatgptModel":"","ollamaUrl":"http://127.0.0.1:11434","language":"en","autoTranscribe":true,"retainAudio":true,"onboardingComplete":false})
+    json!({"name":"","speechModel":"onnx-community/whisper-large-v3-turbo","notesModel":"qwen2.5:3b","notesProvider":"ollama","ollamaUrl":"http://127.0.0.1:11434","language":"en","autoTranscribe":true,"retainAudio":true,"onboardingComplete":false})
+}
+/// Discard retired model preferences while retaining access to older libraries and backups.
+pub(super) fn migrate_legacy_notes_settings(settings: &mut Value) {
+    if let Some(fields) = settings.as_object_mut() {
+        fields.remove("chatgptModel");
+        if fields.get("notesProvider").and_then(Value::as_str) == Some("chatgpt") {
+            fields.insert("notesProvider".into(), json!("ollama"));
+        }
+    }
 }
 /// Merge saved preferences with current defaults and migrate legacy provider settings.
-pub(super) fn normalized_settings(saved: Value) -> Result<Value> {
+pub(super) fn normalized_settings(mut saved: Value) -> Result<Value> {
+    migrate_legacy_notes_settings(&mut saved);
     validate_settings(&saved, false)?;
     let mut settings = defaults();
     for (key, value) in saved
@@ -50,7 +60,6 @@ pub(super) fn validate_settings(v: &Value, full: bool) -> Result<()> {
             "speechModel",
             "notesModel",
             "notesProvider",
-            "chatgptModel",
             "ollamaUrl",
             "language",
             "autoTranscribe",
@@ -60,24 +69,9 @@ pub(super) fn validate_settings(v: &Value, full: bool) -> Result<()> {
     )?;
     string(v, "name", 120, false)?;
     if let Some(provider) = string(v, "notesProvider", 20, full)? {
-        validate_notes_provider(provider)?;
-    }
-    if let Some(model) = string(v, "chatgptModel", 200, false)? {
-        if !model.is_empty()
-            && (!model.as_bytes()[0].is_ascii_alphanumeric()
-                || !model
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"._:/-".contains(&c))
-                || model.contains("..")
-                || model.contains("//"))
-        {
-            return Err(ApiError::bad(
-                "Choose a valid ChatGPT model, or leave it empty to use the account default.",
-            ));
+        if provider != "ollama" {
+            return Err(ApiError::bad("Choose Ollama as the notes provider."));
         }
-    }
-    if full && v.get("chatgptModel").is_none() {
-        return Err(ApiError::bad("The ChatGPT model setting is missing."));
     }
     for key in ["speechModel", "notesModel", "language"] {
         string(v, key, 200, full || v.get(key).is_some())?;
@@ -105,7 +99,8 @@ pub(super) fn validate_settings(v: &Value, full: bool) -> Result<()> {
     Ok(())
 }
 /// Merge an allowlisted preference patch and persist the validated result.
-pub fn update_settings(patch: Value) -> Result<Value> {
+pub fn update_settings(mut patch: Value) -> Result<Value> {
+    migrate_legacy_notes_settings(&mut patch);
     validate_settings(&patch, false)?;
     with_db(|db| {
         let mut settings = settings_db(db)?;

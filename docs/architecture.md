@@ -14,7 +14,6 @@ flowchart LR
     DB[("SQLCipher + encrypted audio, .echo-data")]
     KC[("Keychain: library key")]
     N["Node: native Large V3"]
-    C["Codex 0.160.0 helper"]
   end
   UI --> W
   UI -->|"/api"| S
@@ -22,9 +21,7 @@ flowchart LR
   S --> DB
   S --> KC
   S --> N
-  S --> C
   S -->|"loopback"| O["Ollama"]
-  C -->|"transcript text"| OAI["OpenAI (optional)"]
   S -->|"read-only"| G["Google Calendar (optional)"]
 ```
 
@@ -45,14 +42,13 @@ The server (`server/src/main.rs`) serves the static `public/` folder and two rou
 | `recovery.rs`                                | Recovery phrase, encrypted backups, `--recover-library`                                                                                                                                           |
 | `extensions/`                                | `mod.rs` (routes, auth, connections), `pairing.rs` (v2 pairing, intents), `recordings.rs` (chunk ingest), `live.rs` (live text), `workspace.rs` (`/api/extensions/*`), `vault.rs` (legacy escrow) |
 | `speech.rs`, `speech_spool.rs`               | Native Large V3 jobs and encrypted PCM spool                                                                                                                                                      |
-| `notes.rs`                                   | Ollama and ChatGPT notes generation                                                                                                                                                               |
-| `chatgpt.rs`, `chatgpt_runtime.rs`           | Codex app-server bridge, encrypted sparse-image home                                                                                                                                              |
+| `notes.rs`                                   | Local Ollama notes generation                                                                                                                                                               |
 | `integrations.rs`, `google_oauth.rs`         | Google Calendar and its OAuth flow                                                                                                                                                                |
 | `api.rs`                                     | Meetings, settings, storage and other workspace routes                                                                                                                                            |
 
 ## Other code
 
-- `app/src/`: Dioxus UI (`main.rs`, `settings.rs`, `models.rs`, `calendar.rs`, `extension.rs`, `chatgpt.rs`, `privacy.rs`, `review.rs`, `onboarding.rs`, `api.rs`, `ui.rs`).
+- `app/src/`: Dioxus UI (`main.rs`, `settings.rs`, `models.rs`, `calendar.rs`, `extension.rs`, `privacy.rs`, `review.rs`, `onboarding.rs`, `api.rs`, `ui.rs`).
 - `web/`: browser JS bridges: recorder, `inference*.js` and `models.js` (speech and speaker models), `diarization.js`, `native-speech.js`, `extension-*.js` (extension connection, approval dialog, live text, import).
 - `scripts/native-speech.mjs`: the Node helper for Large V3.
 - `extension/src/` (below).
@@ -76,4 +72,4 @@ The server (`server/src/main.rs`) serves the static `public/` folder and two rou
 2. About one-second chunks are encrypted with the recording's key and committed to the IndexedDB journal.
 3. When connected and Echo answers `/hello`, chunks are `PUT` to `/extension/v1/recordings/{id}/chunks/{sequence}` and finished with `complete`. The server stores them encrypted under `extension-pcm/` and creates the meeting. The extension drops its copy once the import is confirmed.
 4. In Echo, the meeting's audio is processed: Turbo in the browser or Large V3 through the server, plus speaker grouping, producing a transcript version stored in the library.
-5. Notes are generated from a transcript version by Ollama or, on confirmation, ChatGPT, and saved as a notes version.
+5. Notes are generated from a transcript version by local Ollama and saved as a notes version.

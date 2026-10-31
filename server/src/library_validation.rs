@@ -101,7 +101,7 @@ pub(crate) fn verify() -> Result<(), ApiError> {
     }
     // The database references alone cannot prove the copied tree is complete:
     // offline/recovery files and optional credentials may not have indexed rows.
-    for name in ["audio", "extension-pcm", "credentials", "chatgpt/auth.json"] {
+    for name in ["audio", "extension-pcm", "credentials"] {
         let path = store::data_dir()?.join(name);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => verify_protected_tree(&path, 0)?,
@@ -130,7 +130,6 @@ mod tests {
             "audio/recovery/unindexed.chunk",
             "extension-pcm/recovery/unindexed.pcm",
             "credentials/extra.json",
-            "chatgpt/auth.json",
         ] {
             let path = directory.path().join(name);
             store::mkdir(path.parent().unwrap()).unwrap();
@@ -150,6 +149,47 @@ mod tests {
         std::os::unix::fs::symlink(&outside, directory.path().join("audio/link")).unwrap();
         assert!(verify().is_err());
         assert_eq!(std::fs::read(&outside).unwrap(), b"unrelated plaintext");
+        store::reset_for_tests();
+        std::env::remove_var("ECHO_DATA_DIR");
+    }
+
+    #[test]
+    fn legacy_chatgpt_folders_survive_open_and_validation() {
+        let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = store::test_directory();
+        store::reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        store::test_key();
+        store::init().unwrap();
+        assert!(!directory.path().join("chatgpt").exists());
+        let legacy = directory.path().join("chatgpt");
+        store::mkdir(&legacy).unwrap();
+        let path = legacy.join("auth.json");
+        store::write_protected(&path, b"legacy protected state").unwrap();
+        let encrypted = std::fs::read(&path).unwrap();
+        let mut damaged = encrypted.clone();
+        *damaged.last_mut().unwrap() ^= 1;
+        for bytes in [encrypted, b"legacy plaintext".to_vec(), damaged] {
+            std::fs::write(&path, &bytes).unwrap();
+            store::with_db(|db| {
+                db.execute("DELETE FROM storage_protection", [])?;
+                Ok(())
+            })
+            .unwrap();
+            store::reset_for_tests();
+            store::init().unwrap();
+            verify().unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        for area in ["audio", "extension-pcm", "credentials"] {
+            let active = directory.path().join(area).join("unprotected-secret");
+            store::mkdir(active.parent().unwrap()).unwrap();
+            std::fs::write(&active, b"sensitive plaintext").unwrap();
+            assert!(verify().is_err());
+            assert_eq!(std::fs::read(&active).unwrap(), b"sensitive plaintext");
+            std::fs::remove_file(active).unwrap();
+            verify().unwrap();
+        }
         store::reset_for_tests();
         std::env::remove_var("ECHO_DATA_DIR");
     }

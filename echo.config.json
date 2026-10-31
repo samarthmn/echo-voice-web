@@ -1,5 +1,4 @@
 {
   "bind": "127.0.0.1:3000",
-  "dataDir": ".echo-data",
-  "codexBinary": null
+  "dataDir": ".echo-data"
 }

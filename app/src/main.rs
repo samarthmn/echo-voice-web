@@ -128,12 +128,12 @@ mod processing_tests {
     #[test]
     fn notes_jobs_retain_provider_across_review_remount_and_finish_only_their_meeting() {
         let mut jobs = HashMap::new();
-        assert!(start_notes_job(&mut jobs, "first", "chatgpt"));
+        assert!(start_notes_job(&mut jobs, "first", "ollama"));
         assert!(!start_notes_job(&mut jobs, "first", "ollama"));
         assert!(start_notes_job(&mut jobs, "second", "ollama"));
-        assert_eq!(jobs.get("first").map(String::as_str), Some("chatgpt"));
+        assert_eq!(jobs.get("first").map(String::as_str), Some("ollama"));
         jobs.remove("second"); // The same removal runs for success and failure.
-        assert_eq!(jobs.get("first").map(String::as_str), Some("chatgpt"));
+        assert_eq!(jobs.get("first").map(String::as_str), Some("ollama"));
         jobs.remove("first");
         assert!(start_notes_job(&mut jobs, "first", "ollama"));
         assert!(!start_notes_job(&mut jobs, "", "ollama"));

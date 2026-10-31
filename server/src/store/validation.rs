@@ -193,12 +193,10 @@ pub(super) fn validate_transcript(v: &Value, with_id: bool) -> Result<()> {
     }
     Ok(())
 }
-/// Accept only providers whose provenance the workspace understands.
+/// Accept saved notes provenance, including the retired provider for library compatibility.
 pub(super) fn validate_notes_provider(provider: &str) -> Result<()> {
     if !matches!(provider, "ollama" | "chatgpt") {
-        return Err(ApiError::bad(
-            "Choose Ollama or ChatGPT as the notes provider.",
-        ));
+        return Err(ApiError::bad("The saved notes provider is not recognized."));
     }
     Ok(())
 }

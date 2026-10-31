@@ -29,7 +29,6 @@ async function fixture(t, { configured = true } = {}) {
       bind: `127.0.0.1:${port}`,
       dataDir: data,
       googleRedirectUri: redirect,
-      codexBinary: null,
     }),
   );
   // This isolated source folder contains no personal .env, accounts or recording library.

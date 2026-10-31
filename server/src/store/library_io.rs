@@ -121,14 +121,15 @@ pub fn import_library(input: Value) -> Result<Value> {
     }
     let mut settings = defaults();
     if let Some(imported) = input.get("settings") {
+        let mut imported = imported.clone();
+        migrate_legacy_notes_settings(&mut imported);
         object(
-            imported,
+            &imported,
             &[
                 "name",
                 "speechModel",
                 "notesModel",
                 "notesProvider",
-                "chatgptModel",
                 "language",
                 "autoTranscribe",
                 "retainAudio",

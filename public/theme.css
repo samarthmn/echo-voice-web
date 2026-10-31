@@ -147,9 +147,6 @@ select {
 .settings-card-heading h2,
 .settings-provider-heading h3,
 .settings-provider-bottom strong,
-.settings-help-chatgpt h4,
-.chatgpt-card h2,
-.chatgpt-card h3,
 .review-version strong,
 .review-track-list strong,
 .review-player-source strong,
@@ -291,17 +288,9 @@ select {
 .settings-page > .page-heading {
   margin-bottom: 24px;
 }
-.chatgpt-panel h2,
-.chatgpt-panel h3,
-.chatgpt-account strong,
-.chatgpt-model-choice label,
 .settings-field > span {
   color: var(--ink);
 }
-.chatgpt-heading p,
-.chatgpt-disclosure,
-.chatgpt-model-choice p,
-.chatgpt-footnote,
 .settings-field small {
   color: var(--muted);
 }

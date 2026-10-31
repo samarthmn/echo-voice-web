@@ -31,9 +31,9 @@ test('forced termination is reaped and reports preservation instead of allowing 
   assert.equal(child.signalCode, 'SIGKILL');
 });
 
-test('cleanup refuses to traverse a mounted helper filesystem', async () => {
+test('cleanup refuses to traverse a mounted filesystem', async () => {
   const root = path.resolve('tmp/synthetic-cleanup-guard');
-  const mounted = path.join(root, 'chatgpt-runtime');
+  const mounted = path.join(root, 'mounted-volume');
   const visited = [];
   await assert.rejects(
     assertNoMountedDirectory(root, {
@@ -44,10 +44,10 @@ test('cleanup refuses to traverse a mounted helper filesystem', async () => {
       }),
       entries: async (location) => {
         visited.push(location);
-        return location === root ? ['chatgpt-runtime'] : [];
+        return location === root ? ['mounted-volume'] : [];
       },
     }),
     /mounted filesystem.*preserved/,
   );
-  assert.deepEqual(visited, [root], 'Never enumerate or remove the mounted helper contents.');
+  assert.deepEqual(visited, [root], 'Never enumerate or remove the mounted contents.');
 });
