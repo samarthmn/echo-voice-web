@@ -1,0 +1,404 @@
+<!-- @template name="Landing" description="A one-page product landing in the system's own voice — an invented product (Little Acre: a seed-box subscription), a warm hero, a seed bed of numbered circles, a washed photograph and a sign-up patch" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Organic — landing</title>
+<script src="./ds-base.js"></script>
+<style>
+/* Template scaffolding — page layout and web-scale sizing only; every color,
+   font, radius and shadow comes from ../../styles.css. The voice is the
+   deck's, re-derived for a scrolling page: warm and a little playful —
+   Caprasimo headings over Figtree, soft circles as marks (dot markers, a
+   decoration circle), over-rounded containers, whitespace over rules (the
+   system avoids .hr; sections part on air), photographs washed so they
+   sit back into the cream page.
+
+   THE RHYTHM: a 28px leading unit (17px Figtree body at ~1.65), 14px
+   half-step; line-heights and block margins in unit multiples, heads
+   cap-trimmed, ?baselines/B to review. The deck's seat-pinning relaxes to
+   per-block discipline on a fluid page. The system's own interface
+   components keep their styles.css leading.
+
+   THE LANDING LAWS (shared by all six systems' landing templates):
+   #1 display headers break per sentence (.line spans); #2 the landing
+   advertises an invented product played straight — organic's is Little
+   Acre, a monthly seed-box subscription, written like a letter from a
+   slightly muddy friend; #3 spacing is cluster-scoped (display leading
+   ratio-governed ≈1.08 — the display-block lattice exemption — tight
+   single-unit gaps inside a cluster, the air between sections); #4 no
+   hero eyebrow — the nav brand names the product.
+
+   Optical left alignment: the deck's measured Caprasimo value carries
+   verbatim (-0.028em where caps lead a display line). */
+:root {
+  --leading: 28px;
+  --half: 14px;
+  --edge: clamp(20px, 5vw, 72px);
+  --measure: 58ch;
+}
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { margin: 0; text-wrap: pretty; overflow-x: clip; } /* the hero's decoration
+   circle deliberately rises past the page edge — clip (not hidden: no new
+   scroll container) keeps it from widening the page, the way a slide edge
+   clips the deck's divider circle */
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 var(--edge); }
+/* the component demo pads the masthead with its own spacing; on the page the
+   masthead's contents take the page gutter and sit on the wrap's text axis
+   (padding-only — full-width paint such as a masthead rule is untouched) */
+.nav { padding-inline: max(var(--edge), calc((100% - 1200px) / 2 + var(--edge))); }
+.nav a { white-space: nowrap; }
+@media (max-width: 480px) { .nav a { display: none; } } /* phone width: the nav
+   keeps brand + the one action (layout-only — the component's look is untouched) */
+
+/* — kicker (Figtree label; terracotta small text takes the DEEP step:
+   accent-700 measures 5.7:1 on the cream, where the base terracotta is a
+   3.0:1 large-text value) — */
+.kicker {
+  display: block; font-size: 13px; line-height: var(--half);
+  letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600;
+  color: var(--color-accent-700);
+  font-feature-settings: "tnum" 1;
+  margin: 0 0 calc(var(--leading) - var(--half));
+}
+
+/* — hero (a soft sage circle rises past the top-right edge — the deck
+   divider's decoration at page scale; on the cream ground the sage-200
+   shape reads at a 1.02:1 whisper — printed values are per-ground) — */
+.hero { position: relative; padding: calc(4 * var(--leading)) 0 calc(3 * var(--leading)); }
+.hero::before { content: ""; position: absolute; right: -180px; top: -220px;
+  width: 420px; height: 420px; border-radius: 50%;
+  background: var(--color-accent-2-200); pointer-events: none;
+  z-index: -1; /* decoration paints BEHIND all content — positioning alone
+     would leave it later in paint order than the nav (both z-auto paint in
+     tree order) and bury the nav links under sage */ }
+/* the side bleed only exists where the page can hold the full circle: with
+   the 180px overhang, viewports under ~1418px would cut it to a flat chord
+   at the edge (the clip boundary) — below 1420px the circle sits flush
+   instead, whole, with the TOP bleed still rising past the page */
+@media (max-width: 1420px) { .hero::before { right: 0; } }
+
+.display {
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: clamp(40px, 5.8vw, 76px);
+  line-height: clamp(43px, 6.26vw, 82px); /* law #3: ratio-governed ≈1.08 —
+     Caprasimo's chunky rounds; the display-block lattice exemption */
+  letter-spacing: 0; margin: 0;
+  margin-left: -0.028em; /* optical left alignment — the deck's measured Caprasimo value */
+  text-box: trim-both cap alphabetic;
+}
+.display .line { display: block; } /* law #1 */
+.hero .sub { font-size: 17px; line-height: var(--leading); max-width: var(--measure);
+  margin: calc(1.5 * var(--leading) - 1cap) 0 0;
+  text-box: trim-both cap alphabetic; }
+.hero .row { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--leading); }
+
+/* — the seed bed (this system diverges from the shared stat-row chassis
+   here): where the chassis set four numerals on one row, Little Acre
+   plants them — four soft tinted circles of different sizes, staggered
+   and overlapping like seeds thrown rather than sown in rows, the
+   biggest rising past the section's top boundary into the hero's air.
+   This is the system's own grammar doing structural work: the bouba
+   shapes the readme asks for ("soft circles and blobs", tinted fills
+   from the light ramp steps) stop decorating the grid and start
+   breaking it. Both accents carry fills (terracotta and sage tints);
+   3,400 keeps its sage voice from the old row. Whitespace still parts
+   everything — the shapes only overlap each other, at corners, and the
+   rise crosses into air, never into copy.
+
+   Inside a circle the content centers: a round has no flush axis, so
+   the landing's left alignment stays the SECTION grammar while the
+   circle interiors follow the button-label precedent (centered within
+   the shape). The optical left comp is a flush-axis device and does
+   not apply. Numerals keep proportional figures (display figures — the
+   deck's policy) at the old row's scale; labels keep the 13px stat
+   grammar with inks re-measured per tinted ground (each annotated at
+   its rule). Rhythm: numeral and label line-heights stay on the 28/14
+   lattice; the circles themselves are display blocks under the
+   display-block exemption — their staggers are deliberate, sized in
+   half-step multiples of the lattice. — */
+.bed { position: relative; padding: calc(1.5 * var(--leading)) 0 calc(2.5 * var(--leading));
+  min-height: calc(17 * var(--leading)); }
+.seed { position: absolute; border-radius: 50%; aspect-ratio: 1;
+  display: grid; place-content: center; text-align: center;
+  padding: var(--leading); box-sizing: border-box; }
+.seed-a { width: 240px; left: 64px; top: calc(2.5 * var(--leading));
+  background: var(--color-accent-100); }
+.seed-b { width: 190px; left: 208px; top: calc(9 * var(--leading));
+  background: var(--color-accent-200); } /* corner-overlaps seed-a (18px deep
+     by the circle math, not the boxes') — later in the bed, so it plants
+     on top */
+.seed-c { width: 310px; right: 96px; top: calc(-3.5 * var(--leading));
+  background: var(--color-accent-2-300); } /* the big one rises past the
+     section's top: its crest enters the hero CTA row's horizontal band —
+     air, never copy: bounding-box gap 305→417px across the band, settling
+     ≈403 at full width (drawn-edge cream 396→508, ≈494 at full width);
+     the body's
+     overflow-x: clip owns the page edges. One tint step past the hero's
+     sage-200 decoration circle (1.23:1 vs the deco's 1.02:1 whisper on
+     cream — measured), so the data seed quietly outranks the ornament */
+.seed-d { width: 175px; right: 321px; top: calc(4.5 * var(--leading));
+  background: var(--color-accent-2-100); } /* overlaps seed-c from the
+     LOWER-LEFT (20.5px deep) — the two pairs throw in different directions,
+     and the seed bridges the bed's middle, one arc instead of two
+     mirrored islands. Right-anchored like seed-c so the pair's geometry
+     holds at every stage width */
+.seed .stat-num { font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: clamp(34px, 3.4vw, 48px); line-height: calc(2 * var(--leading));
+  margin: 0; text-box: trim-both cap alphabetic; /* display figures stay
+     proportional — the deck's figure policy; no optical margin-left: the
+     comp is a flush-axis device and a centered round has no axis */ }
+.seed-a .stat-num, .seed-b .stat-num { color: var(--color-accent-700); } /* terracotta's
+     deep step on its own tints: 6.2:1 on the 100, 5.5:1 on the 200 —
+     measured; the base terracotta's 3.0:1 is a cream-ground value */
+.seed-d .stat-num { color: var(--color-accent-2-700); } /* sage's deep step
+     on its own 100 tint: 6.0:1 — measured */
+.seed-c .stat-num { color: var(--color-accent-2-800); } /* the 300 tint needs
+     the deeper step: 6.7:1 measured, where the 700 reads 4.4:1 — a
+     large-text value only; 3,400 keeps the sage voice it had in the old row */
+.seed .stat-label { font-size: 13px; line-height: var(--half); letter-spacing: 0.06em;
+  text-transform: uppercase; font-weight: 600;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent); /* 70% ink
+     re-measured per tinted ground: 5.8:1 / 5.5:1 on the terracotta 100/200,
+     5.9:1 on the sage 100, 5.1:1 on the sage 300 — all past the 4.5
+     small-text bar */
+  margin: var(--half) 0 0; max-width: 17ch;
+  text-wrap: balance; /* even rag inside a round — "boxes a year, in season"
+     breaks as two weighed lines, not a word on a cliff */ }
+
+/* — feature rows (the deck's dot grammar: a drawn terracotta circle at
+   marker scale hangs at each feature — soft shapes, no rules, no cards;
+   whitespace parts the rows) — */
+.features { padding: calc(3 * var(--leading)) 0 calc(2.5 * var(--leading)); }
+.feature { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+  gap: var(--leading) clamp(24px, 4vw, 72px); align-items: baseline;
+  padding: calc(1.25 * var(--leading)) 0; }
+.f-title { position: relative; font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: 26px; line-height: var(--leading);
+  margin: 0; text-box: trim-both cap alphabetic; }
+.f-title::before { content: ""; position: absolute; left: -36px; top: calc(0.5cap - 9px);
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--color-accent); } /* the dot, hanging left of the title's
+     axis; at narrow widths the gutter folds it away */
+@media (max-width: 1280px) { .f-title::before { display: none; } }
+.f-copy { font-size: 15.5px; line-height: var(--leading); margin: 0;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+  max-width: 52ch; text-box: trim-both cap alphabetic; }
+
+/* — imagery split (the washed photograph in an over-rounded frame — the
+   system's big radius carried past the token's card scale, the "soft
+   containers" direction; the wrapper carries the wash) — */
+.split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: var(--leading) clamp(24px, 5vw, 96px); align-items: center;
+  padding: calc(2 * var(--leading)) 0 calc(3 * var(--leading)); }
+.split-title { font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: 32px; line-height: calc(1.5 * var(--leading));
+  margin: 0; text-box: trim-both cap alphabetic; }
+.split-copy .note { font-size: 15.5px; line-height: var(--leading);
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+  margin: calc(var(--leading) - 1cap) 0 0; max-width: 48ch; text-box: trim-both cap alphabetic; }
+.split-figure { margin: 0; width: min(400px, 100%); justify-self: end;
+  border-radius: calc(2 * var(--radius-lg)); overflow: hidden; } /* over-rounded:
+     the 16px token grown to container scale, the system's signature move;
+     explicit width — the slot sizes from the figure, so the figure cannot
+     size from the slot */
+.split-figure image-slot { width: 100%; aspect-ratio: 493 / 668; }
+
+/* — quote (Caprasimo, warm; hangs at the deck's measured advances) — */
+.quote { padding: calc(2.5 * var(--leading)) 0 calc(3 * var(--leading)); }
+.quote blockquote {
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: clamp(24px, 2.6vw, 32px); line-height: calc(1.5 * var(--leading));
+  max-width: 32ch; margin: 0;
+  text-indent: -0.559em; /* hang the opening “ (measured advance in Caprasimo) */
+  text-box: trim-both cap alphabetic;
+}
+.quote figcaption { font-size: 15.5px; line-height: var(--leading);
+  color: color-mix(in srgb, var(--color-text) 70%, transparent); /* 70% ink on
+     the cream ground: 5.6:1 measured */
+  margin: calc(2 * var(--leading) - 1cap) 0 0; /* two grid units below the quote's
+     last baseline — one reads as part of the quote block; the attribution needs air */
+  text-indent: -1.347em; /* hang the leading em-dash + space (measured in Figtree) */
+  text-box: trim-both cap alphabetic; }
+
+@media (max-width: 720px) {
+  /* the phone gutter (--edge bottoms out at 20px) is narrower than the hung
+     marks' measured advances, so a hung “ or em-dash would press into or past
+     the viewport edge — seat the quote flush below this width; the hang
+     returns with the wider gutter */
+  .quote blockquote, .quote figcaption { text-indent: 0; }
+}
+
+/* — the rounded patch (the close): a sage-TINTED panel at the light step —
+   a tinted fill, not a saturated flood — over-rounded, the system's one
+   big soft shape on the page; ink keeps 15.4:1 on the tint — */
+.close { padding: 0 0 calc(2 * var(--leading)); }
+.patch { background: var(--color-accent-2-100);
+  border-radius: calc(2 * var(--radius-lg));
+  padding: calc(2 * var(--leading)) clamp(24px, 4vw, 64px); }
+.patch h3 { font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: 26px; line-height: var(--leading); margin: 0; text-box: trim-both cap alphabetic; }
+.patch .sub { font-size: 15.5px; line-height: var(--leading);
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+  margin: calc(var(--leading) - 1cap) 0 0; max-width: var(--measure); text-box: trim-both cap alphabetic; }
+.signup { display: flex; gap: var(--space-3); align-items: stretch; max-width: 480px;
+  margin-top: var(--leading); }
+.signup .input { flex: 1; }
+.signup .input, .signup .btn { min-height: 36px; } /* one control height floor; the row
+  stretches, so whichever of the pair is taller sets both and they read as one row */
+footer { padding: calc(2 * var(--leading)) 0; font-size: 13px; line-height: var(--leading);
+  color: color-mix(in srgb, var(--color-text) 70%, transparent); /* 70% ink on
+     the cream ground: 5.6:1 measured */ }
+
+/* — responsive collapse — */
+@media (max-width: 1080px) {
+  /* the constellation needs about 960px of stage (seed-d bridges the
+     middle, so the arc compresses before anything else) — below that the
+     bed re-plants as a staggered two-up cluster: circles leave the
+     absolute constellation (no overlaps here — soft shapes need air) but
+     keep the thrown look through alternating single-unit drops. The
+     min() cap pins every circle inside its own column, so the pair can
+     never close the gutter from either side, at any width */
+  .bed { min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--leading) var(--half); justify-items: center;
+    padding-bottom: calc(3.5 * var(--leading)); /* the dropped pair's
+     extra unit stays inside the section's air */ }
+  .seed { position: static; width: min(clamp(160px, 44vw, 240px), 100%); }
+  .seed-c { width: min(clamp(180px, 50vw, 280px), 100%); } /* the biggest
+     number keeps its mass where the columns have room (the 600-1080
+     band); at phone widths the shared column cap levels the family */
+  .seed-b, .seed-d { transform: translateY(var(--leading)); }
+}
+@media (max-width: 880px) {
+  .feature { grid-template-columns: 1fr; gap: var(--half); }
+  .f-copy { max-width: var(--measure); }
+}
+@media (max-width: 720px) {
+  .hero { padding-top: calc(2.5 * var(--leading)); }
+  .hero::before { width: 280px; height: 280px; top: -160px; }
+  .split { grid-template-columns: 1fr; }
+  .split-figure { order: -1; justify-self: start; }
+}
+@media (max-width: 389px) {
+  /* two-up runs out of room below 390: the column cap shrinks the circles
+     faster than the type inside them, and the glyph-to-boundary margin
+     decays through the 380s (measured: seed-c 18px at 385 down to 7px at
+     361) — so the bed becomes a single staggered column, seeds
+     alternating off the axis like a garden path. The handoff at 390 also
+     absorbs the size step where the biggest column circle would
+     otherwise jump ~50% larger crossing down in width (+35% for the
+     other three) */
+  .bed { grid-template-columns: 1fr; gap: var(--leading); }
+  .seed { width: clamp(160px, 56vw, 220px); }
+  .seed-c { width: clamp(180px, 62vw, 240px); }
+  .seed-a, .seed-c { justify-self: start; }
+  .seed-b, .seed-d { transform: none; justify-self: end; }
+}
+
+/* Review aid: the 28px rhythm drawn as hairlines — debug chrome, toggled by
+   ?baselines or the B key, never part of the look. */
+body[data-baselines] { position: relative; }
+body[data-baselines]::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom,
+      color-mix(in srgb, var(--color-accent) 35%, transparent) 0 1px,
+      transparent 1px var(--leading)),
+    repeating-linear-gradient(to bottom,
+      transparent 0 var(--half),
+      color-mix(in srgb, var(--color-accent) 16%, transparent) var(--half) calc(var(--half) + 1px),
+      transparent calc(var(--half) + 1px) var(--leading));
+}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <span class="nav-brand">Little Acre</span>
+  <a href="#box">The box</a>
+  <a href="#grown">Grown here</a>
+  <a href="#join">Join</a>
+  <button type="button" class="btn btn-primary">Start growing</button>
+</nav>
+<div class="wrap">
+
+  <section class="hero">
+    <h1 class="display"><span class="line">Plant something.</span> <span class="line">Every month.</span></h1>
+    <p class="sub">Little Acre is a seed-box subscription: six heirloom varieties on your doorstep each month, picked for your season and your soil, with instructions written by gardeners who answer their mail. Dirt under the nails sold separately.</p>
+    <div class="row">
+      <button type="button" class="btn btn-primary">Start growing</button>
+      <button type="button" class="btn btn-ghost">Peek in the box</button>
+    </div>
+  </section>
+
+  <section class="bed" aria-label="Little Acre, by the numbers">
+    <div class="seed seed-a"><p class="stat-num">6</p><p class="stat-label">Heirloom varieties per box</p></div>
+    <div class="seed seed-b"><p class="stat-num">12</p><p class="stat-label">Boxes a year, in season</p></div>
+    <div class="seed seed-c"><p class="stat-num">3,400</p><p class="stat-label">Gardens and counting</p></div>
+    <div class="seed seed-d"><p class="stat-num">1</p><p class="stat-label">Slightly muddy newsletter</p></div>
+  </section>
+
+  <section class="features" id="box">
+    <span class="kicker">What comes up</span>
+    <div class="feature">
+      <h2 class="f-title">Seeds with stories</h2>
+      <p class="f-copy">Every variety is an heirloom with a past — the lettuce a lighthouse keeper bred for wind, the tomato that crossed an ocean in a coat pocket. The card in the box tells you who kept it alive and how to return the favor.</p>
+    </div>
+    <div class="feature">
+      <h2 class="f-title">Planted, not planned</h2>
+      <p class="f-copy">You don’t choose the seeds — the season does. We pack what wants to go in the ground the week the box lands, so the garden stays a small, regular surprise instead of a cart to abandon.</p>
+    </div>
+    <div class="feature">
+      <h2 class="f-title">Help when it wilts</h2>
+      <p class="f-copy">Something will wilt. Write to us — a person who gardens reads every letter and answers with what to try next, not a link to a help center. Most things come back. The rest become compost and wisdom.</p>
+    </div>
+  </section>
+
+  <section class="split" id="grown">
+    <div class="split-copy">
+      <span class="kicker">Grown here</span>
+      <h2 class="split-title">Pictures that sit back in the bed</h2>
+      <p class="note">Every photograph is washed — softened and lifted until it settles into the cream page like it grew there. The garden is the loud part; the pictures keep their voices down.</p>
+    </div>
+    <figure class="split-figure washed">
+      <image-slot id="photo-split" shape="rect" src="../../assets/photo.jpg" role="img" aria-label="Product photograph washed into the warm page"></image-slot>
+    </figure>
+  </section>
+
+  <section class="quote">
+    <figure>
+      <!-- keep the leading “ — the blockquote's negative text-indent hangs it in the margin -->
+      <blockquote>“March was radishes. April was the lighthouse lettuce. My kid named the tomato Gerald. We are not a gardening family; we just can’t stop.”</blockquote>
+      <!-- keep the leading "— " — the figcaption's negative text-indent hangs it -->
+      <figcaption>— R. Calloway, third season</figcaption>
+    </figure>
+  </section>
+
+  <section class="close" id="join">
+    <div class="patch">
+      <h3>Your first box ships with the season</h3>
+      <p class="sub">Join this month and it starts with what wants planting now. Pause any time — gardens are patient, and so are we.</p>
+      <div class="signup">
+        <input class="input" type="email" placeholder="you@example.com" aria-label="Email address" />
+        <button type="button" class="btn btn-primary">Start growing</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>Built from this project’s theme.json — see readme.md.</footer>
+</div>
+<script src="image-slot.js"></script>
+<script>
+// Review aid: baseline-grid overlay — add ?baselines to the URL, or press B to toggle.
+(() => {
+  if (new URLSearchParams(location.search).has('baselines')) document.body.setAttribute('data-baselines', '');
+  addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if ((e.key === 'b' || e.key === 'B') && !e.metaKey && !e.ctrlKey && !e.altKey) document.body.toggleAttribute('data-baselines');
+  });
+})();
+</script>
+</body>
+</html>
