@@ -60,28 +60,6 @@ function recordingLabel(row: Recording): string {
     : new Date(started).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   return `${PROVIDER_NAMES[row.provider]} · ${when}`;
 }
-/**
- * "N older recordings are locked" notice for v2 recordings Echo has not unlocked yet.
- * Returns how many are locked, so a page can offer the recovery-phrase unlock.
- */
-export function lockedNotice(
-  rows: Recording[],
-  connected: boolean,
-  migrationError?: string,
-): number {
-  const node = element('locked-notice');
-  const count = rows.filter((row) => row.needsUnlock).length;
-  const older = `${count} older recording${count === 1 ? ' is' : 's are'} locked`;
-  node.textContent = migrationError
-    ? `Some saved recordings could not be prepared: ${migrationError} Their audio is kept.`
-    : !count
-      ? ''
-      : connected
-        ? `${older} — keep Echo open to unlock ${count === 1 ? 'it' : 'them'}, or use your old recovery phrase.`
-        : `${older} — connect to Echo or use your old recovery phrase to unlock ${count === 1 ? 'it' : 'them'}.`;
-  node.hidden = !node.textContent;
-  return count;
-}
 export function renderRecordings(
   rows: Recording[],
   exportRecording: (row: Recording) => void,
@@ -109,7 +87,7 @@ export function renderRecordings(
       'saved-echo': 'Saved in Echo',
       attention: 'Needs attention',
     }[row.transferState];
-    text.textContent = `${row.locked ? 'Locked · ' : ''}${duration(row.totalFrames)} · ${row.captureState === 'interrupted' ? 'Interrupted · ' : row.captureState === 'paused' ? 'Paused · ' : row.captureState === 'recording' ? 'Recording · ' : ''}${transfer}`;
+    text.textContent = `${duration(row.totalFrames)} · ${row.captureState === 'interrupted' ? 'Interrupted · ' : row.captureState === 'paused' ? 'Paused · ' : row.captureState === 'recording' ? 'Recording · ' : ''}${transfer}`;
     copy.append(title, text);
     if (row.error) {
       const error = document.createElement('p');
@@ -137,7 +115,7 @@ export function renderRecordings(
       });
       actions.append(button);
     }
-    if (!row.receipt && !row.locked && row.chunkCount && row.recordingId !== activeRecordingId) {
+    if (!row.receipt && row.chunkCount && row.recordingId !== activeRecordingId) {
       const button = document.createElement('button');
       button.className = 'quiet';
       button.textContent = 'Export';

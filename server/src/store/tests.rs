@@ -1,5 +1,69 @@
 use super::*;
 #[test]
+fn old_database_drops_extension_vaults_and_library_backup_still_round_trips() {
+    let _guard = TEST_LIBRARY_LOCK.blocking_lock();
+    let directory = test_directory();
+    let imported = test_directory();
+    reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", directory.path());
+    test_key();
+    init().unwrap();
+    let meeting =
+        create_meeting(json!({"title":"Retained meeting","mode":"import","consent":false}))
+            .unwrap();
+    let meeting_id = meeting["id"].as_str().unwrap();
+    with_db(|db| {
+        db.execute_batch("CREATE TABLE extension_vaults(installation_id TEXT PRIMARY KEY,vault_id TEXT NOT NULL,data TEXT NOT NULL);
+            INSERT INTO extension_vaults VALUES('installation','vault','escrowed-key-must-not-export');
+            INSERT INTO extension_connections VALUES('installation','Browser','origin','credential-hash','date');")?;
+        Ok(())
+    }).unwrap();
+    // Portable exports select library records, even when an old database still has escrow data.
+    let backup = export_library().unwrap();
+    let serialized = backup.to_string();
+    assert!(!serialized.contains("extension_vaults"));
+    assert!(!serialized.contains("escrowed-key-must-not-export"));
+    reset_for_tests();
+    // Opening a copied older database uses the same startup path as a normal library.
+    init().unwrap();
+    with_db(|db| {
+        let count: i64 = db.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='extension_vaults'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 0);
+        let credential: String = db.query_row(
+            "SELECT credential_hash FROM extension_connections WHERE installation_id='installation'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(credential, "credential-hash");
+        Ok(())
+    }).unwrap();
+    crate::library_validation::verify().unwrap();
+    assert_eq!(get_meeting(meeting_id).unwrap().unwrap(), meeting);
+    reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", imported.path());
+    test_key();
+    import_library(backup).unwrap();
+    assert_eq!(get_meeting(meeting_id).unwrap().unwrap(), meeting);
+    with_db(|db| {
+        let count: i64 = db.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='extension_vaults'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 0);
+        Ok(())
+    })
+    .unwrap();
+    crate::library_validation::verify().unwrap();
+    reset_for_tests();
+    std::env::remove_var("ECHO_DATA_DIR");
+}
+
+#[test]
 fn panic_rolls_back_and_database_remains_available() {
     let _guard = TEST_LIBRARY_LOCK.blocking_lock();
     let directory = test_directory();

@@ -18,7 +18,6 @@ use std::{fs, path::PathBuf};
 use uuid::Uuid;
 mod pairing;
 pub(crate) use pairing::cleanup_loop as cleanup_pairing_loop;
-mod vault;
 use pairing::{approve, cancel, claim, hello, intent, pair, reject, request_metadata};
 type Result<T> = std::result::Result<T, ApiError>;
 const RATE: u64 = 16000;
@@ -73,7 +72,8 @@ pub(crate) fn init_schema(db: &Connection) -> Result<()> {
  CREATE TABLE IF NOT EXISTS extension_recordings(recording_id TEXT PRIMARY KEY,installation_id TEXT NOT NULL,meeting_id TEXT NOT NULL UNIQUE,data TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS extension_chunks(recording_id TEXT NOT NULL,sequence INTEGER NOT NULL,frames INTEGER NOT NULL,digest TEXT NOT NULL,file TEXT NOT NULL,PRIMARY KEY(recording_id,sequence));")?;
     db.execute("DELETE FROM extension_pairing", [])?;
-    vault::init_schema(db)?;
+    // Discard retired key escrow, including when opening a restored database.
+    db.execute_batch("DROP TABLE IF EXISTS extension_vaults;")?;
     db.execute(
         "INSERT OR IGNORE INTO extension_library VALUES(1,?)",
         [Uuid::new_v4().to_string()],
@@ -360,7 +360,6 @@ fn reply_error(e: ApiError) -> Response {
 pub fn extension_routes() -> Router {
     Router::new()
         .route("/connection", get(connection).delete(disconnect))
-        .route("/vault", get(vault::read).delete(vault::remove))
         .route("/hello", get(hello))
         .route("/pair", post(pair))
         .route("/pair/claim", post(claim))

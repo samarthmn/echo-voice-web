@@ -69,7 +69,6 @@ Use **Disconnect this browser** in Setup, or **Settings â†’ Browser extension â†
 | "Echo disconnected this browser"                                  | The connection was revoked. **Connect again**; pending audio is kept                                       |
 | Microphone missing from the recording                             | Check the mute state in the meeting, microphone permission in Setup, and that the meeting UI is in English |
 | "Open a supported Google Meet, Zoom Web or Teams Web meeting tab" | Select the meeting tab before clicking the popup                                                           |
-| "Connect to Echo to unlock this older recording."                 | It was encrypted by a retired scheme; connect to Echo so it can be migrated                                |
 
 ## Protocol
 
@@ -85,9 +84,10 @@ The extension talks to the local server under `/extension/v1`. The server accept
 | `DELETE /pair/{requestId}`                                                                                                                                                          | none   | Cancel; body `{installationId, claimSecret}`; `204`, idempotent                                                                                                                                                                                                                                                                                                                        |
 | `GET /connection`, `DELETE /connection`                                                                                                                                             | bearer | Connection info (`401` once revoked), and extension-side disconnect                                                                                                                                                                                                                                                                                                                    |
 | `PUT/GET /recordings/{id}`, `PUT /recordings/{id}/chunks/{sequence}`, `POST /recordings/{id}/complete`, `POST /recordings/{id}/controls/{command}/ack`, `GET /recordings/{id}/live` | bearer | Recording upload, remote pause/resume/stop acknowledgement, live text                                                                                                                                                                                                                                                                                                                  |
-| `GET /vault`, `DELETE /vault`                                                                                                                                                       | bearer | Migration only, see below                                                                                                                                                                                                                                                                                                                                                              |
 
 The credential is `hex(SHA256("echo-extension-v2\0" + claimSecret + "\0" + requestId + "\0" + installationId + "\0" + libraryId))`. It is deterministic so a retry after a lost response yields the same credential; the server stores only its SHA-256, with the installation id, name and origin. The workspace side (`/api/extensions/...`, same-origin only) lists connections and pending requests, approves or rejects a request, revokes an installation, and mints intents.
+
+At server start, pending pairing rows are cleared; existing connections are preserved.
 
 An Echo-initiated intent (`POST /api/extensions/intent`) is 32 random bytes in hex, valid 120 seconds, single use; only its SHA-256 is kept, in memory.
 
@@ -110,10 +110,6 @@ The manifest declares `externally_connectable` for `http://localhost/*` and `htt
 ### At-rest encryption (storage v3)
 
 Each recording has a random 32-byte key, wrapped with the non-extractable AES-GCM device key (IndexedDB `credential-device-key`, AAD `["recording-key", recordingId]`). Chunks are AES-GCM encrypted with AAD `["pcm", keyContext, id, seq, frames]`. Title and URL are encrypted; the list and badge read only plaintext summary fields (id, time, status, duration, provider, chunk count, size). Receipts for uploaded recordings are pruned after 7 days.
-
-### Migration of older recordings
-
-Earlier versions encrypted recordings under a separate "vault" identity. The server still holds escrowed vault records for such installations (`GET/DELETE /vault`). On startup the extension rewraps each older recording's key under the device key without re-encrypting the audio, recovering the vault key from the escrow. A recording that cannot be unlocked yet keeps its audio and shows "Connect to Echo to unlock this older recording." Once no older recordings remain and the extension is connected, it calls `DELETE /vault` to remove its escrow record (a 404 counts as already removed). At server start, pending (not yet approved) pairing rows are cleared; existing connections are untouched.
 
 ## Security notes
 

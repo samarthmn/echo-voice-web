@@ -8,13 +8,12 @@ const fakeModules = {
   connection:
     'export async function connectionStatus(){return {status:"none"}};export async function disconnect(){};export async function livePreview(){}',
   'external-messages': 'export async function externalMessage(){return {}}',
-  'legacy-vault': 'export async function unlockWithRecoveryPhrase(){}',
   'library-actions':
     'export async function openEcho(){}; export async function deleteLocalRecording(){}',
   settings:
     "export async function settings(){return {enabledProviders:['meet'],micGranted:false,micDeviceId:'default',rememberedConsent:globalThis.remembered??[],liveTranscription:false}};export async function saveSettings(){return {}};export async function readLink(){return {state:'none'}};export async function connectedPair(){};export async function revokeCredential(){};export async function wasRevoked(){return false}",
   storage:
-    'export async function allRecordings(){return []};export const migrateRecordings=async()=>{};',
+    'export async function allRecordings(){return []};export const pruneReceipts=async()=>{};',
 };
 const built = await build({
   entryPoints: ['extension/src/background.ts'],
@@ -27,8 +26,7 @@ const built = await build({
       setup(builder) {
         builder.onResolve(
           {
-            filter:
-              /^\.\/(settings|storage|library-actions|connection|pairing|external-messages|legacy-vault)$/,
+            filter: /^\.\/(settings|storage|library-actions|connection|pairing|external-messages)$/,
           },
           (args) => ({ path: args.path.slice(2), namespace: 'mock' }),
         );

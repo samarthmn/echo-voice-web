@@ -353,7 +353,7 @@ test('popup polls bounded live/connection status separately and renders exclusio
     };
   };
   const fakeUI =
-    'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=async fn=>fn();export const renderRecordings=()=>{};export const lockedNotice=()=>{};export const duration=()=>"00:01"';
+    'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=async fn=>fn();export const renderRecordings=()=>{};export const duration=()=>"00:01"';
   await load('extension/src/popup.ts', context, fakeUI, '');
   intervals.get(5000)();
   await settle();
@@ -439,7 +439,7 @@ test('popup connect shows waiting, then the not-found message with Retry, never 
     };
   };
   const fakeUI =
-    'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=async fn=>fn();export const renderRecordings=()=>{};export const lockedNotice=()=>{};export const duration=()=>"00:01"';
+    'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=async fn=>fn();export const renderRecordings=()=>{};export const duration=()=>"00:01"';
   await load('extension/src/popup.ts', context, fakeUI, '');
   assert.equal(element('connection-title').textContent, 'Connect to Echo');
   assert.match(element('connection-detail').textContent, /saved in this browser until you connect/);
@@ -521,7 +521,7 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
   };
   context.showError = (error) => errors.push(error.message);
   const fakeUI =
-    'export const element=globalThis.element;export const request=globalThis.request;export const showError=globalThis.showError;export async function action(fn){try{await fn()}catch(error){showError(error)}};export const renderRecordings=()=>{};export const lockedNotice=()=>{}';
+    'export const element=globalThis.element;export const request=globalThis.request;export const showError=globalThis.showError;export async function action(fn){try{await fn()}catch(error){showError(error)}};export const renderRecordings=()=>{}';
   await load(
     'extension/src/setup.ts',
     context,

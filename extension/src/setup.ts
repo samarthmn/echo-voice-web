@@ -1,7 +1,7 @@
 import { MEETING_SITES, Provider, Recording } from './core';
 import type { ExtensionState } from './background';
 import { exportParts, recording } from './storage';
-import { action, element, lockedNotice, renderRecordings, request, showError } from './ui';
+import { action, element, renderRecordings, request, showError } from './ui';
 import { connectionCard } from './connection-card';
 type ExportPart = { blob: Blob; part: number; startFrame: number; frames: number };
 const providers = MEETING_SITES;
@@ -92,11 +92,6 @@ async function refreshState() {
   }
   const connected = state.connection.phase === 'connected';
   element('disconnect').hidden = !connected;
-  element('legacy-unlock').hidden = !lockedNotice(
-    state.recordings,
-    connected,
-    state.migrationError,
-  );
   pendingCount = state.recordings.filter((row) => !row.receipt && row.chunkCount).length;
   capturing = !!state.active;
   const micGranted = await microphonePermission();
@@ -239,21 +234,6 @@ element('retry').addEventListener('click', () => {
     await refresh();
   });
 });
-element('legacy-unlock-submit').addEventListener('click', () => {
-  const field = element<HTMLTextAreaElement>('legacy-phrase');
-  const phrase = field.value;
-  // Never keep the phrase on the page, even when it was wrong.
-  field.value = '';
-  void action(async () => {
-    const { locked } = await request({ type: 'UNLOCK_OLDER_RECORDINGS', phrase });
-    status(
-      locked
-        ? `${locked} older recording${locked === 1 ? ' is' : 's are'} still locked. They may use a different recovery phrase.`
-        : 'Older recordings unlocked. They upload to Echo when it is connected.',
-    );
-    await refresh();
-  }, element<HTMLButtonElement>('legacy-unlock-submit'));
-});
 async function beginExport(id: string) {
   // Lists carry summaries only; export opens the full recording with its device key.
   const row = await recording(id);
@@ -329,7 +309,6 @@ window.addEventListener('pagehide', () => {
 });
 void refresh()
   .then(async () => {
-    if (location.hash === '#unlock') element('legacy-phrase').focus();
     const id = new URLSearchParams(location.hash.slice(1)).get('recording');
     if (id) await beginExport(id);
   })

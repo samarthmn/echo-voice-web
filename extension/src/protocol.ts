@@ -251,12 +251,7 @@ export async function transferPending(
   );
   let outcome: PassOutcome = 'idle';
   for (const row of rows) {
-    // Locked rows wait for migration; they are never uploaded under another key.
-    if (
-      row.receipt ||
-      row.locked ||
-      (!row.chunkCount && !['recording', 'paused'].includes(row.captureState))
-    )
+    if (row.receipt || (!row.chunkCount && !['recording', 'paused'].includes(row.captureState)))
       continue;
     if (Date.now() - passStarted >= 5000) return 'more';
     lastAttempt.set(row.recordingId, ++attemptCounter);

@@ -49,15 +49,10 @@ test('setup has three steps — Connect, Meeting sites, Microphone — and no re
   assert.ok(html.indexOf('id="connect"') < html.indexOf('id="providers"'));
   assert.ok(html.indexOf('id="endpoint"') > html.indexOf('id="advanced"'));
   assert.match(html, /Record call audio only/);
-  // The only phrase field is the migration unlock for pre-v3 recordings: hidden until such
-  // recordings exist, and outside the setup steps.
-  const legacy =
-    /<div id="legacy-unlock" class="notice" hidden>[\s\S]*?<\/textarea[\s\S]*?<\/div>/.exec(html);
-  assert.ok(legacy, 'legacy unlock starts hidden');
-  assert.ok(html.indexOf('id="legacy-unlock"') > html.indexOf('id="microphone-step"'));
-  assert.doesNotMatch(html.replace(legacy[0], ''), /phrase|pairing code|confirm-library/i);
+  assert.doesNotMatch(html, /phrase|pairing code|confirm-library/i);
   const popup = await readFile('extension/popup.html', 'utf8');
   assert.match(popup, /Recordings are saved in this browser until you connect/);
+  assert.doesNotMatch(popup, /phrase|unlock/i);
 });
 test('approval page never approves on load, renders labels as text, and tells the extension after Allow', async () => {
   const buildResult = await build({
@@ -133,7 +128,7 @@ test('popup checks actual host and microphone permission before enabling Start',
         setup(b) {
           b.onResolve({ filter: /^\.\/ui$/ }, () => ({ path: 'ui', namespace: 'mock' }));
           b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({
-            contents: `export const element=globalThis.element;export const request=async()=>({connection:{phase:'none',revoked:false},settings:{enabledProviders:['meet'],micGranted:true,rememberedConsent:[],liveTranscription:false},active:null,recordings:[]});export const renderRecordings=()=>{};export const lockedNotice=()=>{};export const showError=error=>{throw error};export const action=fn=>fn();export const duration=()=>'';`,
+            contents: `export const element=globalThis.element;export const request=async()=>({connection:{phase:'none',revoked:false},settings:{enabledProviders:['meet'],micGranted:true,rememberedConsent:[],liveTranscription:false},active:null,recordings:[]});export const renderRecordings=()=>{};export const showError=error=>{throw error};export const action=fn=>fn();export const duration=()=>'';`,
           }));
         },
       },
@@ -194,7 +189,7 @@ test('setup submits Cancel immediately while a state refresh is still waiting', 
           }));
           b.onLoad({ filter: /.*/, namespace: 'mock' }, (args) => ({
             contents: args.path.endsWith('/ui')
-              ? 'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=fn=>fn();export const renderRecordings=()=>{};export const lockedNotice=()=>{};'
+              ? 'export const element=globalThis.element;export const request=globalThis.request;export const showError=e=>{throw e};export const action=fn=>fn();export const renderRecordings=()=>{};'
               : 'export const recording=async()=>undefined;export async function* exportParts(){}',
           }));
         },

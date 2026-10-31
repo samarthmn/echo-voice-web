@@ -40,7 +40,7 @@ The server (`server/src/main.rs`) serves the static `public/` folder and two rou
 | `store/`                                     | `mod.rs` (database open, lock, migrations), `meetings.rs`, `audio.rs`, `settings.rs`, `vocabulary.rs`, `library_io.rs` (export/import), `validation.rs`                                           |
 | `library_schema.rs`, `library_validation.rs` | Format fence and offline library check                                                                                                                                                            |
 | `recovery.rs`                                | Recovery phrase, encrypted backups, `--recover-library`                                                                                                                                           |
-| `extensions/`                                | `mod.rs` (routes, auth, connections), `pairing.rs` (v2 pairing, intents), `recordings.rs` (chunk ingest), `live.rs` (live text), `workspace.rs` (`/api/extensions/*`), `vault.rs` (legacy escrow) |
+| `extensions/`                                | `mod.rs` (routes, auth, connections), `pairing.rs` (v2 pairing, intents), `recordings.rs` (chunk ingest), `live.rs` (live text), `workspace.rs` (`/api/extensions/*`)                             |
 | `speech.rs`, `speech_spool.rs`               | Native Large V3 jobs and encrypted PCM spool                                                                                                                                                      |
 | `notes.rs`                                   | Local Ollama notes generation                                                                                                                                                               |
 | `integrations.rs`, `google_oauth.rs`         | Google Calendar and its OAuth flow                                                                                                                                                                |
@@ -57,13 +57,13 @@ The server (`server/src/main.rs`) serves the static `public/` folder and two rou
 
 | Module                                                                               | Role                                                                     |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `background.ts`                                                                      | Service worker: message routing, migration, upload scheduling            |
+| `background.ts`                                                                      | Service worker: message routing, receipt pruning, upload scheduling      |
 | `popup.ts`, `setup.ts`, `ui.ts`, `connection-card.ts`, `status-labels.ts`            | Popup and Setup pages                                                    |
 | `pairing.ts`, `connection.ts`, `discovery.ts`, `external-messages.ts`, `protocol.ts` | Pairing, link state, finding Echo, messages from Echo pages, HTTP client |
 | `settings.ts`                                                                        | Sealed link state and settings                                           |
 | `content.ts`, `adapters.ts`, `compatibility.ts`                                      | Meeting-page observer and mute-state adapters (Meet, Zoom, Teams)        |
 | `offscreen.ts`, `audio.ts`, `worklet.ts`, `recording-lock.ts`                        | Tab/mic capture, resampling to 16 kHz PCM, single-recording lock         |
-| `storage.ts`, `encryption.ts`, `device-secrets.ts`, `vault-db.ts`, `legacy-vault.ts` | Encrypted IndexedDB journal, device key, migration of older recordings   |
+| `storage.ts`, `encryption.ts`, `device-secrets.ts`, `vault-db.ts`                    | Encrypted IndexedDB journal and device key                               |
 | `library-actions.ts`                                                                 | Upload, export and delete of local recordings                            |
 
 ## Recording data flow

@@ -64,8 +64,6 @@ export type Recording = {
   transferState: TransferState;
   gaps: { atFrame: number; pauseMs: number }[];
   interrupted: boolean;
-  locked?: boolean;
-  needsUnlock?: boolean;
   error?: string;
   interruption?: ReturnType<typeof interruption>;
   receipt?: { libraryId: string; meetingId: string; verifiedAt: string };

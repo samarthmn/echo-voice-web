@@ -145,7 +145,7 @@ test('device-key journal survives restart, records offline, and never stores pla
     );
     assert.equal(restarted.title, 'Confidential renamed meeting');
     assert.equal(restarted.listed.title, '', 'lists never decrypt metadata');
-    assert.equal(restarted.listed.locked, false);
+    assert.ok(!('locked' in restarted.listed));
     assert.deepEqual(restarted.pcm, [1, 2, 3, 4]);
     assert.equal(restarted.credential, 'secret-auth-credential');
     const offline = crypto.randomUUID();
@@ -204,83 +204,5 @@ test('device-key journal survives restart, records offline, and never stores pla
   } finally {
     await context?.close();
     await rm(scratch, { recursive: true, force: true, maxRetries: 3 });
-  }
-});
-test('v1 plaintext migration is resumable after asynchronous encryption failure and retains every committed chunk', async () => {
-  const root = path.join(project, 'tmp', 'extension-protection-migration');
-  await mkdir(root, { recursive: true });
-  const output = await buildExtension({ outdir: path.join(root, 'extension') });
-  await writeFile(
-    path.join(output.outdir, 'protection-test.html'),
-    '<!doctype html><title>Migration test</title>',
-  );
-  let context;
-  try {
-    context = await launch(output, path.join(root, 'profile'));
-    const page = await testPage(context, output);
-    const id = crypto.randomUUID();
-    await page.evaluate(async (value) => {
-      const pcm = new Uint8Array([10, 20, 30, 40]).buffer;
-      const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', pcm)), (b) =>
-        b.toString(16).padStart(2, '0'),
-      ).join('');
-      const db = await testAPI.journal.database();
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction(['recordings', 'chunks', 'meta'], 'readwrite');
-        tx.objectStore('recordings').put({
-          ...value,
-          chunkCount: 2,
-          totalFrames: 4,
-          captureState: 'stopped',
-        });
-        for (let sequence = 0; sequence < 2; sequence++)
-          tx.objectStore('chunks').put({
-            recordingId: value.recordingId,
-            sequence,
-            frames: 2,
-            pcm,
-            sha256,
-          });
-        tx.objectStore('meta').put({ key: 'pendingBytes', value: 8 });
-        tx.oncomplete = resolve;
-        tx.onerror = reject;
-      });
-    }, row(id));
-    const failure = await page.evaluate(async () => {
-      const original = crypto.subtle.encrypt.bind(crypto.subtle);
-      let calls = 0;
-      crypto.subtle.encrypt = async (...args) => {
-        if (++calls === 4) throw new Error('injected encryption failure');
-        return original(...args);
-      };
-      try {
-        return await testAPI.journal.migrateRecordings().then(
-          () => null,
-          (error) => error.message,
-        );
-      } finally {
-        crypto.subtle.encrypt = original;
-      }
-    });
-    assert.match(failure, /injected encryption failure/);
-    const partial = await dump(page);
-    assert.equal(partial.chunks.length, 2);
-    assert.equal(partial.rows[0].migrating, true);
-    assert.equal(partial.rows[0].title, undefined);
-    assert.ok(partial.chunks.some((chunk) => chunk.pcm));
-    await page.evaluate(() => testAPI.journal.migrateRecordings());
-    const done = await dump(page);
-    assert.equal(done.rows[0].migrating, undefined);
-    assert.ok(done.chunks.every((chunk) => chunk.encrypted && !chunk.pcm));
-    const exported = await page.evaluate(async (id) => {
-      const pieces = [];
-      for await (const part of testAPI.journal.exportParts(id))
-        pieces.push([...new Uint8Array(await part.blob.arrayBuffer())].slice(44));
-      return pieces;
-    }, id);
-    assert.deepEqual(exported, [[10, 20, 30, 40, 10, 20, 30, 40]]);
-  } finally {
-    await context?.close();
-    await rm(root, { recursive: true, force: true, maxRetries: 3 });
   }
 });

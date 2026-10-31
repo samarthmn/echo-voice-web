@@ -1,14 +1,6 @@
 import { meetingFor, MEETING_SITES, Recording, MAX_FRAMES } from './core';
 import type { ExtensionState } from './background';
-import {
-  action,
-  duration,
-  element,
-  lockedNotice,
-  renderRecordings,
-  request,
-  showError,
-} from './ui';
+import { action, duration, element, renderRecordings, request, showError } from './ui';
 import { liveLabel } from './status-labels';
 import { connectionCard } from './connection-card';
 let tab: chrome.tabs.Tab | undefined;
@@ -76,11 +68,6 @@ async function refreshState() {
   prefs = settings;
   active = state.active;
   connection.update(state.connection);
-  element('unlock-older').hidden = !lockedNotice(
-    state.recordings,
-    connection.status() === 'connected',
-    state.migrationError,
-  );
   if (state.recoveryError) showError(new Error(state.recoveryError));
   try {
     micGranted =
@@ -183,9 +170,6 @@ async function refreshState() {
   );
   enableStart();
 }
-element('unlock-older').addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('setup.html#unlock') }).catch(showError);
-});
 element('setup').addEventListener('click', () => {
   chrome.runtime.openOptionsPage().catch(showError);
 });

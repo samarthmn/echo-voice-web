@@ -1462,16 +1462,12 @@ fn validated_loopback_hosts_and_ranges() {
 }
 
 #[test]
-fn pairing_migration_preserves_legacy_vaults_and_connections() {
-    // Pre-v2 libraries carry the extra staged-credential columns and v1 vault escrow rows.
+fn pairing_migration_preserves_connections() {
+    // Pre-v2 libraries carry extra staged-credential columns.
     let db = Connection::open_in_memory().unwrap();
-    db.execute_batch("CREATE TABLE extension_pairing(code_hash TEXT PRIMARY KEY,expires INTEGER NOT NULL,request_id TEXT UNIQUE,installation_id TEXT,name TEXT,origin TEXT,state TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'manual',activation_required INTEGER NOT NULL DEFAULT 0,credential_hash TEXT); INSERT INTO extension_pairing VALUES('old',99999999999,'request','installation','Browser','origin','claimed','browser',1,'staged'); CREATE TABLE extension_vaults(installation_id TEXT PRIMARY KEY,vault_id TEXT NOT NULL,data TEXT NOT NULL); INSERT INTO extension_vaults VALUES('installation','vault','{}'); CREATE TABLE extension_connections(installation_id TEXT PRIMARY KEY,name TEXT NOT NULL,origin TEXT NOT NULL,credential_hash TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL); INSERT INTO extension_connections VALUES('installation','Browser','origin','hash','date');").unwrap();
+    db.execute_batch("CREATE TABLE extension_pairing(code_hash TEXT PRIMARY KEY,expires INTEGER NOT NULL,request_id TEXT UNIQUE,installation_id TEXT,name TEXT,origin TEXT,state TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'manual',activation_required INTEGER NOT NULL DEFAULT 0,credential_hash TEXT); INSERT INTO extension_pairing VALUES('old',99999999999,'request','installation','Browser','origin','claimed','browser',1,'staged'); CREATE TABLE extension_connections(installation_id TEXT PRIMARY KEY,name TEXT NOT NULL,origin TEXT NOT NULL,credential_hash TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL); INSERT INTO extension_connections VALUES('installation','Browser','origin','hash','date');").unwrap();
     init_schema(&db).unwrap();
-    for (table, expected) in [
-        ("extension_pairing", 0),
-        ("extension_vaults", 1),
-        ("extension_connections", 1),
-    ] {
+    for (table, expected) in [("extension_pairing", 0), ("extension_connections", 1)] {
         let count: i64 = db
             .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
             .unwrap();
@@ -1481,7 +1477,7 @@ fn pairing_migration_preserves_legacy_vaults_and_connections() {
 }
 
 #[tokio::test]
-async fn pairing_v2_discovery_decisions_intents_and_vault_migration() {
+async fn pairing_v2_discovery_decisions_intents_and_existing_connections() {
     let _guard = store::TEST_LIBRARY_LOCK.lock().await;
     let directory = crate::store::test_directory();
     store::reset_for_tests();
@@ -1748,10 +1744,6 @@ async fn pairing_v2_discovery_decisions_intents_and_vault_migration() {
             "INSERT INTO extension_connections VALUES(?,?,?,?,?)",
             params![installation, "Legacy", ORIGIN, hash(&token), "date"],
         )?;
-        db.execute(
-            "INSERT INTO extension_vaults VALUES(?,?,?)",
-            params![installation, Uuid::new_v4().to_string(), "{}"],
-        )?;
         Ok(())
     })
     .unwrap();
@@ -1775,26 +1767,6 @@ async fn pairing_v2_discovery_decisions_intents_and_vault_migration() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _, _) = send(
-        &app,
-        "DELETE",
-        "/extension/v1/vault",
-        ORIGIN,
-        Some(&token),
-        vec![],
-        &[],
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    store::with_db(|db| {
-        assert_eq!(
-            db.query_row("SELECT count(*) FROM extension_vaults", [], |r| r
-                .get::<_, i64>(0))?,
-            0
-        );
-        Ok(())
-    })
-    .unwrap();
     for path in [
         "/extension/v1/pairing/begin",
         "/extension/v1/pairing/request",
@@ -2013,4 +1985,33 @@ async fn discovery_responds_while_database_is_locked_and_tracks_reopened_library
         json_request(&app, "GET", "/extension/v1/hello", ORIGIN, None, json!({})).await;
     assert_ne!(expected, expected_other);
     assert_eq!(hello["libraryId"], expected_other);
+}
+
+#[tokio::test]
+async fn removed_vault_route_returns_not_found() {
+    let _guard = store::TEST_LIBRARY_LOCK.lock().await;
+    let directory = store::test_directory();
+    store::reset_for_tests();
+    std::env::set_var("ECHO_DATA_DIR", directory.path());
+    store::test_key();
+    store::init().unwrap();
+    let app = app();
+    let (credential, _, _) = pair(&app, &Uuid::new_v4().to_string()).await;
+    for method in ["GET", "DELETE"] {
+        for credential in [None, Some(credential.as_str())] {
+            let (status, _, _) = send(
+                &app,
+                method,
+                "/extension/v1/vault",
+                ORIGIN,
+                credential,
+                vec![],
+                &[],
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+    store::reset_for_tests();
+    std::env::remove_var("ECHO_DATA_DIR");
 }

@@ -9,7 +9,7 @@ import {
   validObservation,
   InterruptionReason,
 } from './core';
-import { allRecordings, migrateRecordings } from './storage';
+import { allRecordings, pruneReceipts } from './storage';
 import {
   settings,
   saveSettings,
@@ -35,7 +35,6 @@ import {
   confirmConnect,
 } from './pairing';
 import { captureChanged, renderBadge } from './badge';
-import { unlockWithRecoveryPhrase } from './legacy-vault';
 type Owner = {
   tabId: number;
   identity: string;
@@ -364,30 +363,12 @@ async function reportFailure(error: unknown) {
   if (chrome.action.openPopup)
     await chrome.action.openPopup().catch(logFailure('opening the popup'));
 }
-let migrating: Promise<void> | undefined;
-let migrationError: string | undefined;
-function migrateProtectedHistory(): Promise<void> {
-  migrating ??= migrateRecordings()
-    .then(() => {
-      migrationError = undefined;
-    })
-    .catch((error) => {
-      console.error('Echo: saved recordings could not be migrated.', error);
-      migrationError = (error as Error).message;
-    })
-    .finally(() => {
-      migrating = undefined;
-    });
-  return migrating;
-}
 /**
  * Upload pending audio through the offscreen document, creating it only when a connected Echo
  * has recordings to receive. `reset` starts a fresh backoff (connect, user retry, startup).
  */
 async function requestUploads(reset: boolean): Promise<void> {
-  const pending = (await allRecordings()).some(
-    (row) => !row.receipt && !row.locked && row.chunkCount > 0,
-  );
+  const pending = (await allRecordings()).some((row) => !row.receipt && row.chunkCount > 0);
   const active = (await offscreenStatus())?.active;
   if ((!pending && !active) || !(await connectedPair())) {
     await chrome.alarms.clear(TRANSFER_ALARM);
@@ -399,19 +380,9 @@ async function requestUploads(reset: boolean): Promise<void> {
     : Number((await chrome.storage.session.get('uploadFailures')).uploadFailures) || 0;
   await send({ type: 'SYNC', failures });
 }
-/** Migration only: unlock recordings from before storage v3 with the old recovery phrase. */
-async function unlockOlderRecordings(phrase: unknown) {
-  await unlockWithRecoveryPhrase(phrase);
-  // A migration already running started without this identity; rewrap after it.
-  if (migrating) await migrating;
-  await migrateProtectedHistory();
-  const locked = (await allRecordings()).filter((row) => row.needsUnlock).length;
-  void requestUploads(true).catch(logFailure('transfer'));
-  return { locked };
-}
-/** Migrate, then upload pending audio. Recording itself never waits for this. */
+/** Prune old receipts, then upload pending audio. Recording itself never waits for this. */
 async function syncPending(reset: boolean): Promise<void> {
-  await migrateProtectedHistory();
+  await pruneReceipts();
   await requestUploads(reset);
 }
 /** The offscreen document finished uploading for now; retry offline Echo from an alarm. */
@@ -472,7 +443,6 @@ async function state() {
     ((await chrome.storage.session.get('recorderError')).recorderError as string | undefined);
   return {
     build: BUILD_ID,
-    migrationError,
     connection: {
       ...scheduleClaim(await pairingView()),
       revoked: await wasRevoked(),
@@ -637,9 +607,8 @@ async function pageAction(message: any) {
   }
   if (message.type === 'LIVE_TEXT_DEFAULT')
     return saveSettings({ liveTranscription: message.enabled === true }).then(() => ({}));
-  if (message.type === 'UNLOCK_OLDER_RECORDINGS') return unlockOlderRecordings(message.phrase);
   if (message.type === 'SYNC') {
-    await migrateProtectedHistory();
+    await pruneReceipts();
     void requestUploads(true).catch(logFailure('transfer'));
     return {};
   }
@@ -716,12 +685,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 chrome.runtime.onInstalled.addListener((details) => {
   // Drop the former 30-second transfer alarm; retries are scheduled only while Echo is offline.
-  // An update migrates settings and saved recordings right away; a fresh install has nothing to migrate.
+  // Refresh settings and transfer pending recordings after an update.
   void chrome.alarms
     .clear(TRANSFER_ALARM)
     .then(() => settings())
     .then(() => (details.reason === 'update' ? syncPending(true) : undefined))
-    .catch(logFailure('migration'));
+    .catch(logFailure('update'));
   void renderBadge().catch(logFailure('badge update'));
   if (details.reason === 'install')
     void chrome.runtime.openOptionsPage().catch(logFailure('opening setup'));
