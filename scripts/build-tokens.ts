@@ -7,26 +7,24 @@ const SOURCE = path.join(project, 'design-system', 'styles.css');
 
 /** The self-hosted faces in public/fonts (see public/fonts/README.md). */
 const FONT_FACES = [
-  ['Caprasimo', 'caprasimo-latin-ext-400-normal.woff2', '400', 'normal', 'woff2', 'latin-ext'],
-  ['Caprasimo', 'caprasimo-latin-400-normal.woff2', '400', 'normal', 'woff2', 'latin'],
   [
-    'Figtree',
-    'figtree-latin-ext-wght-normal.woff2',
-    '300 900',
+    'Mulish',
+    'mulish-latin-ext-wght-normal.woff2',
+    '200 1000',
     'normal',
     'woff2-variations',
     'latin-ext',
   ],
-  ['Figtree', 'figtree-latin-wght-normal.woff2', '300 900', 'normal', 'woff2-variations', 'latin'],
+  ['Mulish', 'mulish-latin-wght-normal.woff2', '200 1000', 'normal', 'woff2-variations', 'latin'],
   [
-    'Figtree',
-    'figtree-latin-ext-wght-italic.woff2',
-    '300 900',
+    'Mulish',
+    'mulish-latin-ext-wght-italic.woff2',
+    '200 1000',
     'italic',
     'woff2-variations',
     'latin-ext',
   ],
-  ['Figtree', 'figtree-latin-wght-italic.woff2', '300 900', 'italic', 'woff2-variations', 'latin'],
+  ['Mulish', 'mulish-latin-wght-italic.woff2', '200 1000', 'italic', 'woff2-variations', 'latin'],
 ] as const;
 export const FONT_FILES = FONT_FACES.map(([, file]) => file);
 

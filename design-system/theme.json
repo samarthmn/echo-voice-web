@@ -28,14 +28,14 @@
   },
   "fonts": {
     "heading": {
-      "family": "Caprasimo",
-      "class": "display",
+      "family": "Mulish",
+      "class": "humanist",
       "weights": [
-        400
+        800
       ]
     },
     "body": {
-      "family": "Figtree",
+      "family": "Mulish",
       "class": "humanist",
       "weights": [
         400,

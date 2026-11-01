@@ -93,7 +93,7 @@ select {
   padding: 10px 18px;
   border-radius: var(--radius-pill);
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 700;
 }
 .button-small {
   min-height: 36px;

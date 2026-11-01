@@ -141,7 +141,7 @@ Phases run in order. Inside a phase, tasks marked ∥ can run as parallel worker
   - Add the **Organic dark** theme under `[data-theme='dark']`: dark earth ground and surface from the neutral 800–900 steps, accents shifted per the design readme (pressed state = accent-400 on dark). Keep `theme.json` and `readme.md` in step.
   - Add a contrast test (`tests/contrast.test.ts`) that asserts AA for text/ground pairs in both themes.
 - **3.3 Self-host fonts and icons:**
-  - Caprasimo and Figtree woff2 (OFL, licence files included) replace Inter and the Google Fonts `@import`.
+  - Mulish variable woff2 (OFL, licence file included) replaces Inter and the Google Fonts `@import`, for headings and body. (Changed from Caprasimo + Figtree at the Phase 4 checkpoint, 2026-11-01.)
   - Lucide SVGs at stroke 2.75, inlined where the app and extension draw icons today.
 
 ### Phase 4: Restyle the self-hosted app and extension

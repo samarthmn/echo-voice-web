@@ -10,12 +10,12 @@
 /* Template scaffolding — page layout and web-scale sizing only; every color,
    font, radius and shadow comes from ../../styles.css. The voice is the
    deck's, re-derived for a scrolling page: warm and a little playful —
-   Caprasimo headings over Figtree, soft circles as marks (dot markers, a
+   Mulish headings over Mulish, soft circles as marks (dot markers, a
    decoration circle), over-rounded containers, whitespace over rules (the
    system avoids .hr; sections part on air), photographs washed so they
    sit back into the cream page.
 
-   THE RHYTHM: a 28px leading unit (17px Figtree body at ~1.65), 14px
+   THE RHYTHM: a 28px leading unit (17px Mulish body at ~1.65), 14px
    half-step; line-heights and block margins in unit multiples, heads
    cap-trimmed, ?baselines/B to review. The deck's seat-pinning relaxes to
    per-block discipline on a fluid page. The system's own interface
@@ -30,7 +30,7 @@
    single-unit gaps inside a cluster, the air between sections); #4 no
    hero eyebrow — the nav brand names the product.
 
-   Optical left alignment: the deck's measured Caprasimo value carries
+   Optical left alignment: the deck's measured Mulish value carries
    verbatim (-0.028em where caps lead a display line). */
 :root {
   --leading: 28px;
@@ -53,7 +53,7 @@ body { margin: 0; text-wrap: pretty; overflow-x: clip; } /* the hero's decoratio
 @media (max-width: 480px) { .nav a { display: none; } } /* phone width: the nav
    keeps brand + the one action (layout-only — the component's look is untouched) */
 
-/* — kicker (Figtree label; terracotta small text takes the DEEP step:
+/* — kicker (Mulish label; terracotta small text takes the DEEP step:
    accent-700 measures 5.7:1 on the cream, where the base terracotta is a
    3.0:1 large-text value) — */
 .kicker {
@@ -84,9 +84,9 @@ body { margin: 0; text-wrap: pretty; overflow-x: clip; } /* the hero's decoratio
   font-family: var(--font-heading); font-weight: var(--font-heading-weight);
   font-size: clamp(40px, 5.8vw, 76px);
   line-height: clamp(43px, 6.26vw, 82px); /* law #3: ratio-governed ≈1.08 —
-     Caprasimo's chunky rounds; the display-block lattice exemption */
+     Mulish's chunky rounds; the display-block lattice exemption */
   letter-spacing: 0; margin: 0;
-  margin-left: -0.028em; /* optical left alignment — the deck's measured Caprasimo value */
+  margin-left: -0.028em; /* optical left alignment — the deck's measured Mulish value */
   text-box: trim-both cap alphabetic;
 }
 .display .line { display: block; } /* law #1 */
@@ -206,13 +206,13 @@ body { margin: 0; text-wrap: pretty; overflow-x: clip; } /* the hero's decoratio
      size from the slot */
 .split-figure image-slot { width: 100%; aspect-ratio: 493 / 668; }
 
-/* — quote (Caprasimo, warm; hangs at the deck's measured advances) — */
+/* — quote (Mulish, warm; hangs at the deck's measured advances) — */
 .quote { padding: calc(2.5 * var(--leading)) 0 calc(3 * var(--leading)); }
 .quote blockquote {
   font-family: var(--font-heading); font-weight: var(--font-heading-weight);
   font-size: clamp(24px, 2.6vw, 32px); line-height: calc(1.5 * var(--leading));
   max-width: 32ch; margin: 0;
-  text-indent: -0.559em; /* hang the opening “ (measured advance in Caprasimo) */
+  text-indent: -0.559em; /* hang the opening “ (measured advance in Mulish) */
   text-box: trim-both cap alphabetic;
 }
 .quote figcaption { font-size: 15.5px; line-height: var(--leading);
@@ -220,7 +220,7 @@ body { margin: 0; text-wrap: pretty; overflow-x: clip; } /* the hero's decoratio
      the cream ground: 5.6:1 measured */
   margin: calc(2 * var(--leading) - 1cap) 0 0; /* two grid units below the quote's
      last baseline — one reads as part of the quote block; the attribution needs air */
-  text-indent: -1.347em; /* hang the leading em-dash + space (measured in Figtree) */
+  text-indent: -1.347em; /* hang the leading em-dash + space (measured in Mulish) */
   text-box: trim-both cap alphabetic; }
 
 @media (max-width: 720px) {

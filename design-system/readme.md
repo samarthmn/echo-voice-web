@@ -1,6 +1,6 @@
 # Organic design system
 
-Organic is warm, rounded and a little playful: a cream-and-sand ground with a terracotta accent and a sage second accent, Caprasimo display headings over Figtree, 16px radii that grow into pills and soft circular shapes. Photographs are washed so they sit back into the warm page instead of on top of it.
+Organic is warm, rounded and a little playful: a cream-and-sand ground with a terracotta accent and a sage second accent, Mulish throughout, heavy for headings and regular for reading, 16px radii that grow into pills and soft circular shapes. Photographs are washed so they sit back into the warm page instead of on top of it.
 
 ## How to use this
 
@@ -23,7 +23,7 @@ A light ground (`--color-bg` #f5ead8) with `--color-text` #201e1d and two accent
 
 ## Type
 
-Caprasimo for headings over Figtree for body text, loaded as `--font-heading` / `--font-body`. Density 1.10× and radius 16px are already baked into the `--space-*` / `--radius-*` scales — use the variables, not raw numbers.
+Mulish, a rounded sans with a variable weight axis (200–1000), carries everything: headings at 800 (`--font-heading` with `--font-heading-weight`) and body text at 400, with 600–700 for labels and emphasis (`--font-body`). Density 1.10× and radius 16px are already baked into the `--space-*` / `--radius-*` scales — use the variables, not raw numbers.
 
 ## Icons
 
@@ -60,7 +60,7 @@ States are built in: hovers and pressed states come from the accent ramp, keyboa
 
 - Do not draw sharp corners or hairline-only geometry.
 - Do not desaturate the palette into greys — warmth is the point.
-- Do not use condensed or geometric display faces; Caprasimo is the only display voice.
+- Do not add a second typeface; hierarchy comes from Mulish weights and sizes, not from a display face.
 - Do not crowd elements; the rounded shapes need air to read as soft.
 
 ## Files

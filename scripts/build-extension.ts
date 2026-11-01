@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { WithImplicitCoercion } from 'buffer';
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FONT_LICENSES = ['OFL-Caprasimo.txt', 'OFL-Figtree.txt'];
+const FONT_LICENSES = ['OFL-Mulish.txt'];
 export const EXTENSION_FILES = [
   'manifest.json',
   'background.js',

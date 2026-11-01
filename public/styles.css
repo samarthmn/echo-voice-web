@@ -145,7 +145,8 @@ button:hover:not(:disabled) {
 .brand > span {
   font-family: var(--font-heading);
   font-size: 26px;
-  letter-spacing: -0.015em;
+  font-weight: 850;
+  letter-spacing: -0.03em;
 }
 .brand-mark {
   display: block;
@@ -285,7 +286,7 @@ button:hover:not(:disabled) {
   padding: 11px 17px;
   min-height: 40px;
   font-size: 11px;
-  font-weight: 550;
+  font-weight: 700;
   line-height: 1.4;
   border: 1px solid transparent;
   white-space: nowrap;

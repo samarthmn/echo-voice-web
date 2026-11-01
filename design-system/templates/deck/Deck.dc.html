@@ -28,7 +28,7 @@ deck-stage {
   --page-foot-note: "Confidential — July 2026"; /* the deck-wide folio text (page furniture; see the PAGE FURNITURE note below) */
   --pad-top: 108px;
   --pad-bottom: 108px;
-  --baseline: 54px; /* grid unit — one default-text line: the 36px Figtree body at a 1.5 deck
+  --baseline: 54px; /* grid unit — one default-text line: the 36px Mulish body at a 1.5 deck
      leading (the system's airy spacing carried to projection scale; 20 gridlines tile the
      1080 stage exactly, and the pinned footer baseline lands on the 18th at 972). */
 }
@@ -73,7 +73,7 @@ deck-stage {
    flush-left axis (a centered plot, ruled column or hanging-marked list has
    no honest center), one axis per slide either way. Centered display type
    drops the optical-left margin terms: a left-bearing return would shift a
-   CENTERED line sideways, and Caprasimo's small bearings (see the optical
+   CENTERED line sideways, and Mulish's small bearings (see the optical
    note) leave under 3px of first-vs-last-glyph asymmetry at display size —
    below what a template could reliably correct without knowing its glyphs.
    Centered blocks stay optically centered as blocks (the shared contract's
@@ -89,7 +89,7 @@ deck-stage {
 }
 /* Optical left alignment — the deliberate exception to box-edge alignment
    the reviewed decks share, re-derived for this face (the rules generalize,
-   the numbers never do — see ../../../deck-templates.md). Caprasimo's
+   the numbers never do — see ../../../deck-templates.md). Mulish's
    rounded display cut carries small bearings that tuck under its bowls:
    measured from its hmtx (upm 2048, normalized; cross-checked against
    render scans), rounds O/C/G sit at 0.034em, R at 0.033em, E/F/S at
@@ -103,7 +103,7 @@ deck-stage {
    while they sat on the left axis — both now CENTER and drop the term
    (see the centered-axis note), so the optical-left machinery in this
    deck survives only on the left-axis slides' titles. Text digits in
-   Figtree are proportional by default, so COLUMNS opt into "tnum" (see
+   Mulish are proportional by default, so COLUMNS opt into "tnum" (see
    .toc-num and the chart text). */
 .pin-bottom { position: absolute; left: var(--pad-x); right: var(--pad-x); bottom: var(--pad-bottom); }
 .meta { display: flex; align-items: baseline; gap: 18px; font-size: var(--type-kicker); color: color-mix(in srgb, var(--color-text) 55%, transparent); }
@@ -392,7 +392,7 @@ deck-stage[data-no-page-furniture] .page-foot, deck-stage[data-no-page-furniture
 .quote .rise { display: flex; flex-direction: column; align-items: center; gap: 54px; }
 .quote blockquote {
   font-family: var(--font-heading); font-weight: var(--font-heading-weight); /* the display
-     voice — Caprasimo is the system's only display face and ships one upright cut (no
+     voice — Mulish is the system's only display face and ships one upright cut (no
      italic exists for it at all) */
   font-size: 60px; line-height: calc(1.5 * var(--baseline)); letter-spacing: 0;
   max-width: 28ch; margin: 0;
@@ -477,7 +477,7 @@ deck-stage[data-baselines] .slide::after {
     <h2 class="slide-title">Working rules</h2>
     <ul class="bullets rise">
       <li>Round everything that can be round — pills, circles, soft shapes.</li>
-      <li>Caprasimo speaks display; Figtree carries the reading.</li>
+      <li>Mulish speaks display; Mulish carries the reading.</li>
       <li>Terracotta leads and the sage is a genuine second voice, not a highlight.</li>
     </ul>
     <div class="page-foot" aria-hidden="true"></div>
@@ -507,7 +507,7 @@ deck-stage[data-baselines] .slide::after {
       </div>
       <div>
         <h3>Grow</h3>
-        <p>Heads take Caprasimo at body size, so the display voice labels each column.</p>
+        <p>Heads take Mulish at body size, so the display voice labels each column.</p>
       </div>
       <div>
         <h3>Harvest</h3>

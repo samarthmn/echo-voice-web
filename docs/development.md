@@ -86,7 +86,7 @@ The look comes from the Organic design system in `design-system/`. `design-syste
 
 `tests/unit/contrast.test.ts` reads the same source and asserts WCAG AA (4.5:1 for text, 3:1 for focus rings and accent fills) for every text/ground pairing the UI uses, in both themes. Add a pair there when you introduce a new combination.
 
-Fonts are self-hosted in `public/fonts/`: Caprasimo for headings and Figtree for body text, both under the SIL OFL. `public/fonts/README.md` records the pinned source and how to update them. Nothing loads from a font CDN.
+Fonts are self-hosted in `public/fonts/`: Mulish (variable weight) for headings and body text, under the SIL OFL. `public/fonts/README.md` records the pinned source and how to update them. Nothing loads from a font CDN.
 
 Icons are [Lucide](https://lucide.dev) at stroke width 2.75. `scripts/build-icons.ts` (`pnpm build:icons`) reads the pinned `lucide-static` devDependency and generates `app/src/icons.rs`, which maps the app's icon names (`Icon { name: "mic" }`) to Lucide markup. To add an icon, add a line to the name map in the script and rerun it. `check.sh --lint` fails (`icons-fresh`) if the generated file is stale.
 

@@ -27,8 +27,8 @@
         "message": "Raw px value — use a design-system spacing token via var()."
       },
       {
-        "selector": "Literal[value=/font-family\\s*:\\s*(?!['\\\"]?(?:Caprasimo|Figtree))/i]",
-        "message": "Font not provided by the design system. Available: Caprasimo, Figtree."
+        "selector": "Literal[value=/font-family\\s*:\\s*(?!['\\\"]?(?:Mulish))/i]",
+        "message": "Font not provided by the design system. Available: Mulish."
       }
     ]
   },
@@ -145,8 +145,7 @@
       "--shadow-lg": "shadow"
     },
     "fontFamilies": [
-      "Caprasimo",
-      "Figtree"
+      "Mulish"
     ]
   }
 }

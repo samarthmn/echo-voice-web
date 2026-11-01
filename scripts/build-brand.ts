@@ -21,17 +21,14 @@ async function fontFace(family: string, file: string, weight: string): Promise<s
 }
 
 const logo = await readFile(path.join(brand, 'logo.svg'), 'utf8');
-const fonts = [
-  await fontFace('Caprasimo', 'caprasimo-latin-400-normal.woff2', '400'),
-  await fontFace('Figtree', 'figtree-latin-wght-normal.woff2', '300 900'),
-].join('');
+const fonts = await fontFace('Mulish', 'mulish-latin-wght-normal.woff2', '200 1000');
 
 function page(body: string, background = 'transparent'): string {
   return `<!doctype html><meta charset="utf-8"><style>${fonts}
     *{box-sizing:border-box;margin:0}html,body{width:100%;height:100%;background:${background}}
-    body{font-family:Figtree,sans-serif;color:${TEXT};display:flex}
+    body{font-family:Mulish,sans-serif;color:${TEXT};display:flex}
     .mark svg{display:block;width:100%;height:100%}
-    h1{font-family:Caprasimo,serif;font-weight:400;letter-spacing:-0.015em;line-height:1}
+    h1{font-weight:850;letter-spacing:-0.03em;line-height:1}
     p{text-wrap:balance}
   </style>${body}`;
 }

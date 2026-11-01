@@ -28,8 +28,8 @@ Chrome Web Store screenshots (1280×800) are made from the running app, not from
 | Sage (`--color-accent-2`) | `#7a8a5e` |
 | Ground (`--color-bg`) | `#f5ead8` |
 | Ink (`--color-text`) | `#201e1d` |
-| Wordmark | Caprasimo, set as "Echo" |
-| Supporting text | Figtree |
+| Wordmark | Mulish 850, set as "Echo" |
+| Supporting text | Mulish 400–600 |
 
 The mark works unchanged on the light and dark Organic grounds. On any other background, use `logo-mono.svg` in a single colour with enough contrast.
 
