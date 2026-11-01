@@ -38,6 +38,13 @@ else
 fi
 if command -v pnpm >/dev/null; then ok "pnpm $(pnpm --version)"; else fail 'pnpm missing' 'corepack enable, or brew install pnpm'; fi
 if [[ -d node_modules/@huggingface/transformers ]]; then ok 'Node packages installed'; else fail 'Node packages missing' './scripts/setup.sh'; fi
+if [[ ! -d .git ]]; then
+  ok 'Not a git checkout; no pre-commit hook needed'
+elif [[ "$(git config --get core.hooksPath)" == .githooks ]]; then
+  ok 'Pre-commit lint and type checks enabled'
+else
+  warn 'Pre-commit hook not enabled' 'git config core.hooksPath .githooks (setup.sh and pnpm install do this)'
+fi
 
 section 'Build outputs'
 missing=()

@@ -18,6 +18,8 @@ command -v pnpm >/dev/null || { echo 'Install pnpm: corepack enable or brew inst
 if [[ ${1:-} != --build-only ]]; then
   rustup target add wasm32-unknown-unknown || { echo 'Could not install Rust wasm target; check rustup.' >&2; exit 1; }
   pnpm install --frozen-lockfile || { echo 'Dependency install failed; check pnpm and network access.' >&2; exit 1; }
+  # Lint and type checks run before every commit (.githooks/pre-commit; see AGENTS.md).
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git config core.hooksPath .githooks; fi
   bindgen_version="$(awk '/name = "wasm-bindgen"/{getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
   if ! command -v wasm-bindgen >/dev/null || [[ "$(wasm-bindgen --version)" != "wasm-bindgen $bindgen_version" ]]; then
     cargo install wasm-bindgen-cli --version "$bindgen_version" --locked || { echo 'Could not install wasm-bindgen-cli; check Rust and network access.' >&2; exit 1; }

@@ -21,6 +21,8 @@ Follow [docs/install.md](docs/install.md), then use the development server, whic
 
 ## Checks
 
+A git pre-commit hook runs every lint and type check (`./scripts/check.sh --pre-commit`) before each commit; `setup.sh` enables it. Don't bypass it with `--no-verify`. The rules in [AGENTS.md](AGENTS.md) apply to people as well as coding agents.
+
 Run the full suite before you open a pull request:
 
 ```bash

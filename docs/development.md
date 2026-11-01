@@ -39,6 +39,8 @@ There is no hot reload. After changing Rust UI or `web/` code, rerun `./scripts/
 | `pnpm test:e2e`                            | Browser end to end tests via `scripts/test-browser.ts`; needs the debug server, assets from `setup.sh` and Chromium                                                                                                                                      |
 | `pnpm test:speakers`                       | Loads real PyAnnote and WavLM models and runs speaker grouping on sample audio; downloads models and needs internet                                                                                                                                      |
 
+**Pre-commit hook.** `.githooks/pre-commit` runs `./scripts/check.sh --pre-commit` before every commit: every lint and type check (Rust format and Clippy, Prettier, ESLint, stylelint, markdownlint, ShellCheck, actionlint, both TypeScript compilers, `astro check`, knip, icon and version freshness), without tests or builds. A missing linter fails the hook instead of being skipped. `setup.sh` and `pnpm run prepare` enable it with `git config core.hooksPath .githooks`. Never bypass it; see [AGENTS.md](../AGENTS.md).
+
 `check.sh` also runs `cargo clippy` (native workspace/all targets and `echo-app` for `wasm32-unknown-unknown`, warnings denied). No argument runs Rust, lint and unit tests; `--all` adds release and debug builds, integration tests and e2e tests. The three explicit modes partition `--all` for CI.
 
 Native speech HTTP lifecycle tests live in `tests/integration/native-speech-http.test.ts` and run with `pnpm test:integration`. They use sparse model fixtures, without downloading or running speech models.

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "build:assets": "node scripts/build-assets.ts",
     "build:tokens": "node scripts/build-tokens.ts",
     "build:icons": "node scripts/build-icons.ts",
