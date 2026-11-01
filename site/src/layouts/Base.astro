@@ -1,7 +1,7 @@
 ---
 import '../styles/tokens.generated.css';
 import '../styles/site.css';
-import { CLOUDFLARE_ANALYTICS_TOKEN } from '../analytics';
+import { VERCEL_ANALYTICS, VERCEL_ANALYTICS_STUB } from '../analytics';
 import { GITHUB_URL, SITE_URL } from '../data/site';
 
 interface Props {
@@ -42,15 +42,8 @@ const ogImage = new URL('/og-image.png', SITE_URL).href;
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
     {jsonLd.map((data) => <script type="application/ld+json" set:html={JSON.stringify(data)} />)}
-    {
-      CLOUDFLARE_ANALYTICS_TOKEN && (
-        <script
-          defer
-          src="https://static.cloudflareinsights.com/beacon.min.js"
-          data-cf-beacon={JSON.stringify({ token: CLOUDFLARE_ANALYTICS_TOKEN })}
-        />
-      )
-    }
+    {VERCEL_ANALYTICS && <script is:inline set:html={VERCEL_ANALYTICS_STUB} />}
+    {VERCEL_ANALYTICS && <script is:inline defer src="/_vercel/insights/script.js" />}
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>

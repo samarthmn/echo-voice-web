@@ -6,7 +6,7 @@ import { defineConfig } from 'astro/config';
 import { copyFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { FONT_FILES, writeTokens } from '../scripts/build-tokens.ts';
-import { CLOUDFLARE_ANALYTICS_TOKEN } from './src/analytics.ts';
+import { VERCEL_ANALYTICS, VERCEL_ANALYTICS_STUB } from './src/analytics.ts';
 import { remarkRepoLinks } from './src/plugins/remark-repo-links.ts';
 import { sidebar } from './src/sidebar.ts';
 
@@ -15,16 +15,10 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const docsDir = fileURLToPath(new URL('../docs', import.meta.url));
 const github = 'https://github.com/samarthmn/echo-voice-web';
 const ogImage = `${site}/og-image.png`;
-const analytics = CLOUDFLARE_ANALYTICS_TOKEN
+const analytics = VERCEL_ANALYTICS
   ? [
-      {
-        tag: 'script' as const,
-        attrs: {
-          defer: true,
-          src: 'https://static.cloudflareinsights.com/beacon.min.js',
-          'data-cf-beacon': JSON.stringify({ token: CLOUDFLARE_ANALYTICS_TOKEN }),
-        },
-      },
+      { tag: 'script' as const, content: VERCEL_ANALYTICS_STUB },
+      { tag: 'script' as const, attrs: { defer: true, src: '/_vercel/insights/script.js' } },
     ]
   : [];
 

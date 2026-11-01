@@ -1,6 +1,6 @@
 ---
 title: Releasing
-description: How Echo versions are cut, and how the website at echo-web.samarthmn.com is built and deployed on Cloudflare.
+description: How Echo versions are cut, and how the website at echo-web.samarthmn.com is built and deployed on Vercel.
 ---
 
 ## The website
@@ -15,20 +15,18 @@ pnpm --filter echo-site build   # astro check + static build into site/dist
 
 The build fails on broken internal links (`starlight-links-validator`). Repository-relative links in the docs, such as `install.md#updating` or `../scripts/setup.sh`, are rewritten to site routes or GitHub links by `site/src/plugins/remark-repo-links.ts`.
 
-### Cloudflare setup
+### Vercel setup
 
-The site is served by Cloudflare Workers static assets, configured in `site/wrangler.jsonc`, and deployed by Cloudflare's Git integration. No Cloudflare secrets live in GitHub.
+The site is a static Astro build deployed by Vercel's Git integration. Its settings are in `site/vercel.json`: build commands, trailing slashes, and the security headers (CSP, HSTS and others). No Vercel secrets live in GitHub.
 
-1. In the Cloudflare dashboard, open **Workers & Pages → Create → Import a repository** and pick `samarthmn/echo-voice-web`.
-2. Set the **root directory** to `site`.
-3. Build command: `pnpm install --frozen-lockfile --filter echo-site && pnpm build`. Deploy command: `npx wrangler deploy`.
-4. Set the environment variable `NODE_VERSION` to `22` (or newer).
-5. Under **Settings → Domains & Routes**, add the custom domain `echo-web.samarthmn.com`.
-6. Under **Web Analytics**, enable analytics for the site, then add its beacon token as the build variable `CLOUDFLARE_ANALYTICS_TOKEN`. Analytics only ever run on the website, never in the app.
+1. In Vercel, choose **Add New → Project** and import `samarthmn/echo-voice-web`.
+2. Set the **Root Directory** to `site`, and keep **Include files outside the root directory in the Build Step** enabled: the site reads `docs/`, `brand/`, `public/fonts/` and `scripts/` from the repository root.
+3. Leave the framework, install and build settings to `site/vercel.json` (Astro; `pnpm install --frozen-lockfile --filter echo-site`; `pnpm build`; output `dist`).
+4. Under **Settings → General**, choose Node.js 22 or newer.
+5. Under **Settings → Domains**, add `echo-web.samarthmn.com` and create the DNS record Vercel shows.
+6. Under **Analytics**, enable Web Analytics. Builds on Vercel then include its cookieless script, served from the site's own `/_vercel/insights` path. Analytics only ever run on the website, never in the app.
 
-Pushes to `main` deploy to production; other branches get preview URLs.
-
-Security headers (CSP, HSTS and others) are in `site/public/_headers`.
+Pushes to `main` deploy to production; other branches and pull requests get preview URLs.
 
 ## Releasing a version
 

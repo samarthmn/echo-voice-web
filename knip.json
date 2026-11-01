@@ -18,11 +18,6 @@
         "scripts/*.ts",
         "tests/**/*.ts"
       ]
-    },
-    "site": {
-      "ignoreDependencies": [
-        "wrangler"
-      ]
     }
   }
 }

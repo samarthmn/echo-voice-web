@@ -31,4 +31,4 @@ The extension can read pages only on the meeting sites you enable (Google Meet, 
 
 ## The website
 
-The project website, echo-web.samarthmn.com, is separate from the app. It uses cookieless Cloudflare Web Analytics; see the [site privacy page](https://echo-web.samarthmn.com/privacy/). The app never loads anything from the website.
+The project website, echo-web.samarthmn.com, is separate from the app. It is hosted on Vercel and uses cookieless Vercel Web Analytics; see the [site privacy page](https://echo-web.samarthmn.com/privacy/). The app never loads anything from the website.

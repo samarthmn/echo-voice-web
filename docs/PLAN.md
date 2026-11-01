@@ -19,7 +19,7 @@ Positioning: **"Echo: open-source, local-first AI meeting notes. A private alter
 1. A Mac developer can go from finding the repo to their first transcribed meeting using only the docs.
 2. The codebase is clean: dead code is gone, all JavaScript becomes strict TypeScript, and lint, type and format gates run in CI for Rust, TS, CSS, shell, Markdown and workflows.
 3. One visual identity, the **Organic** design system (`design-system/`) with a new abstract soft-blob logo, covers the landing page, the docs, the self-hosted app and the extension, in light and dark.
-4. A landing page plus Starlight docs at `echo-web.samarthmn.com` (docs under `/docs`), deployed by Cloudflare. The docs have **one source**, the repo's `docs/` folder, which renders on both GitHub and the site.
+4. A landing page plus Starlight docs at `echo-web.samarthmn.com` (docs under `/docs`), deployed by Vercel (originally planned for Cloudflare; switched 2026-11-01). The docs have **one source**, the repo's `docs/` folder, which renders on both GitHub and the site.
 5. It's discoverable. The README, repo metadata, site SEO and comparison content target "Fireflies alternative", "Otter alternative", "local AI meeting notes" and "open-source meeting recorder".
 6. Release hygiene: versioned releases, a changelog, community and security files, supply-chain checks, health and diagnostics, and a Chrome Web Store listing.
 
@@ -52,8 +52,8 @@ Positioning: **"Echo: open-source, local-first AI meeting notes. A private alter
 | TS conversion | Everything: `web/*.js`, `scripts/*.mjs`, `tests/*.mjs` all become strict `.ts` |
 | Extension distribution | Load unpacked + release zip **and** a Chrome Web Store listing |
 | Competitor positioning | Name them, with a factual comparison table |
-| Site deploy | Cloudflare Git integration (the dashboard builds `site/`; no secrets in GitHub) |
-| Site analytics | Cloudflare Web Analytics (cookieless) on the public site only, never in the app |
+| Site deploy | Vercel Git integration (root `site/`, settings in `site/vercel.json`; no secrets in GitHub). Changed from Cloudflare on 2026-11-01 |
+| Site analytics | Vercel Web Analytics (cookieless) on the public site only, never in the app |
 | Extras | Community files, supply-chain checks, versioned releases, diagnostics and health |
 | Delivery | One branch (`claude/production-hardening`), one PR at the end, a commit per phase |
 | Logo | Abstract soft blob (organic pebble with a cut-out wave). Three concepts, you pick one |
@@ -195,9 +195,9 @@ Phases run in order. Inside a phase, tasks marked ∥ can run as parallel worker
   - JSON-LD: `SoftwareApplication` (free, macOS, MIT) on the landing page, `FAQPage` on the FAQ.
   - Alternative pages `/alternatives/fireflies`, `/alternatives/otter`, `/alternatives/fathom` (short and factual, linking to the comparison).
   - Semantic headings, image alt text. Target Lighthouse ≥ 95 on all four categories.
-- **5.6 Cloudflare:**
-  - `site/wrangler.jsonc` (Workers static assets, `not_found_handling: "404-page"`) and `site/public/_headers` (CSP, HSTS, nosniff, referrer-policy, permissions-policy).
-  - The Cloudflare Web Analytics beacon goes on the site only; the token comes from you.
+- **5.6 Hosting (Vercel; Cloudflare in the original plan):**
+  - `site/vercel.json`: build settings and headers (CSP, HSTS, nosniff, referrer-policy, permissions-policy).
+  - Vercel Web Analytics goes on the site only, enabled in the Vercel dashboard.
   - A `docs/releasing.md` section on the dashboard setup (Git integration, root `site/`, build `pnpm build`, custom domain `echo-web.samarthmn.com`).
   - Add a `/privacy` page for the site analytics and for the extension (required by the store).
 
@@ -262,7 +262,7 @@ Phases run in order. Inside a phase, tasks marked ∥ can run as parallel worker
 ## 8. Manual steps only you can do
 
 1. Pick the logo (3.1) and review the app screenshots (4.3) and the landing page (5.3).
-2. Cloudflare: connect the repo via Git integration (root `site/`), add the custom domain `echo-web.samarthmn.com`, enable Web Analytics and give me the beacon token.
+2. Vercel: import the repo (root `site/`), add the custom domain `echo-web.samarthmn.com`, and enable Web Analytics (originally planned on Cloudflare).
 3. Chrome Web Store: developer account (one-time fee), create the item, paste the listing from `docs/store-listing.md`, upload the store zip, submit for review. Send me the assigned store ID for `extension-id.json`.
 4. GitHub: approve the `gh repo edit` command (7.2), upload the social preview (7.3), and tag `v1.0.0` after the PR merges (this triggers the release workflow).
 

@@ -7,5 +7,3 @@ allowBuilds:
   esbuild: true
   onnxruntime-node: true
   protobufjs: false
-  # wrangler's local runtime; `wrangler deploy` of static assets does not need it.
-  workerd: false
