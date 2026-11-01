@@ -1,3 +1,5 @@
+import type * as SettingsModule from '../../extension/src/settings.ts';
+import type * as DomainModule from '../../web/types/domain.ts';
 import assert from 'node:assert/strict';
 /** Test boundaries remain unknown until their shape has been asserted. */
 export function defined<T>(value: T): NonNullable<T> {
@@ -43,31 +45,26 @@ export function moduleExports<T extends object>(value: unknown, names: readonly 
   return exports as T;
 }
 export function connectedLink(
-  value: import('../../extension/src/settings.ts').Link,
-): Extract<import('../../extension/src/settings.ts').Link, { state: 'connected' }> {
+  value: SettingsModule.Link,
+): Extract<SettingsModule.Link, { state: 'connected' }> {
   assert.equal(value.state, 'connected');
-  if (value.state !== 'connected') throw new Error('Expected connected link');
   return value;
 }
 export function waitingLink(
-  value: import('../../extension/src/settings.ts').Link,
-): Extract<import('../../extension/src/settings.ts').Link, { state: 'waiting' }> {
+  value: SettingsModule.Link,
+): Extract<SettingsModule.Link, { state: 'waiting' }> {
   assert.equal(value.state, 'waiting');
-  if (value.state !== 'waiting') throw new Error('Expected waiting link');
   return value;
 }
 export function linked(
-  value: import('../../extension/src/settings.ts').Link,
-): Exclude<import('../../extension/src/settings.ts').Link, { state: 'none' }> {
+  value: SettingsModule.Link,
+): Exclude<SettingsModule.Link, { state: 'none' }> {
   assert.notEqual(value.state, 'none');
   if (value.state === 'none') throw new Error('Expected saved link');
   return value;
 }
-export function meetingRecord(
-  value: unknown,
-): import('../../web/types/domain.ts').Meeting & Record<string, unknown> {
-  return parseMeeting(value) as import('../../web/types/domain.ts').Meeting &
-    Record<string, unknown>;
+export function meetingRecord(value: unknown): DomainModule.Meeting & Record<string, unknown> {
+  return parseMeeting(value) as DomainModule.Meeting & Record<string, unknown>;
 }
 import { meeting as parseMeeting } from '../../web/guards.ts';
 export function floatAudio(value: unknown): Float32Array {

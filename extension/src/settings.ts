@@ -1,3 +1,4 @@
+import type { Reply } from './messages.ts';
 import { type Settings, type Pair, endpointURL } from './core.ts';
 import { sealSecret, openSecret } from './device-secrets.ts';
 import type { Ciphertext } from './encryption.ts';
@@ -40,11 +41,13 @@ let cachedSettings: Promise<Settings> | undefined;
 let cachedLink: Promise<Link> | undefined;
 // Storage modules also load in contexts without extension APIs (export pages, tests).
 if (typeof chrome !== 'undefined')
-  chrome.storage?.onChanged?.addListener((changes, area) => {
-    if (area !== 'local') return;
-    if ('settings' in changes) cachedSettings = undefined;
-    if ('link' in changes) cachedLink = undefined;
-  });
+  (chrome as { storage?: Partial<typeof chrome.storage> }).storage?.onChanged?.addListener(
+    (changes, area) => {
+      if (area !== 'local') return;
+      if ('settings' in changes) cachedSettings = undefined;
+      if ('link' in changes) cachedLink = undefined;
+    },
+  );
 function remembered<T>(
   read: () => Promise<T> | undefined,
   write: (value: Promise<T> | undefined) => void,
@@ -101,7 +104,9 @@ async function readSettings(): Promise<Settings> {
 export function settings(): Promise<Settings> {
   return remembered(
     () => cachedSettings,
-    (value) => (cachedSettings = value),
+    (value) => {
+      cachedSettings = value;
+    },
     () => serialized(readSettings),
   );
 }
@@ -118,15 +123,18 @@ export function saveSettings(
 }
 // The offscreen document has no chrome.storage; it asks the service worker.
 async function trusted<T>(message: { type: string } & Record<string, unknown>): Promise<T> {
-  const reply = await chrome.runtime.sendMessage(message);
+  const reply: Reply<T> | undefined = await chrome.runtime.sendMessage(message);
   if (!reply?.ok) throw new Error(reply?.error ?? 'The Echo connection is unavailable.');
   return reply.value;
 }
 export function readLink(): Promise<Link> {
-  if (!chrome.storage?.local) return trusted<Link>({ type: 'TRUSTED_LINK' });
+  if (!(chrome as { storage?: Partial<typeof chrome.storage> }).storage?.local)
+    return trusted<Link>({ type: 'TRUSTED_LINK' });
   return remembered(
     () => cachedLink,
-    (value) => (cachedLink = value),
+    (value) => {
+      cachedLink = value;
+    },
     () =>
       serialized(async () => {
         await readSettings();
@@ -146,8 +154,8 @@ export function saveLink(link: Link): Promise<void> {
 }
 /** Echo answered 401 for this credential: forget it, keep every recording. */
 export function revokeCredential(credential: string, endpoint: string): Promise<void> {
-  if (!chrome.storage?.local)
-    return trusted<void>({ type: 'TRUSTED_REVOKE', credential, endpoint });
+  if (!(chrome as { storage?: Partial<typeof chrome.storage> }).storage?.local)
+    return trusted<undefined>({ type: 'TRUSTED_REVOKE', credential, endpoint });
   return serialized(async () => {
     const saved = (await chrome.storage.local.get('link'))['link'] as Ciphertext | undefined;
     if (!saved) return;

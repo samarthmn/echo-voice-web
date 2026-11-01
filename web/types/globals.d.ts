@@ -1,3 +1,5 @@
+import type * as ModelsModule from '../models.ts';
+import type * as NativeSpeechModule from '../native-speech.ts';
 import type * as inference from '../inference.ts';
 import type { autoTranscribeMeeting } from '../bridge.ts';
 import type { createRecorderController } from '../recorder.ts';
@@ -32,11 +34,11 @@ declare global {
       downloadModel: typeof notes.downloadModel;
     };
     echoInference: {
-      models: typeof import('../models.ts').MODELS;
+      models: typeof ModelsModule.MODELS;
       getDownloadedModels: typeof inference.getDownloadedModels;
       getOutdatedModels: typeof inference.getOutdatedModels;
       getModelDownloadState: typeof inference.getModelDownloadState;
-      getNativeSpeechStatus: typeof import('../native-speech.ts').getNativeSpeechStatus;
+      getNativeSpeechStatus: typeof NativeSpeechModule.getNativeSpeechStatus;
       removeModel: typeof inference.removeModel;
       cancelInference: typeof inference.cancelInference;
       transcribeAudio: typeof inference.transcribeAudio;

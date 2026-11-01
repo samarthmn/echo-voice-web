@@ -27,8 +27,10 @@ export function chooseJsonFile() {
         resolve(value);
       }
     };
-    const cancel = () => finish({ cancelled: true });
-    const change = async () => {
+    const cancel = () => {
+      finish({ cancelled: true });
+    };
+    const handleChange = async () => {
       try {
         const file = input.files?.[0];
         if (!file) {
@@ -48,6 +50,9 @@ export function chooseJsonFile() {
       }
     };
     input.addEventListener('cancel', cancel, { once: true });
+    function change() {
+      void handleChange();
+    }
     input.addEventListener('change', change, { once: true });
     window.addEventListener('pagehide', cancel, { once: true });
     document.body.appendChild(input);

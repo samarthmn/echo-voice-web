@@ -1,29 +1,34 @@
+import type * as PairingModule from '../../extension/src/pairing.ts';
+import type * as DiscoveryModule from '../../extension/src/discovery.ts';
+import type * as SettingsModule from '../../extension/src/settings.ts';
+import type * as ConnectionModule from '../../extension/src/connection.ts';
+import type * as ExternalMessagesModule from '../../extension/src/external-messages.ts';
+import type * as ProtocolModule from '../../extension/src/protocol.ts';
+import type * as DeviceSecretsModule from '../../extension/src/device-secrets.ts';
+import type * as StorageModule from '../../extension/src/storage.ts';
 import type { Recording } from '../../extension/src/core.ts';
 import type { Ciphertext } from '../../extension/src/encryption.ts';
 export type PairingApi = Omit<
-  typeof import('../../extension/src/pairing.ts') &
-    typeof import('../../extension/src/discovery.ts') &
-    typeof import('../../extension/src/settings.ts') &
-    typeof import('../../extension/src/connection.ts') &
-    Pick<typeof import('../../extension/src/external-messages.ts'), 'externalMessage'> &
-    Pick<typeof import('../../extension/src/protocol.ts'), 'jsonRequest'>,
+  typeof PairingModule &
+    typeof DiscoveryModule &
+    typeof SettingsModule &
+    typeof ConnectionModule &
+    Pick<typeof ExternalMessagesModule, 'externalMessage'> &
+    Pick<typeof ProtocolModule, 'jsonRequest'>,
   'jsonRequest'
 > & {
-  jsonRequest(
-    ...args: Parameters<typeof import('../../extension/src/protocol.ts').jsonRequest>
-  ): Promise<unknown>;
+  jsonRequest(...args: Parameters<typeof ProtocolModule.jsonRequest>): Promise<unknown>;
 };
-export type SettingsApi = typeof import('../../extension/src/settings.ts') &
-  typeof import('../../extension/src/device-secrets.ts');
-export type StorageApi = typeof import('../../extension/src/storage.ts');
+export type SettingsApi = typeof SettingsModule & typeof DeviceSecretsModule;
+export type StorageApi = typeof StorageModule;
 type FetchOptions = RequestInit & { signal?: AbortSignal | null | undefined };
 export type FixtureFetch = (url: string, options: FetchOptions) => Promise<Response>;
-type Area = {
+interface Area {
   setAccessLevel: () => Promise<void>;
   get: (keys?: string | string[]) => Promise<Record<string, unknown>>;
   set: (patch: Record<string, unknown>) => Promise<unknown>;
   remove: (keys: string | string[]) => Promise<void>;
-};
+}
 interface FixtureContext extends Record<string, unknown> {
   crypto: {
     subtle: typeof webcrypto.subtle;
@@ -144,7 +149,7 @@ export function fixture<Api = PairingApi>(): Fixture<Api> {
       ),
     set: async (patch: Record<string, unknown>) => Object.assign(store, structuredClone(patch)),
     remove: async (keys: string | string[]) => {
-      for (const key of Array.isArray(keys) ? keys : [keys]) delete store[key];
+      for (const key of Array.isArray(keys) ? keys : [keys]) Reflect.deleteProperty(store, key);
     },
   });
   h.context = {
@@ -289,7 +294,7 @@ export function memoryDatabase(h: Fixture<unknown>) {
                 );
                 const req: MemoryRequest = {};
                 let index = 0;
-                const next = () =>
+                const next = () => {
                   queueMicrotask(() => {
                     const entry = entries[index++];
                     req.result = entry
@@ -300,6 +305,7 @@ export function memoryDatabase(h: Fixture<unknown>) {
                       : null;
                     req.onsuccess?.({ target: req });
                   });
+                };
                 next();
                 return req;
               },

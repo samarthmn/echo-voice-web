@@ -10,7 +10,7 @@ import {
   traceSpeechChunks,
 } from '../../web/speech-errors.ts';
 
-test('native exceptions keep numeric, string, and cross-realm object diagnostics', () => {
+void test('native exceptions keep numeric, string, and cross-realm object diagnostics', () => {
   assert.equal(speechErrorDetail(735912), 'ONNX runtime exception 735912');
   assert.equal(speechErrorDetail('decoder failed'), 'decoder failed');
   assert.equal(speechErrorDetail({ message: 'OrtRun failed' }), 'OrtRun failed');
@@ -23,7 +23,7 @@ test('native exceptions keep numeric, string, and cross-realm object diagnostics
   assert.match(speechErrorDetail(cycle), /unknown error/);
 });
 
-test('failed Large V3 inference keeps the runtime exception, phase, and safe retry path', () => {
+void test('failed Large V3 inference keeps the runtime exception, phase, and safe retry path', () => {
   const message = speechFailureMessage(735912, {
     modelName: 'Whisper Large V3',
     phase: 'transcribing audio and aligning word timestamps',
@@ -38,7 +38,7 @@ test('failed Large V3 inference keeps the runtime exception, phase, and safe ret
   assert.doesNotMatch(message, /ran out of memory/);
 });
 
-test('allocation, network, and storage failures retain diagnostics and appropriate recovery', () => {
+void test('allocation, network, and storage failures retain diagnostics and appropriate recovery', () => {
   const allocation = speechFailureMessage(
     new Error('failed to allocate a buffer of size 915059840'),
   );
@@ -52,7 +52,7 @@ test('allocation, network, and storage failures retain diagnostics and appropria
   assert.match(storage, /Free disk space/);
 });
 
-test('session diagnostics retain native method ownership and rejection values', async () => {
+void test('session diagnostics retain native method ownership and rejection values', async () => {
   const phases: unknown = [];
   const sessions = {
     model: {
@@ -74,7 +74,7 @@ test('session diagnostics retain native method ownership and rejection values', 
   assert.deepEqual(phases, ['running the speech encoder', 'running the word timestamp decoder']);
 });
 
-test('real generation calls report eight overlapping chunks for 150 seconds without fake percentages', async () => {
+void test('real generation calls report eight overlapping chunks for 150 seconds without fake percentages', async () => {
   const updates: Progress[] = [],
     phases: string[] = [];
   const model = {
@@ -101,7 +101,7 @@ test('real generation calls report eight overlapping chunks for 150 seconds with
   assert.ok(phases.includes('running the word timestamp decoder'));
 });
 
-test('a failed chunk keeps its native exception and is not reported as aligned', async () => {
+void test('a failed chunk keeps its native exception and is not reported as aligned', async () => {
   const updates: unknown = [];
   const model = {
     sessions: { model: { async run() {} }, decoder_model_merged: { async run() {} } },

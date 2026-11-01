@@ -91,7 +91,7 @@ function fixture({
         generation,
         expiresAt: expiresAt / 1000,
         totalFrames: record.totalFrames,
-        draft: structuredClone(record.draft || null),
+        draft: structuredClone(record.draft ?? null),
       };
     },
     async pcm(_id: string, startFrame: number, frameCount: number) {
@@ -100,15 +100,15 @@ function fixture({
     },
     async draft(_id: string, value: unknown) {
       const raw = recordFields(value);
+      const saved = validateLiveDraft(value, record.totalFrames);
       const body = {
-        ...validateLiveDraft(value, record.totalFrames),
+        ...saved,
         ownerId: text(raw['ownerId']),
         generation: numeric(raw['generation']),
       };
       assert.equal(body.generation, generation);
       assert.equal(body.ownerId, owner);
       assert.ok(clock < expiresAt);
-      const { ownerId, generation: fence, ...saved } = body;
       writes.push(structuredClone(body));
       record.draft = structuredClone(saved);
       if (draftFailure) {
@@ -126,7 +126,9 @@ function fixture({
       const job: Job = { audio, options };
       jobs.push(job);
       return new Promise<{ words: Word[]; modelRevision: string }>((resolve, reject) => {
-        job.resolve = (words: Word[]) => resolve({ words, modelRevision: 'revision-one' });
+        job.resolve = (words: Word[]) => {
+          resolve({ words, modelRevision: 'revision-one' });
+        };
         job.reject = reject;
       });
     },
@@ -202,7 +204,7 @@ function fixture({
   };
 }
 
-test('midpoint ownership replaces provisional overlaps and preserves repeated phrases', () => {
+void test('midpoint ownership replaces provisional overlaps and preserves repeated phrases', () => {
   const first = mergeLiveWindow(empty(), {
     startFrame: 0,
     frameCount: 20 * RATE,
@@ -234,7 +236,7 @@ test('midpoint ownership replaces provisional overlaps and preserves repeated ph
   assert.deepEqual(validateLiveDraft(second, 50 * RATE), second);
 });
 
-test('a word crossing the temporal boundary is owned by its midpoint', () => {
+void test('a word crossing the temporal boundary is owned by its midpoint', () => {
   const first = mergeLiveWindow(empty(), {
     startFrame: 0,
     frameCount: 20 * RATE,
@@ -257,7 +259,7 @@ test('a word crossing the temporal boundary is owned by its midpoint', () => {
   );
 });
 
-test('words exactly on the commit boundary are committed once across overlap', () => {
+void test('words exactly on the commit boundary are committed once across overlap', () => {
   const first = mergeLiveWindow(empty(), {
     startFrame: 0,
     frameCount: 20 * RATE,
@@ -277,7 +279,7 @@ test('words exactly on the commit boundary are committed once across overlap', (
   );
 });
 
-test('malformed timestamps and saved cursors are rejected without fabricating words', () => {
+void test('malformed timestamps and saved cursors are rejected without fabricating words', () => {
   assert.throws(
     () =>
       mergeLiveWindow(empty(), {
@@ -304,7 +306,7 @@ test('malformed timestamps and saved cursors are rejected without fabricating wo
   );
 });
 
-test('scheduler uses 20 second windows, 15 second stride, one active and one prepared', async () => {
+void test('scheduler uses 20 second windows, 15 second stride, one active and one prepared', async () => {
   const f = fixture(),
     controller = f.make('owner-one');
   await controller.start();
@@ -334,7 +336,7 @@ test('scheduler uses 20 second windows, 15 second stride, one active and one pre
   await flush();
 });
 
-test('workspace recovery resumes from persisted overlap cursor with committed words intact', async () => {
+void test('workspace recovery resumes from persisted overlap cursor with committed words intact', async () => {
   const draft = mergeLiveWindow(empty(), {
     startFrame: 0,
     frameCount: 20 * RATE,
@@ -355,7 +357,7 @@ test('workspace recovery resumes from persisted overlap cursor with committed wo
   controller.stop();
 });
 
-test('lease grant owns the authoritative cursor when a stale GET predates another owner save', async () => {
+void test('lease grant owns the authoritative cursor when a stale GET predates another owner save', async () => {
   const first = mergeLiveWindow(empty(), {
     startFrame: 0,
     frameCount: 20 * RATE,
@@ -394,7 +396,7 @@ test('lease grant owns the authoritative cursor when a stale GET predates anothe
   await flush();
 });
 
-test('a lease lacking the authoritative draft is refused before PCM or ASR', async () => {
+void test('a lease lacking the authoritative draft is refused before PCM or ASR', async () => {
   const f = fixture();
   f.api.lease = async () => ({ generation: 1, expiresAt: 160 });
   const controller = f.make('owner-one');
@@ -407,7 +409,7 @@ test('a lease lacking the authoritative draft is refused before PCM or ASR', asy
   controller.stop();
 });
 
-test('missing model never starts PCM or inference and displays a download action', async () => {
+void test('missing model never starts PCM or inference and displays a download action', async () => {
   const f = fixture();
   f.setModel(false);
   const controller = f.make('owner-one');
@@ -424,7 +426,7 @@ test('missing model never starts PCM or inference and displays a download action
   await flush();
 });
 
-test('an idle earlier recording does not block another recording with a ready window', async () => {
+void test('an idle earlier recording does not block another recording with a ready window', async () => {
   const f = fixture({ totalFrames: 10 * RATE });
   const ready = { ...f.record, recordingId: 'recording-two', totalFrames: 20 * RATE };
   f.api.recordings = async () => ({ recordings: [f.record, ready] });
@@ -439,7 +441,7 @@ test('an idle earlier recording does not block another recording with a ready wi
   await flush();
 });
 
-test('a ready recording leased elsewhere backs off while the next ready recording processes', async () => {
+void test('a ready recording leased elsewhere backs off while the next ready recording processes', async () => {
   const f = fixture(),
     second = { ...f.record, recordingId: 'recording-two' };
   f.api.recordings = async () => ({ recordings: [structuredClone(f.record), second] });
@@ -467,7 +469,7 @@ test('a ready recording leased elsewhere backs off while the next ready recordin
   await flush();
 });
 
-test('recording-specific conflict backoff suppresses retries until its bounded deadline', async () => {
+void test('recording-specific conflict backoff suppresses retries until its bounded deadline', async () => {
   const f = fixture(),
     leases: string[] = [];
   f.api.lease = async (id) => {
@@ -484,7 +486,7 @@ test('recording-specific conflict backoff suppresses retries until its bounded d
   controller.stop();
 });
 
-test('leases renew every ten seconds without changing the active generation', async () => {
+void test('leases renew every ten seconds without changing the active generation', async () => {
   const f = fixture(),
     controller = f.make('owner-one');
   await controller.start();
@@ -508,7 +510,7 @@ test('leases renew every ten seconds without changing the active generation', as
   await flush();
 });
 
-test('a second tab cannot process until lease expiry and stale first-tab results cannot save', async () => {
+void test('a second tab cannot process until lease expiry and stale first-tab results cannot save', async () => {
   const f = fixture(),
     first = f.make('owner-one'),
     second = f.make('owner-two');
@@ -534,7 +536,7 @@ test('a second tab cannot process until lease expiry and stale first-tab results
   await flush();
 });
 
-test('renewal failure cancels only live work and preserves the persisted draft', async () => {
+void test('renewal failure cancels only live work and preserves the persisted draft', async () => {
   const f = fixture(),
     controller = f.make('owner-one');
   await controller.start();
@@ -550,7 +552,7 @@ test('renewal failure cancels only live work and preserves the persisted draft',
   controller.stop();
 });
 
-test('independent watchdog releases expired ASR and prepared PCM while GET and renewal hang', async () => {
+void test('independent watchdog releases expired ASR and prepared PCM while GET and renewal hang', async () => {
   const f = fixture({ clockStart: 1000000 }),
     controller = f.make('owner-one', { requestTimeoutMs: 120000 });
   await controller.start();
@@ -582,7 +584,7 @@ test('independent watchdog releases expired ASR and prepared PCM while GET and r
   controller.stop();
 });
 
-test('lease expiry deadline cancels processing independently of poll and renewal guards', async () => {
+void test('lease expiry deadline cancels processing independently of poll and renewal guards', async () => {
   const f = fixture({ clockStart: 1000000 }),
     controller = f.make('owner-one', { requestTimeoutMs: 120000 });
   await controller.start();
@@ -602,7 +604,7 @@ test('lease expiry deadline cancels processing independently of poll and renewal
   controller.stop();
 });
 
-test('a renewal reply delivered after local expiry cannot revive the expired ASR operation', async () => {
+void test('a renewal reply delivered after local expiry cannot revive the expired ASR operation', async () => {
   const f = fixture({ clockStart: 1000000 }),
     controller = f.make('owner-one', { requestTimeoutMs: 120000 });
   await controller.start();
@@ -632,7 +634,7 @@ test('a renewal reply delivered after local expiry cannot revive the expired ASR
   controller.stop();
 });
 
-test('network deadlines settle uncooperative GET and renewal and allow subsequent recovery', async () => {
+void test('network deadlines settle uncooperative GET and renewal and allow subsequent recovery', async () => {
   const f = fixture(),
     controller = f.make('owner-one');
   await controller.start();
@@ -675,7 +677,7 @@ test('network deadlines settle uncooperative GET and renewal and allow subsequen
   await flush();
 });
 
-test('final processing preempts active and prepared work; failure retains draft for recovery', async () => {
+void test('final processing preempts active and prepared work; failure retains draft for recovery', async () => {
   const draft = mergeLiveWindow(empty(), {
     startFrame: 0,
     frameCount: 20 * RATE,
@@ -707,7 +709,7 @@ test('final processing preempts active and prepared work; failure retains draft 
   assert.equal(defined(controller.getState()[0]).status, 'paused-open-echo');
 });
 
-test('ambiguous draft acknowledgement reloads the durable cursor before retrying', async () => {
+void test('ambiguous draft acknowledgement reloads the durable cursor before retrying', async () => {
   const f = fixture(),
     controller = f.make('owner-one');
   await controller.start();
@@ -732,7 +734,7 @@ test('ambiguous draft acknowledgement reloads the durable cursor before retrying
   await flush();
 });
 
-test('completion preempts live inference while keeping the saved draft visible', async () => {
+void test('completion preempts live inference while keeping the saved draft visible', async () => {
   const f = fixture(),
     controller = f.make('owner-one');
   await controller.start();
@@ -746,7 +748,7 @@ test('completion preempts live inference while keeping the saved draft visible',
   controller.stop();
 });
 
-test('API enforces bounded same-origin PCM and protocol version without redirects', async () => {
+void test('API enforces bounded same-origin PCM and protocol version without redirects', async () => {
   const calls: { url: string; options: RequestInit | undefined }[] = [];
   const api = createExtensionLiveApi(async (url, options) => {
     assert.equal(typeof url, 'string');
@@ -778,7 +780,7 @@ test('API enforces bounded same-origin PCM and protocol version without redirect
   );
 });
 
-test('actual live worker stays warm, loads no speaker models, and validates word alignment', async () => {
+void test('actual live worker stays warm, loads no speaker models, and validates word alignment', async () => {
   const source = (
     await readFile(new URL('../../web/inference-worker.ts', import.meta.url), 'utf8')
   ).replace(/^import[\s\S]*?;\n/gm, '');
@@ -810,8 +812,11 @@ test('actual live worker stays warm, loads no speaker models, and validates word
     URL,
     Response,
     self: {
-      addEventListener: (_type: string, handler: (event: { data: unknown }) => Promise<void>) =>
-        handlers.push(handler),
+      addEventListener: (_type: string, handler: (event: { data: unknown }) => void) =>
+        handlers.push(async (event) => {
+          handler(event);
+          await flush();
+        }),
       postMessage: (value: unknown) => messages.push(recordFields(value)),
     },
     pipeline: async (_task: unknown, _checkpoint: unknown, options: Record<string, unknown>) => {
@@ -894,7 +899,7 @@ test('actual live worker stays warm, loads no speaker models, and validates word
   assert.equal(operations.filter((value) => value.operation === 'dispose').length, 1);
 });
 
-test('live status adapter reports only eligible state with monotonic fencing generation', () => {
+void test('live status adapter reports only eligible state with monotonic fencing generation', () => {
   const record = { status: 'receiving', liveTranscription: true, generation: 3 };
   assert.deepEqual(liveStatusReport({ status: 'model-missing' }, record, 'tab', 2), {
     ownerId: 'tab',
@@ -912,7 +917,7 @@ test('live status adapter reports only eligible state with monotonic fencing gen
   );
 });
 
-test('workspace publishes best-effort heartbeats through long inference and missing model', async () => {
+void test('workspace publishes best-effort heartbeats through long inference and missing model', async () => {
   const f = fixture();
   const reports: Record<string, unknown>[] = [];
   f.api.status = async (_id: string, body: unknown) => {

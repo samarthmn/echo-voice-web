@@ -2,12 +2,15 @@
 // Echo connects or when a retry is due; nothing polls while no recording is waiting.
 export type PassOutcome = 'idle' | 'more' | 'offline' | 'poll';
 /** Reported after a pass that needs no immediate follow-up. `retryAt` is set while Echo is offline. */
-export type Settled = { failures: number; retryAt?: number };
-type Clock = {
+export interface Settled {
+  failures: number;
+  retryAt?: number;
+}
+interface Clock {
   now(): number;
-  setTimeout(callback: () => void, ms: number): number | ReturnType<typeof setTimeout>;
-  clearTimeout(id: number | ReturnType<typeof setTimeout>): void;
-};
+  setTimeout(callback: () => void, ms: number): number;
+  clearTimeout(id: number): void;
+}
 /** Minimum spacing between passes triggered by committed audio while recording.
  * @dynamicImport Used by filename-bundled extension tests.
  */
@@ -23,7 +26,9 @@ export function backoffDelay(failures: number): number {
 const systemClock: Clock = {
   now: () => Date.now(),
   setTimeout: (callback, ms) => setTimeout(callback, ms),
-  clearTimeout: (id) => clearTimeout(id),
+  clearTimeout: (id) => {
+    clearTimeout(id);
+  },
 };
 export function uploadScheduler(
   pass: () => Promise<PassOutcome>,
@@ -33,7 +38,7 @@ export function uploadScheduler(
   let failures = 0;
   let retryAt = 0;
   let lastStart = -Infinity;
-  let timer: number | ReturnType<typeof setTimeout> | undefined;
+  let timer: number | undefined;
   let due = Infinity;
   let running: Promise<void> | undefined;
   let again = false;
@@ -79,7 +84,7 @@ export function uploadScheduler(
     }
     lastStart = clock.now();
     running = pass()
-      .catch((error) => {
+      .catch((error: unknown) => {
         // An unexpected local failure backs off like an outage instead of retrying in a loop.
         console.warn('Echo: upload pass failed.', error);
         return 'offline' as const;

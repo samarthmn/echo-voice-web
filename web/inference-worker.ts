@@ -41,7 +41,7 @@ env.useCustomCache = true;
 onnxWasm.wasmPaths = '/wasm/';
 onnxWasm.numThreads = wasmThreadCount(
   globalThis.crossOriginIsolated,
-  globalThis.navigator?.hardwareConcurrency,
+  (globalThis as { navigator?: Navigator }).navigator?.hardwareConcurrency,
 );
 onnxWasm.proxy = false;
 const createTranscriber = pipeline as (
@@ -51,13 +51,14 @@ const createTranscriber = pipeline as (
 ) => Promise<AutomaticSpeechRecognitionPipeline>;
 const runtime = {
   threads: onnxWasm.numThreads,
-  isolated: globalThis.crossOriginIsolated === true,
+  isolated: globalThis.crossOriginIsolated,
 };
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null,
   loadedModel = '',
   busy = false,
   usedFiles = new Set<string>();
+const currentTranscriber = () => transcriber;
 const keyOf = (request: RequestInfo | URL) =>
   typeof request === 'string' ? request : request instanceof URL ? request.href : request.url;
 const originalFetch = globalThis.fetch.bind(globalThis);
@@ -84,8 +85,13 @@ async function unloadSpeech() {
   transcriber = null;
   loadedModel = '';
 }
-const postReply = (reply: WorkerReply) => self.postMessage(reply);
-self.addEventListener('message', async (event: MessageEvent<unknown>) => {
+const postReply = (reply: WorkerReply) => {
+  self.postMessage(reply);
+};
+self.addEventListener('message', (event: MessageEvent<unknown>) => {
+  void handleMessage(event);
+});
+async function handleMessage(event: MessageEvent<unknown>) {
   const message = workerRequest(event.data);
   if (!message) {
     const raw = record(event.data);
@@ -138,7 +144,7 @@ self.addEventListener('message', async (event: MessageEvent<unknown>) => {
     device: 'wasm',
     dtype: 'q8',
     local_files_only: !download,
-    progress_callback: (value) =>
+    progress_callback: (value) => {
       progress(
         value.status === 'progress'
           ? 'Downloading model file'
@@ -147,7 +153,8 @@ self.addEventListener('message', async (event: MessageEvent<unknown>) => {
             : 'Loading model',
         'progress' in value ? value.progress : value.status === 'done' ? 100 : 0,
         'file' in value ? value.file : undefined,
-      ),
+      );
+    },
   };
   let segmentation: PreTrainedModel | undefined,
     embedding: PreTrainedModel | undefined,
@@ -163,7 +170,7 @@ self.addEventListener('message', async (event: MessageEvent<unknown>) => {
       throw new Error('Unsupported speech operation.');
     if (live && modelId !== DEFAULT_SPEECH_MODEL)
       throw new Error('Live transcription requires the downloaded Large V3 Turbo model.');
-    if (live && (!audio?.length || audio.length > 20 * 16000))
+    if (live && (!audio.length || audio.length > 20 * 16000))
       throw new Error('Live audio must contain at most twenty seconds.');
     const native = speechModelConfig(modelId).engine === 'native';
     if (native !== ['download-companions', 'diarize'].includes(type))
@@ -196,12 +203,14 @@ self.addEventListener('message', async (event: MessageEvent<unknown>) => {
           traceSpeechChunks(
             speechModel(transcriber.model),
             audio.length,
-            (value) => postReply({ id, type: 'progress', progress: value }),
+            (value) => {
+              postReply({ id, type: 'progress', progress: value });
+            },
             (next) => {
               phase = next;
             },
           );
-        if (!transcriber) throw new Error('The speech model returned no word timestamps.');
+        if (!currentTranscriber()) throw new Error('The speech model returned no word timestamps.');
         const output: unknown = await transcriber(audio, {
           return_timestamps: 'word',
           chunk_length_s: 29,
@@ -225,7 +234,7 @@ self.addEventListener('message', async (event: MessageEvent<unknown>) => {
         type: 'result',
         result: {
           words,
-          duration: (audio?.length ?? 0) / 16000,
+          duration: audio.length / 16000,
           model: modelId,
           modelRevision: speechModelConfig(modelId).revision,
         },
@@ -281,7 +290,7 @@ self.addEventListener('message', async (event: MessageEvent<unknown>) => {
       reply = { id, type: 'result' };
       return;
     }
-    const speakers = options.speakers || [];
+    const speakers = options.speakers ?? [];
     phase = 'recognizing speakers';
     const turns = words.length
       ? await diarize(
@@ -309,10 +318,17 @@ self.addEventListener('message', async (event: MessageEvent<unknown>) => {
     const message = speechFailureMessage(error, { download, phase, modelName });
     reply = { id, type: 'error', error: message };
   } finally {
-    if (!live || reply?.type !== 'result') await unloadSpeech().catch(() => {});
-    await segmentation?.dispose().catch(() => {});
-    await embedding?.dispose().catch(() => {});
+    if (!live || reply?.type !== 'result')
+      await unloadSpeech().catch(() => {
+        /* The worker is already returning the original job failure. */
+      });
+    await segmentation?.dispose().catch(() => {
+      /* The worker is already returning the original job failure. */
+    });
+    await embedding?.dispose().catch(() => {
+      /* The worker is already returning the original job failure. */
+    });
     busy = false;
     if (reply) postReply(reply);
   }
-});
+}

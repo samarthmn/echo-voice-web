@@ -26,7 +26,10 @@ export function connectionAction<T>(work: () => Promise<T>): Promise<T> {
 }
 const samePair = (a: Pair, b: Pair) =>
   a.libraryId === b.libraryId && a.endpoint === b.endpoint && a.credential === b.credential;
-type StatusReply = { status: ConnectionStatus; endpoint?: string };
+interface StatusReply {
+  status: ConnectionStatus;
+  endpoint?: string;
+}
 async function localStatus(link: Link): Promise<StatusReply> {
   if (link.state === 'none') return { status: (await wasRevoked()) ? 'revoked' : 'none' };
   return { status: link.state, endpoint: link.endpoint };
@@ -36,19 +39,19 @@ export async function connectionStatus(): Promise<StatusReply> {
   const link = await readLink();
   if (link.state !== 'connected') return localStatus(link);
   try {
-    const body = await jsonRequest(
+    const body = (await jsonRequest(
       link.endpoint,
       '/connection',
       { signal: AbortSignal.timeout(3_000) },
       link.credential,
-    );
+    )) as { libraryId?: unknown };
     if (body.libraryId !== link.libraryId || !protectedCompanion(body))
       throw new ProtocolError('Echo returned an unexpected connection.');
     // A disconnect or new pairing may have finished while Echo answered.
     const current = await readLink();
     return current.state === 'connected' && samePair(current, link)
       ? { status: 'connected', endpoint: link.endpoint }
-      : localStatus(current);
+      : await localStatus(current);
   } catch (error) {
     // jsonRequest already cleared a credential that Echo answered 401 for.
     if (error instanceof ProtocolError && error.status === 401)
@@ -63,9 +66,9 @@ export async function forgetRemote(pair: Pair): Promise<void> {
     '/connection',
     { method: 'DELETE', signal: AbortSignal.timeout(3_000) },
     pair.credential,
-  ).catch((error) =>
-    console.warn('Echo: the previous Echo did not confirm the disconnect.', error),
-  );
+  ).catch((error: unknown) => {
+    console.warn('Echo: the previous Echo did not confirm the disconnect.', error);
+  });
 }
 /**
  * Forget this browser in Echo, then locally. Echo must confirm the revocation unless the user
@@ -80,18 +83,20 @@ export function disconnect(forgetLocally = false): Promise<void> {
     } catch (error) {
       const revoked = error instanceof ProtocolError && error.status === 401;
       if (!revoked && !forgetLocally)
-        throw new Error('Open Echo to disconnect this browser. Recordings stay saved here.');
+        throw new Error('Open Echo to disconnect this browser. Recordings stay saved here.', {
+          cause: error,
+        });
     }
     await saveLink({ state: 'none' });
   });
 }
-type LivePreview = {
+interface LivePreview {
   recordingId: string;
   status: string;
   preview: string;
   backlogSeconds: number;
   provisional: boolean;
-};
+}
 const livePending = new Map<string, Promise<LivePreview>>();
 export async function livePreview(id: string): Promise<LivePreview> {
   if (!uuid.test(id)) throw new Error('Invalid recording identity.');
@@ -118,12 +123,12 @@ export async function livePreview(id: string): Promise<LivePreview> {
   if (inFlight) return inFlight;
   const promise = (async (): Promise<LivePreview> => {
     try {
-      const body = await jsonRequest(
+      const body = (await jsonRequest(
         pair.endpoint,
         `/recordings/${id}/live`,
         { signal: AbortSignal.timeout(3_000) },
         pair.credential,
-      );
+      )) as Partial<LivePreview> & { libraryId?: unknown };
       const currentPair = await connectedPair();
       if (!currentPair || !samePair(currentPair, pair))
         return {
@@ -136,8 +141,10 @@ export async function livePreview(id: string): Promise<LivePreview> {
       if (
         body.recordingId !== id ||
         body.libraryId !== pair.libraryId ||
+        typeof body.status !== 'string' ||
         !liveStates.has(body.status) ||
         typeof body.preview !== 'string' ||
+        typeof body.backlogSeconds !== 'number' ||
         !Number.isFinite(body.backlogSeconds) ||
         body.backlogSeconds < 0 ||
         typeof body.provisional !== 'boolean'

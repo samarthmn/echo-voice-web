@@ -61,7 +61,7 @@ async function fixture(t: test.TestContext, { configured = true } = {}) {
   for (const stream of [child.stdout, child.stderr])
     stream.on('data', (streamValue: unknown) => {
       const bytes = bufferChunk(streamValue);
-      logs = (logs + bytes).slice(-8192);
+      logs = (logs + String(bytes)).slice(-8192);
     });
   t.after(async () => {
     if (child.exitCode === null) {
@@ -90,14 +90,16 @@ async function fixture(t: test.TestContext, { configured = true } = {}) {
         assert.equal(object((await response.json()) as unknown)['path'], data);
         return { root, data, base, origin, redirect, logs: () => logs };
       }
-    } catch {}
+    } catch {
+      /* The isolated server may still be starting; retry until the readiness deadline. */
+    }
     await delay(30);
   }
   throw new Error('Synthetic source server did not start');
 }
 const get = (base: string, route: string, headers = {}) =>
   fetch(base + route, { redirect: 'manual', headers, signal: AbortSignal.timeout(3000) });
-test('web OAuth remains optional and reports maintainer configuration without exposing secrets', async (t) => {
+void test('web OAuth remains optional and reports maintainer configuration without exposing secrets', async (t) => {
   const s = await fixture(t, { configured: false });
   const status = object((await (await get(s.base, '/api/integrations/status')).json()) as unknown);
   assert.equal(object(status['google'])['mode'], 'source');
@@ -110,7 +112,7 @@ test('web OAuth remains optional and reports maintainer configuration without ex
   assert.match(text(object((await response.json()) as unknown)['error']), /not configured/);
   assert.ok(!s.logs().includes(secret));
 });
-test('configured web OAuth uses its existing callback with PKCE and keeps denial and cancellation local', async (t) => {
+void test('configured web OAuth uses its existing callback with PKCE and keeps denial and cancellation local', async (t) => {
   const s = await fixture(t);
   const status = object((await (await get(s.base, '/api/integrations/status')).json()) as unknown);
   assert.equal(object(status['google'])['configured'], true);

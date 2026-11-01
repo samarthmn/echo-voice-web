@@ -8,9 +8,9 @@ export function automaticTranscriptionEligible(
 ) {
   return (
     !!meeting?.id &&
-    !!meeting.tracks?.length &&
+    !!meeting.tracks.length &&
     ['saved', 'interrupted', 'ready'].includes(meeting.status) &&
-    !meeting.transcripts?.length &&
+    !meeting.transcripts.length &&
     meeting.autoTranscribeSuppressed !== true &&
     meeting.error !== TRANSCRIPTION_CANCELLED
   );

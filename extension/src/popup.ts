@@ -56,10 +56,9 @@ function enableStart() {
     (mic.checked && !micGranted);
 }
 function refresh(): Promise<void> {
-  if (!refreshing)
-    refreshing = refreshState().finally(() => {
-      refreshing = undefined;
-    });
+  refreshing ??= refreshState().finally(() => {
+    refreshing = undefined;
+  });
   return refreshing;
 }
 async function refreshState() {
@@ -70,9 +69,7 @@ async function refreshState() {
   connection.update(state.connection);
   if (state.recoveryError) showError(new Error(state.recoveryError));
   try {
-    micGranted =
-      (await navigator.permissions.query({ name: 'microphone' as PermissionName })).state ===
-      'granted';
+    micGranted = (await navigator.permissions.query({ name: 'microphone' })).state === 'granted';
   } catch (error) {
     console.warn('Echo: microphone permission state is unavailable.', error);
     micGranted = false;
@@ -135,11 +132,11 @@ async function refreshState() {
     element('mic-source').textContent =
       active.mic === 'tab-only'
         ? 'Call audio only'
-        : /unknown|stale|unrecognized/.test(active.mic ?? '')
+        : /unknown|stale|unrecognized/.test(active.mic)
           ? 'Voice excluded · meeting controls unknown'
           : active.mic;
     element('mic-exclusion-field').hidden = !active.micCaptured;
-    element<HTMLInputElement>('mic-exclusion').checked = !!active.micExcluded;
+    element<HTMLInputElement>('mic-exclusion').checked = active.micExcluded;
     element<HTMLInputElement>('mic-exclusion').disabled = !active.micAvailable;
     const liveId = row?.liveTranscription ? active.recordingId : undefined;
     if (liveId !== liveRecordingId) {

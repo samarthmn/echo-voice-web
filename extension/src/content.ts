@@ -1,19 +1,23 @@
+import type { ObservationMessage } from './messages.ts';
 import { meetingProvider } from './core.ts';
 import { observeDocument } from './adapters.ts';
 // This script is a one-way observer. It never receives endpoint settings, tokens or capture audio.
 const marker = '__echoMuteObserverV2';
+const observerGlobal = globalThis as typeof globalThis & {
+  [marker]?: { nextSequence: number; dispose?: () => void };
+};
 {
-  const previous = (globalThis as any)[marker];
+  const previous = observerGlobal[marker];
   previous?.dispose?.();
-  let seq = Number.isSafeInteger(previous?.nextSequence) ? previous.nextSequence : 0;
+  let seq = Number.isSafeInteger(previous?.nextSequence) ? (previous?.nextSequence ?? 0) : 0;
   let disposed = false;
   let lastSentAt = -Infinity;
   let pending: ReturnType<typeof setTimeout> | undefined;
-  const transmit = (message: any) => {
+  const transmit = (message: ObservationMessage) => {
     try {
       // The worker answers observe:false once this tab is not recording, so an idle tab
       // stops waking it. A rejected send means the extension reloaded.
-      chrome.runtime.sendMessage(message).then((reply) => {
+      chrome.runtime.sendMessage(message).then((reply: { observe?: boolean } | undefined) => {
         if (reply?.observe === false) dispose();
       }, dispose);
     } catch {
@@ -40,7 +44,7 @@ const marker = '__echoMuteObserverV2';
     if (disposed) return;
     const remaining = 100 - (Date.now() - lastSentAt);
     if (remaining <= 0) send();
-    else if (pending === undefined) pending = setTimeout(send, remaining);
+    else pending ??= setTimeout(send, remaining);
   };
   // Provider animation/layout mutations can arrive in bursts. Read the latest
   // controls at most once per 100 ms; a separate heartbeat also runs without DOM changes.
@@ -82,7 +86,7 @@ const marker = '__echoMuteObserverV2';
     window.removeEventListener('pagehide', pagehide);
   }
   window.addEventListener('pagehide', pagehide);
-  (globalThis as any)[marker] = {
+  observerGlobal[marker] = {
     get nextSequence() {
       return seq;
     },

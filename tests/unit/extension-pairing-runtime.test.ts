@@ -52,7 +52,7 @@ async function harness() {
   };
   return h;
 }
-test('parallel discovery respects saved, announced, then candidate priority and 700ms timeout', async () => {
+void test('parallel discovery respects saved, announced, then candidate priority and 700ms timeout', async () => {
   const h = await harness();
   await h.api.saveLink({ state: 'connected', endpoint, libraryId: library, credential: 'a' });
   h.local['echoOrigin'] = 'http://localhost:3222';
@@ -73,16 +73,18 @@ test('parallel discovery respects saved, announced, then candidate priority and 
   defined(pending[0]).resolve(reply({ service: 'other' }));
   assert.equal(await discovery, h.local['echoOrigin']);
   h.fetch = (_url: unknown, options: Parameters<FixtureFetch>[1]) =>
-    new Promise((_, reject) =>
-      defined(options.signal).addEventListener('abort', () => reject(Error('timeout'))),
-    );
+    new Promise((_, reject) => {
+      defined(options.signal).addEventListener('abort', () => {
+        reject(Error('timeout'));
+      });
+    });
   const keepAlive = setTimeout(() => {}, 1000);
   const started = Date.now();
   await assert.rejects(h.api.discover(), /Echo isn't running/);
   clearTimeout(keepAlive);
   assert.ok(Date.now() - started >= 650 && Date.now() - started < 1500);
 });
-test('pair → sealed waiting → approved claim → connected; owned approval tab closes', async () => {
+void test('pair → sealed waiting → approved claim → connected; owned approval tab closes', async () => {
   const h = await harness();
   await h.api.beginPairing(endpoint);
   assert.equal((await h.api.readLink()).state, 'waiting');
@@ -94,7 +96,7 @@ test('pair → sealed waiting → approved claim → connected; owned approval t
   assert.deepEqual(h.removed, [1]);
   assert.equal(connectedLink(await h.api.readLink()).credential, 'a'.repeat(64));
 });
-test('lost claim reply retries identical body; existing approval tab remains open', async () => {
+void test('lost claim reply retries identical body; existing approval tab remains open', async () => {
   const h = await harness();
   h.tabs.push({ id: 20, url: `${pageOrigin}/extension-connect.html#request=${requestId}` });
   await h.api.beginPairing(endpoint);
@@ -109,7 +111,7 @@ test('lost claim reply retries identical body; existing approval tab remains ope
   assert.equal(new Set(bodies).size, 1);
   assert.deepEqual(h.removed, []);
 });
-test('lost reservation response reuses durable claim secret on retry', async () => {
+void test('lost reservation response reuses durable claim secret on retry', async () => {
   const h = await harness();
   const wire = h.fetch;
   let first = true;
@@ -127,7 +129,7 @@ test('lost reservation response reuses durable claim secret on retry', async () 
     .map(([, options]) => options.body);
   assert.equal(bodies[0], bodies[1]);
 });
-test('expiry returns none with notice; cancel uses idempotent DELETE', async () => {
+void test('expiry returns none with notice; cancel uses idempotent DELETE', async () => {
   const h = await harness();
   await h.api.beginPairing(endpoint);
   h.now += 601000;
@@ -142,7 +144,7 @@ test('expiry returns none with notice; cancel uses idempotent DELETE', async () 
     ),
   );
 });
-test('401 on any authenticated call clears credential and records revoked state', async () => {
+void test('401 on any authenticated call clears credential and records revoked state', async () => {
   const h = await harness();
   h.approved = true;
   await h.api.beginPairing(endpoint);
@@ -156,7 +158,7 @@ test('401 on any authenticated call clears credential and records revoked state'
   await assert.rejects(h.api.jsonRequest(endpoint, '/recordings/a', {}, 'b'));
   assert.equal((await h.api.connectionStatus()).status, 'revoked');
 });
-test('ECHO messages require verified loopback sender origin; connect requires confirmation', async () => {
+void test('ECHO messages require verified loopback sender origin; connect requires confirmation', async () => {
   const h = await harness();
   const sender = { origin: endpoint };
   const present = await h.api.externalMessage(
@@ -196,7 +198,7 @@ test('ECHO messages require verified loopback sender origin; connect requires co
     'c'.repeat(64),
   );
 });
-test('Echo-initiated connect replaces a waiting request; approval from another Echo origin claims', async () => {
+void test('Echo-initiated connect replaces a waiting request; approval from another Echo origin claims', async () => {
   const h = await harness();
   let connected = 0;
   h.api.whenConnected(() => connected++);
@@ -227,7 +229,7 @@ test('Echo-initiated connect replaces a waiting request; approval from another E
   assert.equal(linked(await h.api.readLink()).endpoint, endpoint);
   assert.equal(connected, 2);
 });
-test('cancel ends waiting locally even when Echo is offline; malformed Echo messages are rejected', async () => {
+void test('cancel ends waiting locally even when Echo is offline; malformed Echo messages are rejected', async () => {
   const h = await harness();
   await h.api.beginPairing(endpoint);
   const wire = h.fetch;
@@ -248,7 +250,7 @@ test('cancel ends waiting locally even when Echo is offline; malformed Echo mess
     /Unverified/,
   );
 });
-test('an Echo-started connect from a moved Echo replaces the old link and forgets the old Echo', async () => {
+void test('an Echo-started connect from a moved Echo replaces the old link and forgets the old Echo', async () => {
   const h = await harness();
   const moved = 'http://127.0.0.1:3112';
   const otherLibrary = '33333333-3333-4333-8333-333333333333';
@@ -301,7 +303,7 @@ test('an Echo-started connect from a moved Echo replaces the old link and forget
     'the replaced Echo is asked to forget this browser',
   );
 });
-test('an Echo-started connect from the linked Echo and library keeps the connection', async () => {
+void test('an Echo-started connect from the linked Echo and library keeps the connection', async () => {
   const h = await harness();
   await h.api.saveLink({
     state: 'connected',
@@ -316,7 +318,7 @@ test('an Echo-started connect from the linked Echo and library keeps the connect
   );
   assert.equal(connectedLink(await h.api.readLink()).credential, 'b'.repeat(64));
 });
-test('an expired request whose reservation reply was lost ends without reserving again', async () => {
+void test('an expired request whose reservation reply was lost ends without reserving again', async () => {
   const h = await harness();
   const wire = h.fetch;
   h.fetch = async (url: string, options: Parameters<FixtureFetch>[1]) => {
@@ -337,7 +339,7 @@ test('an expired request whose reservation reply was lost ends without reserving
     .map(([, options]) => object(JSON.parse(text(options.body)) as unknown)['claimSecret']);
   assert.notEqual(secrets.at(-1), secrets[0], 'Retry starts with a fresh secret');
 });
-test('a refused reservation ends the waiting state instead of retrying forever', async () => {
+void test('a refused reservation ends the waiting state instead of retrying forever', async () => {
   const h = await harness();
   const wire = h.fetch;
   h.fetch = async (url: string, options: Parameters<FixtureFetch>[1]) => {
@@ -350,14 +352,16 @@ test('a refused reservation ends the waiting state instead of retrying forever',
   assert.equal((await h.api.resumePairing()).phase, 'none');
   assert.equal((await h.api.readLink()).state, 'none');
 });
-test('Cancel aborts a claim hanging on Echo instead of waiting behind it', async () => {
+void test('Cancel aborts a claim hanging on Echo instead of waiting behind it', async () => {
   const h = await harness();
   await h.api.beginPairing(endpoint);
   h.fetch = (url: string, options: Parameters<FixtureFetch>[1]) =>
     url.endsWith('/claim')
-      ? new Promise((_, reject) =>
-          defined(options.signal).addEventListener('abort', () => reject(Error('aborted'))),
-        )
+      ? new Promise((_, reject) => {
+          defined(options.signal).addEventListener('abort', () => {
+            reject(Error('aborted'));
+          });
+        })
       : Promise.resolve(new Response(null, { status: 204 }));
   const claim = h.api.resumePairing();
   await new Promise((resolve) => setImmediate(resolve));

@@ -16,7 +16,7 @@ async function harness() {
   h.api = await bundle(h, contents);
   return h;
 }
-test('v3 records offline with non-extractable device key, encrypted metadata/PCM; reads survive restart; lists never decrypt', async () => {
+void test('v3 records offline with non-extractable device key, encrypted metadata/PCM; reads survive restart; lists never decrypt', async () => {
   const h = await harness(),
     row = sampleRow();
   await h.api.createRecording(row);
@@ -39,7 +39,7 @@ test('v3 records offline with non-extractable device key, encrypted metadata/PCM
   assert.equal((await h.api.allRecordings()).length, 1);
   await assert.rejects(h.api.recording(row.recordingId));
 });
-test('v3 transfer receipts remove encrypted metadata and PCM, then prune after seven days', async () => {
+void test('v3 transfer receipts remove encrypted metadata and PCM, then prune after seven days', async () => {
   const h = await harness();
   const value = { ...sampleRow(), libraryId: library };
   await h.api.createRecording(value);
@@ -63,7 +63,7 @@ test('v3 transfer receipts remove encrypted metadata and PCM, then prune after s
   await h.api.pruneReceipts(Date.now() + 8 * 86400000);
   assert.equal(defined(h.data['recordings']).size, 0);
 });
-test('v3 offline export preserves WAV audio after restart, and delete releases its local storage', async () => {
+void test('v3 offline export preserves WAV audio after restart, and delete releases its local storage', async () => {
   const h = await harness();
   const row = sampleRow();
   const pcm = Uint8Array.from([1, 2, 3, 4]).buffer;

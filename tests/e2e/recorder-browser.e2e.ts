@@ -1,3 +1,4 @@
+import type * as TestModule from '@playwright/test';
 import { bufferChunk } from '../helpers/assertions.ts';
 import { meetingRecord } from '../helpers/assertions.ts';
 import { browserGuards } from '../helpers/browser-guards.ts';
@@ -39,29 +40,32 @@ const server = spawn(binary, [], {
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
+const getExitCode = () => server.exitCode;
 let serverOutput = '';
 server.stdout.on('data', (streamValue: unknown) => {
   const chunk = bufferChunk(streamValue);
-  serverOutput += chunk;
+  serverOutput += String(chunk);
 });
 server.stderr.on('data', (streamValue: unknown) => {
   const chunk = bufferChunk(streamValue);
-  serverOutput += chunk;
+  serverOutput += String(chunk);
 });
-let browser: import('@playwright/test').Browser | undefined;
+let browser: TestModule.Browser | undefined;
 let passed = false;
 const delay = (ms: number | undefined) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function ready() {
   for (let attempt = 0; attempt < 100; attempt++) {
-    if (server.exitCode !== null)
+    if (getExitCode() !== null)
       throw new Error(
         'The isolated test server could not bind. Refusing to use any existing workspace.',
       );
-    if (server.exitCode !== null) throw new Error(`Test server exited: ${serverOutput}`);
+    if (getExitCode() !== null) throw new Error(`Test server exited: ${serverOutput}`);
     try {
       if ((await fetch(`${origin}/api/settings`)).ok) return;
-    } catch {}
+    } catch {
+      /* The isolated server may still be starting; retry until the readiness deadline. */
+    }
     await delay(100);
   }
   throw new Error(`Test server did not start: ${serverOutput}`);
@@ -101,9 +105,14 @@ try {
     };
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (url, init) => {
-      if (String(url).endsWith('/audio') && init?.body instanceof FormData) {
+      if (
+        (typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).endsWith(
+          '/audio',
+        ) &&
+        init?.body instanceof FormData
+      ) {
         window.__captureTest.uploads.push({
-          url: String(url),
+          url: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url,
           sequence: init.body.get('sequence'),
           bytes: (() => {
             const file = init.body.get('file');
@@ -129,7 +138,9 @@ try {
     );
   });
   await page.goto(origin);
-  await page.waitForFunction(() => typeof window.echoRecorder?.start === 'function');
+  await page.waitForFunction(
+    () => typeof (window as Partial<Window>).echoRecorder?.start === 'function',
+  );
   await delay(500);
   assert.equal(await page.evaluate(() => window.__captureTest.micCalls), 0);
   console.log('PASS: loading the real application does not request microphone access');
@@ -217,11 +228,11 @@ try {
         item.url.includes(text(id)),
       );
     },
-    meeting['id'],
+    meeting.id,
     { timeout: 10000 },
   );
   const recording = object(
-    (await (await fetch(`${origin}/api/meetings/${meeting['id']}`)).json()) as unknown,
+    (await (await fetch(`${origin}/api/meetings/${meeting.id}`)).json()) as unknown,
   );
   assert.equal(recording['status'], 'recording');
   await page.waitForFunction(async (id) => {
@@ -232,12 +243,14 @@ try {
 
     const saved = object((await (await fetch(`/api/meetings/${id}`)).json()) as unknown);
     return (testMeeting(saved).tracks[0]?.bytes ?? 0) > 0;
-  }, meeting['id']);
+  }, meeting.id);
   console.log(
     'PASS: explicit microphone start persists a real periodic audio chunk to the Rust server',
   );
 
-  await page.evaluate(() => window.echoRecorder.toggleMute());
+  await page.evaluate(() => {
+    window.echoRecorder.toggleMute();
+  });
   assert.equal(
     await page.evaluate(() => {
       function defined<T>(v: T): NonNullable<T> {
@@ -249,15 +262,21 @@ try {
     false,
   );
   await delay(600);
-  await page.evaluate(() => window.echoRecorder.pause());
+  await page.evaluate(() => {
+    window.echoRecorder.pause();
+  });
   const pausedElapsed = await page.evaluate(() => window.echoRecorder.state.elapsed);
   const pausedAt = Date.now();
   await delay(1200);
   assert.equal(await page.evaluate(() => window.echoRecorder.state.elapsed), pausedElapsed);
-  await page.evaluate(() => window.echoRecorder.resume());
+  await page.evaluate(() => {
+    window.echoRecorder.resume();
+  });
   const pausedMs = Date.now() - pausedAt;
   await delay(400);
-  await page.evaluate(() => window.echoRecorder.toggleMute());
+  await page.evaluate(() => {
+    window.echoRecorder.toggleMute();
+  });
   await delay(350);
   const wallSeconds = (Date.now() - started) / 1000;
   const saved = await page.evaluate(() => window.echoRecorder.stop());
@@ -279,7 +298,7 @@ try {
     return window.__captureTest.uploads.filter((item: { url: string | unknown[] }) =>
       item.url.includes(text(id)),
     );
-  }, meeting['id']);
+  }, meeting.id);
   assert.ok(uploads.length >= 2, 'Expected periodic and final chunks');
   assert.deepEqual(
     uploads.map((item: { sequence: unknown }) => Number(item.sequence)),
@@ -317,12 +336,12 @@ try {
   });
   await page.waitForFunction(
     (id) => window.__captureTest.saved.some((meeting: { id: unknown }) => meeting.id === id),
-    interrupted['id'],
+    interrupted.id,
   );
   const interruptedSaved = meetingRecord(
-    (await (await fetch(`${origin}/api/meetings/${interrupted['id']}`)).json()) as unknown,
+    (await (await fetch(`${origin}/api/meetings/${interrupted.id}`)).json()) as unknown,
   );
-  assert.equal(interruptedSaved['status'], 'interrupted');
+  assert.equal(interruptedSaved.status, 'interrupted');
   assert.ok((await decodeSaved(interruptedSaved)).duration > 0);
   await assertReleased();
   console.log(
@@ -362,7 +381,7 @@ try {
     return window.__captureTest.uploads.filter((item: { url: string | unknown[] }) =>
       item.url.includes(text(id)),
     );
-  }, retryMeeting['id']);
+  }, retryMeeting.id);
   assert.deepEqual(
     retriedUploads.map((item: { sequence: unknown }) => item.sequence),
     ['0', '0', '0', '0', '1'],
@@ -388,10 +407,10 @@ try {
   console.log('Recorder browser integration: 5 checks passed.');
 } finally {
   await browser?.close();
-  if (server.exitCode === null) {
+  if (getExitCode() === null) {
     server.kill('SIGINT');
     await Promise.race([new Promise((resolve) => server.once('exit', resolve)), delay(3000)]);
-    if (server.exitCode === null) server.kill('SIGKILL');
+    if (getExitCode() === null) server.kill('SIGKILL');
   }
   if (passed) await rm(dataDirectory, { recursive: true, force: true });
   else console.error(`Recorder test data retained at ${dataDirectory}\n${serverOutput}`);

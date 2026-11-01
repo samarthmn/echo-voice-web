@@ -1,3 +1,4 @@
+import type * as TestModule from '@playwright/test';
 import type { Recording } from '../../extension/src/core.ts';
 import type { Page } from '@playwright/test';
 import { array } from '../helpers/assertions.ts';
@@ -52,7 +53,10 @@ async function launch(
   return chromium.launchPersistentContext(profile, {
     executablePath,
     headless: true,
-    args: [`--disable-extensions-except=${output.outdir}`, `--load-extension=${output.outdir}`],
+    args: [
+      `--disable-extensions-except=${String(output.outdir)}`,
+      `--load-extension=${String(output.outdir)}`,
+    ],
     env: { ...process.env, TMPDIR: path.join(project, 'tmp') },
   });
 }
@@ -61,7 +65,7 @@ async function testPage(
   output: { outdir?: string; extensionId: unknown; version?: unknown },
 ) {
   const page = await context.newPage();
-  await page.goto(`chrome-extension://${output.extensionId}/protection-test.html`);
+  await page.goto(`chrome-extension://${String(output.extensionId)}/protection-test.html`);
   await page.evaluate(defined(bundle.outputFiles[0]).text);
   return page;
 }
@@ -71,8 +75,12 @@ async function dump(page: Page) {
     const get = (store: string) =>
       new Promise<unknown[]>((resolve, reject) => {
         const request = db.transaction(store).objectStore(store).getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+        request.onerror = () => {
+          reject(request.error ?? new Error('IndexedDB request failed.'));
+        };
       });
     return {
       rows: await get('recordings'),
@@ -82,7 +90,7 @@ async function dump(page: Page) {
     };
   });
 }
-test('device-key journal survives restart, records offline, and never stores plaintext metadata or credentials', async () => {
+void test('device-key journal survives restart, records offline, and never stores plaintext metadata or credentials', async () => {
   await mkdir(scratch, { recursive: true });
   const output = await buildExtension({ outdir: path.join(scratch, 'extension') });
   await writeFile(
@@ -90,7 +98,7 @@ test('device-key journal survives restart, records offline, and never stores pla
     '<!doctype html><title>Protection test</title>',
   );
   const profile = path.join(scratch, 'profile');
-  let context: import('@playwright/test').BrowserContext | undefined;
+  let context: TestModule.BrowserContext | undefined;
   try {
     context = await launch(output, profile);
     let page = await testPage(context, output);
@@ -143,7 +151,9 @@ test('device-key journal survives restart, records offline, and never stores pla
       const db = await testAPI.journal.database();
       const original = await new Promise<unknown>((resolve) => {
         const request = db.transaction('recordings').objectStore('recordings').get(id);
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
       });
       const put = (value: unknown) =>
         new Promise((resolve, reject) => {
@@ -155,7 +165,7 @@ test('device-key journal survives restart, records offline, and never stores pla
       await put({ ...object(original), libraryId: 'another-library' });
       const error = await testAPI.journal.recording(text(id)).then(
         () => null,
-        (error: { message: unknown }) => error.message,
+        (error: unknown) => object(error)['message'],
       );
       await put(original);
       return { error, retained: !!(await testAPI.journal.getChunk(text(id), 0)) };
@@ -234,12 +244,14 @@ test('device-key journal survives restart, records offline, and never stores pla
       const db = await testAPI.journal.database();
       const current = await new Promise<unknown>((resolve) => {
         const request = db.transaction('chunks').objectStore('chunks').get([id, 0]);
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
       });
       const changed = structuredClone(current);
       const encrypted = object(object(changed)['encrypted']);
       const ciphertext = text(encrypted['ciphertext']);
-      encrypted['ciphertext'] = (ciphertext[0] === 'A' ? 'B' : 'A') + ciphertext.slice(1);
+      encrypted['ciphertext'] = (ciphertext.startsWith('A') ? 'B' : 'A') + ciphertext.slice(1);
       await new Promise((resolve, reject) => {
         const tx = db.transaction('chunks', 'readwrite');
         tx.objectStore('chunks').put(changed);
@@ -248,7 +260,7 @@ test('device-key journal survives restart, records offline, and never stores pla
       });
       const error = await testAPI.journal.getChunk(text(id), 0).then(
         () => null,
-        (error: { name: unknown }) => error.name,
+        (error: unknown) => object(error)['name'],
       );
       return { error, count: defined(await testAPI.journal.recording(text(id))).chunkCount };
     }, id);

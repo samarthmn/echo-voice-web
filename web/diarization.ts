@@ -91,7 +91,7 @@ export function matchSpeakers(
       speaker.weight = weight;
     }
     used.add(index);
-    labels.set(channel, 'Speaker ' + (index + 1));
+    labels.set(channel, 'Speaker ' + String(index + 1));
   }
   return labels;
 }
@@ -179,8 +179,8 @@ export function speakerPassages(
   const passages: Segment[] = [];
   for (const word of words) {
     if (!word.text.trim()) continue;
-    const start = Math.max(0, Math.min(duration, word.timestamp?.[0] ?? 0));
-    const end = Math.max(start, Math.min(duration, word.timestamp?.[1] ?? duration));
+    const start = Math.max(0, Math.min(duration, word.timestamp[0]));
+    const end = Math.max(start, Math.min(duration, word.timestamp[1]));
     let best: (Omit<Turn, 'uncertain'> & { uncertain?: boolean }) | null = null,
       amount = 0;
     for (const turn of turns) {
@@ -194,8 +194,7 @@ export function speakerPassages(
     const uncertain = !best || best.uncertain || amount < (end - start) / 2;
     const previous = passages.at(-1);
     if (
-      previous &&
-      previous.speaker === speaker &&
+      previous?.speaker === speaker &&
       previous.uncertain === uncertain &&
       start - previous.end < 1.5 &&
       end - previous.start < 30
@@ -265,7 +264,7 @@ export async function diarize<Inputs, Logits, EmbedInputs>(
     const retainedStart = offset === 0 ? 0 : 1;
     const retainedEnd = offset + windowSamples >= audio.length ? length / RATE : 9;
     for (const segment of segments) {
-      const channels = CHANNELS[segment.id] || [];
+      const channels = CHANNELS[segment.id] ?? [];
       if (!channels.length) continue;
       const identified = channels.map((channel) => labels.get(channel)).filter(Boolean);
       const attribution = {

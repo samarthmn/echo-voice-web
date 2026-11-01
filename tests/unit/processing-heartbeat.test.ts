@@ -20,7 +20,7 @@ const timers = () => {
   };
 };
 
-test('server restart reconciliation claims only pending browser jobs and stops after terminal jobs', async () => {
+void test('server restart reconciliation claims only pending browser jobs and stops after terminal jobs', async () => {
   const clock = timers(),
     requests: unknown = [],
     restored: unknown = [];
@@ -47,7 +47,7 @@ test('server restart reconciliation claims only pending browser jobs and stops a
   assert.equal(requests.length, 2);
 });
 
-test('temporary server loss preserves pending workers and retries without overlapping requests', async () => {
+void test('temporary server loss preserves pending workers and retries without overlapping requests', async () => {
   const clock = timers();
   let calls = 0,
     release: ((value: { restored?: string[] }) => void) | undefined;
@@ -71,7 +71,7 @@ test('temporary server loss preserves pending workers and retries without overla
   heartbeat.clear();
 });
 
-test('cancel all aborts the heartbeat and a late response cannot announce restored jobs', async () => {
+void test('cancel all aborts the heartbeat and a late response cannot announce restored jobs', async () => {
   const clock = timers();
   let release: ((value: { restored?: string[] }) => void) | undefined,
     signal: AbortSignal | undefined;
@@ -96,7 +96,7 @@ test('cancel all aborts the heartbeat and a late response cannot announce restor
   assert.deepEqual(restored, []);
 });
 
-test('large pending sets use bounded batches and rotate through every meeting', async () => {
+void test('large pending sets use bounded batches and rotate through every meeting', async () => {
   const clock = timers(),
     batches: string[][] = [];
   const heartbeat = createProcessingHeartbeat({

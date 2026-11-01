@@ -1,3 +1,12 @@
+import type {
+  Reply,
+  StartRequest,
+  PageMessage,
+  OffscreenMessage,
+  BackgroundMessage,
+  ObservationMessage,
+  OffscreenStatus,
+} from './messages.ts';
 import { BUILD_ID } from './build.ts';
 import { externalMessage } from './external-messages.ts';
 import {
@@ -18,7 +27,6 @@ import {
   connectedPair,
   wasRevoked,
 } from './settings.ts';
-import type { ActiveStatus } from './offscreen.ts';
 import type { ConnectionView } from './status-labels.ts';
 import type { Settled } from './upload-scheduler.ts';
 import { openEcho, deleteLocalRecording } from './library-actions.ts';
@@ -35,15 +43,15 @@ import {
   confirmConnect,
 } from './pairing.ts';
 import { captureChanged, renderBadge } from './badge.ts';
-type Owner = {
+interface Owner {
   tabId: number;
   identity: string;
   recordingId: string;
   documentId?: string | undefined;
-  gateRevision: number;
+  gateRevision?: number;
   departing?: boolean;
-};
-type OffscreenStatus = { active: ActiveStatus | null; error?: string; busy: boolean };
+}
+
 // Nothing here polls while idle: the gate runs on meeting observations and, during a
 // recording, once a second; uploads and the offscreen document follow pending audio.
 const TRANSFER_ALARM = 'echo-transfer';
@@ -53,6 +61,8 @@ const PROVIDERS: Provider[] = ['meet', 'zoom', 'teams'];
 let owner: Owner | undefined;
 let restoring: Promise<void> | undefined;
 let starting = false;
+const captureStarting = () => starting;
+const currentOwner = () => owner;
 let makingOffscreen: Promise<void> | undefined;
 let closingOffscreen: Promise<void> | undefined;
 let gateQueue: Promise<void> = Promise.resolve();
@@ -61,7 +71,9 @@ let claimTimer: ReturnType<typeof setTimeout> | undefined;
 let claiming = false;
 const observations = new Map<number, Observation>();
 function logFailure(task: string) {
-  return (error: unknown) => console.warn(`Echo: ${task} failed.`, error);
+  return (error: unknown) => {
+    console.warn(`Echo: ${task} failed.`, error);
+  };
 }
 async function hasOffscreen(): Promise<boolean> {
   return (
@@ -76,22 +88,28 @@ async function hasOffscreen(): Promise<boolean> {
 async function offscreen(): Promise<void> {
   while (closingOffscreen) await closingOffscreen;
   if (await hasOffscreen()) return;
-  if (!makingOffscreen)
-    makingOffscreen = chrome.offscreen
-      .createDocument({
-        url: 'offscreen.html',
-        reasons: ['USER_MEDIA', 'BLOBS'],
-        justification:
-          'Capture meeting audio after Start and persist local PCM for recovery and transfer.',
-      })
-      .finally(() => {
-        makingOffscreen = undefined;
-      });
+  makingOffscreen ??= chrome.offscreen
+    .createDocument({
+      url: 'offscreen.html',
+      reasons: ['USER_MEDIA', 'BLOBS'],
+      justification:
+        'Capture meeting audio after Start and persist local PCM for recovery and transfer.',
+    })
+    .finally(() => {
+      makingOffscreen = undefined;
+    });
   await makingOffscreen;
 }
-async function send(message: any) {
+async function send(
+  message: Extract<OffscreenMessage, { type: 'STATUS' }>,
+): Promise<OffscreenStatus>;
+async function send(message: OffscreenMessage): Promise<unknown>;
+async function send(message: OffscreenMessage): Promise<unknown> {
   await offscreen();
-  const reply = await chrome.runtime.sendMessage({ ...message, target: 'offscreen' });
+  const reply: Reply | undefined = await chrome.runtime.sendMessage({
+    ...message,
+    target: 'offscreen',
+  });
   if (!reply?.ok) throw new Error(reply?.error ?? 'The local audio recorder did not respond.');
   return reply.value;
 }
@@ -107,7 +125,7 @@ async function closeOffscreenIfIdle(): Promise<void> {
   const status = await offscreenStatus();
   if (!status || status.active || status.busy) return;
   // Start sets `starting` synchronously; re-check after the await, with none before closing.
-  if (starting || owner || closingOffscreen) return;
+  if (captureStarting() || currentOwner() || closingOffscreen) return;
   closingOffscreen = chrome.offscreen.closeDocument().finally(() => {
     closingOffscreen = undefined;
   });
@@ -161,7 +179,7 @@ async function sendGate() {
     !capturedOwner.departing &&
     microphoneAllowed(observation, capturedOwner.identity, capturedOwner.documentId);
   const age = observation ? Date.now() - observation.receivedAt : Infinity;
-  const response = await chrome.runtime.sendMessage({
+  const response: Reply | undefined = await chrome.runtime.sendMessage({
     target: 'offscreen',
     type: 'GATE',
     recordingId: capturedOwner.recordingId,
@@ -199,11 +217,11 @@ async function stopOwner(reason: InterruptionReason) {
 async function verifyOwnerDocument(tabId: number) {
   await restoreOwner();
   const capturedOwner = owner;
-  if (!capturedOwner || capturedOwner.tabId !== tabId) return;
+  if (capturedOwner?.tabId !== tabId) return;
   // InjectionResult.documentId comes from Chrome, without reading meeting content.
   // Loading may belong to a subframe or same-document navigation; it is not proof
   // that the original meeting document was replaced.
-  let frames: any[];
+  let frames: chrome.scripting.InjectionResult<undefined>[];
   try {
     frames = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
@@ -223,7 +241,7 @@ async function verifyOwnerDocument(tabId: number) {
   if (capturedOwner.documentId && capturedOwner.documentId !== documentId)
     await stopOwner('document-changed');
 }
-async function start(message: any) {
+async function start(message: StartRequest) {
   if (starting) throw new Error('A recording is already starting.');
   starting = true;
   try {
@@ -256,16 +274,16 @@ async function start(message: any) {
         .slice(0, 200) || 'Meeting';
     await offscreen();
     const injected = await chrome.scripting.executeScript({
-      target: { tabId: tabId },
+      target: { tabId },
       files: ['content.js'],
     });
-    const documentId = injected.find((frame: any) => frame.frameId === 0)?.documentId;
+    const documentId = injected.find((frame) => frame.frameId === 0)?.documentId;
     if (typeof documentId !== 'string')
       throw new Error('The meeting document could not be verified. Retry from your meeting tab.');
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
     const recordingId = crypto.randomUUID();
     await setOwner({
-      tabId: tabId,
+      tabId,
       identity: meeting.identity,
       recordingId,
       documentId,
@@ -285,7 +303,7 @@ async function start(message: any) {
           recordingId,
           title,
           provider: meeting.provider,
-          meetingUrl: tab.url,
+          meetingUrl: tab.url ?? '',
           consent: true,
           liveTranscription: message.liveTranscription === true,
           sampleRate: 16000,
@@ -295,8 +313,7 @@ async function start(message: any) {
         },
       });
       if (
-        !owner ||
-        owner.recordingId !== recordingId ||
+        owner?.recordingId !== recordingId ||
         meetingIdentity((await chrome.tabs.get(tabId)).url ?? '') !== meeting.identity
       ) {
         await send({
@@ -360,7 +377,7 @@ async function reportFailure(error: unknown) {
   console.warn('Echo: the recording shortcut failed.', error);
   await chrome.storage.session.set({ recorderError: (error as Error).message });
   // Chrome 127+ opens the popup from a command; older versions show the error on next open.
-  if (chrome.action.openPopup)
+  if ((chrome.action as Partial<typeof chrome.action>).openPopup)
     await chrome.action.openPopup().catch(logFailure('opening the popup'));
 }
 /**
@@ -387,7 +404,10 @@ async function syncPending(reset: boolean): Promise<void> {
 }
 /** The offscreen document finished uploading for now; retry offline Echo from an alarm. */
 async function uploadsSettled(message: Partial<Settled>) {
-  const failures = Number.isSafeInteger(message.failures) ? (message.failures as number) : 0;
+  const failures =
+    typeof message.failures === 'number' && Number.isSafeInteger(message.failures)
+      ? message.failures
+      : 0;
   await chrome.storage.session.set({ uploadFailures: failures });
   const retryAt = message.retryAt;
   if (typeof retryAt === 'number' && Number.isFinite(retryAt))
@@ -395,7 +415,7 @@ async function uploadsSettled(message: Partial<Settled>) {
   else await chrome.alarms.clear(TRANSFER_ALARM);
   await closeOffscreenIfIdle();
 }
-async function captureReported(message: any) {
+async function captureReported(message: Extract<BackgroundMessage, { type: 'CAPTURE_STATUS' }>) {
   if (typeof message.error === 'string')
     await chrome.storage.session.set({ recorderError: message.error });
   await captureChanged(message.active ?? null);
@@ -419,7 +439,7 @@ function scheduleClaim(view: PairingView): PairingView {
           claiming = false;
           scheduleClaim(next);
         },
-        (error) => {
+        (error: unknown) => {
           claiming = false;
           logFailure('connection check')(error);
         },
@@ -461,7 +481,7 @@ async function state() {
 }
 export type ExtensionState = Awaited<ReturnType<typeof state>>;
 function meetingObservation(
-  message: any,
+  message: ObservationMessage,
   sender: chrome.runtime.MessageSender,
   respond: (reply: unknown) => void,
 ): boolean {
@@ -476,8 +496,7 @@ function meetingObservation(
   )
     return false;
   const previous = observations.get(tabId);
-  if (previous && previous.documentId === sender.documentId && message.seq <= previous.seq)
-    return false;
+  if (previous?.documentId === sender.documentId && message.seq <= previous.seq) return false;
   const now = Date.now();
   const fresh =
     Number.isFinite(message.observedAt) &&
@@ -493,12 +512,12 @@ function meetingObservation(
   const run = async () => {
     await restoreOwner();
     if (message.type === 'MEETING_PAGEHIDE') {
-      if (owner && owner.tabId === tabId && owner.documentId === sender.documentId)
+      if (owner?.tabId === tabId && owner.documentId === sender.documentId)
         await stopOwner('document-changed');
       return;
     }
     if (observations.get(tabId) !== received) return;
-    if (owner && owner.tabId === tabId) {
+    if (owner?.tabId === tabId) {
       if (owner.documentId && owner.documentId !== sender.documentId) {
         await stopOwner('document-changed');
         return;
@@ -522,18 +541,24 @@ function meetingObservation(
   // A tab that is not recording stops observing, so an idle meeting never wakes this worker.
   void run()
     .catch(logFailure('meeting observation'))
-    .then(() => respond({ observe: starting || owner?.tabId === tabId }));
+    .then(() => {
+      respond({ observe: starting || owner?.tabId === tabId });
+    });
   return true;
 }
-function offscreenMessage(message: any, respond: (reply: unknown) => void): boolean {
-  if (['TRUSTED_LINK', 'TRUSTED_REVOKE'].includes(message.type)) {
+function offscreenMessage(message: BackgroundMessage, respond: (reply: unknown) => void): boolean {
+  if (message.type === 'TRUSTED_LINK' || message.type === 'TRUSTED_REVOKE') {
     const work =
       message.type === 'TRUSTED_LINK'
         ? readLink()
         : revokeCredential(message.credential, message.endpoint);
     work.then(
-      (value) => respond({ ok: true, value }),
-      (error) => respond({ ok: false, error: (error as Error).message }),
+      (value) => {
+        respond({ ok: true, value });
+      },
+      (error: unknown) => {
+        respond({ ok: false, error: (error as Error).message });
+      },
     );
     return true;
   }
@@ -543,7 +568,7 @@ function offscreenMessage(message: any, respond: (reply: unknown) => void): bool
     void uploadsSettled(message).catch(logFailure('upload scheduling'));
   return false;
 }
-async function pageAction(message: any) {
+async function pageAction(message: PageMessage) {
   if (message.type === 'STATE') return state();
   if (message.type === 'CONNECT_REQUEST') return pendingConnect();
   if (message.type === 'CONNECT_CONFIRM')
@@ -552,7 +577,7 @@ async function pageAction(message: any) {
   if (message.type === 'LIVE_PREVIEW') return livePreview(message.recordingId);
   if (message.type === 'MIC_EXCLUSION') {
     await restoreOwner();
-    if (!owner || owner.recordingId !== message.recordingId)
+    if (owner?.recordingId !== message.recordingId)
       throw new Error('That recording is no longer active.');
     const response = await send({
       type: 'MIC_EXCLUSION',
@@ -574,7 +599,7 @@ async function pageAction(message: any) {
   if (message.type === 'CONTROL' && ['pause', 'resume', 'stop'].includes(message.action)) {
     if (message.action === 'stop') return stopRecording(message.recordingId);
     await restoreOwner();
-    if (!owner || owner.recordingId !== message.recordingId)
+    if (owner?.recordingId !== message.recordingId)
       throw new Error('That recording is no longer active.');
     return send({ type: 'CONTROL', recordingId: owner.recordingId, action: message.action });
   }
@@ -591,7 +616,7 @@ async function pageAction(message: any) {
   if (message.type === 'PROVIDER_ENABLED' && PROVIDERS.includes(message.provider)) {
     await saveSettings((current) => {
       const providers = current.enabledProviders.filter((p) => p !== message.provider);
-      if (message.enabled === true) providers.push(message.provider as Provider);
+      if (message.enabled === true) providers.push(message.provider);
       return { enabledProviders: providers };
     });
     await renderBadge();
@@ -600,7 +625,7 @@ async function pageAction(message: any) {
   if (message.type === 'REMEMBER_CONSENT' && PROVIDERS.includes(message.provider)) {
     await saveSettings((current) => {
       const remembered = current.rememberedConsent.filter((p) => p !== message.provider);
-      if (message.remember === true) remembered.push(message.provider as Provider);
+      if (message.remember === true) remembered.push(message.provider);
       return { rememberedConsent: remembered };
     });
     return {};
@@ -614,32 +639,45 @@ async function pageAction(message: any) {
   }
   throw new Error('Unsupported extension action.');
 }
-chrome.runtime.onMessage.addListener((message: any, sender, respond) => {
-  if (sender.id !== chrome.runtime.id) return false;
-  const documentURL = typeof sender.url === 'string' ? (sender.url.split(/[?#]/)[0] ?? '') : '';
-  const trustedPage = [
-    chrome.runtime.getURL('popup.html'),
-    chrome.runtime.getURL('setup.html'),
-  ].includes(documentURL);
-  if (sender.tab && !trustedPage) return meetingObservation(message, sender, respond);
-  if (message.target === 'offscreen') return false;
-  if (sender.url === chrome.runtime.getURL('offscreen.html'))
-    return offscreenMessage(message, respond);
-  if (!trustedPage) return false;
-  if (
-    ['CONNECT_REQUEST', 'CONNECT_CONFIRM'].includes(message.type) &&
-    documentURL !== chrome.runtime.getURL('setup.html')
-  )
-    return false;
-  pageAction(message).then(
-    (value) => respond({ ok: true, value }),
-    (error) => respond({ ok: false, error: (error as Error).message }),
-  );
-  return true;
-});
+chrome.runtime.onMessage.addListener(
+  (
+    message: (PageMessage | OffscreenMessage | BackgroundMessage | ObservationMessage) & {
+      target?: string;
+    },
+    sender,
+    respond,
+  ) => {
+    if (sender.id !== chrome.runtime.id) return false;
+    const documentURL = typeof sender.url === 'string' ? (sender.url.split(/[?#]/)[0] ?? '') : '';
+    const trustedPage = [
+      chrome.runtime.getURL('popup.html'),
+      chrome.runtime.getURL('setup.html'),
+    ].includes(documentURL);
+    if (sender.tab && !trustedPage)
+      return meetingObservation(message as ObservationMessage, sender, respond);
+    if (message.target === 'offscreen') return false;
+    if (sender.url === chrome.runtime.getURL('offscreen.html'))
+      return offscreenMessage(message as BackgroundMessage, respond);
+    if (!trustedPage) return false;
+    if (
+      ['CONNECT_REQUEST', 'CONNECT_CONFIRM'].includes(message.type) &&
+      documentURL !== chrome.runtime.getURL('setup.html')
+    )
+      return false;
+    pageAction(message as PageMessage).then(
+      (value) => {
+        respond({ ok: true, value });
+      },
+      (error: unknown) => {
+        respond({ ok: false, error: (error as Error).message });
+      },
+    );
+    return true;
+  },
+);
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command === 'toggle-recording')
-    void toggleRecording(tab).catch((error) =>
+    void toggleRecording(tab).catch((error: unknown) =>
       reportFailure(error).catch(logFailure('reporting the shortcut failure')),
     );
 });
@@ -657,7 +695,7 @@ chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
     void renderBadge([tab]).catch(logFailure('badge update'));
   void restoreOwner()
     .then(() => {
-      if (!owner || owner.tabId !== tabId) return;
+      if (owner?.tabId !== tabId) return;
       if (change.url && meetingIdentity(tab.url ?? change.url) !== owner.identity) {
         void stopOwner('meeting-changed').catch(logFailure('stopping the recording'));
         return;
@@ -706,7 +744,7 @@ chrome.runtime.onStartup.addListener(() => {
 });
 chrome.runtime.onMessageExternal.addListener((message, sender, respond) => {
   externalMessage(message, sender)
-    .then(respond, (error) => {
+    .then(respond, (error: unknown) => {
       console.warn('Echo: rejected a message from an Echo page.', error);
       respond({ ok: false, error: (error as Error).message });
     })

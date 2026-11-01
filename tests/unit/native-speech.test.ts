@@ -31,7 +31,7 @@ async function fixture(t: test.TestContext) {
   return root;
 }
 
-test('native requests keep model choice fixed and accept only supported language and private path fields', () => {
+void test('native requests keep model choice fixed and accept only supported language and private path fields', () => {
   for (const language of ['en', 'es', 'fr', 'de', 'hi', 'ja', 'pt', 'zh', 'auto']) {
     assert.equal(
       validateRequest({
@@ -56,7 +56,7 @@ test('native requests keep model choice fixed and accept only supported language
     assert.throws(() => validateRequest(invalid));
 });
 
-test('native PCM rejects empty, unaligned and non-finite input before model execution', () => {
+void test('native PCM rejects empty, unaligned and non-finite input before model execution', () => {
   const bytes = Buffer.alloc(12);
   bytes.writeFloatLE(-0.5, 0);
   bytes.writeFloatLE(0, 4);
@@ -69,7 +69,7 @@ test('native PCM rejects empty, unaligned and non-finite input before model exec
   }
 });
 
-test('native output requires actual finite ordered word timestamps within the recorded audio', () => {
+void test('native output requires actual finite ordered word timestamps within the recorded audio', () => {
   const output = {
     text: 'Hello world',
     chunks: [
@@ -134,7 +134,7 @@ test('native output requires actual finite ordered word timestamps within the re
   );
 });
 
-test('pinned Large V3 alignment uses its original heads and actual stride-two encoder frame count', () => {
+void test('pinned Large V3 alignment uses its original heads and actual stride-two encoder frame count', () => {
   const calls: unknown[] = [],
     model = {
       _extract_token_timestamps(...args: unknown[]) {
@@ -165,7 +165,7 @@ test('pinned Large V3 alignment uses its original heads and actual stride-two en
   assert.throws(() => model._extract_token_timestamps(outputs, [], undefined), /actual audio/);
 });
 
-test('partial native weights cannot be trusted and only an explicit download removes its pinned partial files', async (t) => {
+void test('partial native weights cannot be trusted and only an explicit download removes its pinned partial files', async (t) => {
   const root = await fixture(t),
     folder = path.join(root, CHECKPOINT, REVISION, 'onnx');
   await mkdir(folder, { recursive: true });
@@ -180,7 +180,7 @@ test('partial native weights cannot be trusted and only an explicit download rem
   assert.equal(await readFile(unrelated, 'utf8'), 'keep');
 });
 
-test('native readiness rejects unqualified and escaping manifests', async (t) => {
+void test('native readiness rejects unqualified and escaping manifests', async (t) => {
   const root = await fixture(t);
   const ready = {
     version: 1,
@@ -197,7 +197,7 @@ test('native readiness rejects unqualified and escaping manifests', async (t) =>
   await assert.rejects(validateReady(root), /Invalid native/);
 });
 
-test('native weight checks reject symbolic-link ancestors before trusting or removing any target', async (t) => {
+void test('native weight checks reject symbolic-link ancestors before trusting or removing any target', async (t) => {
   const root = await fixture(t),
     external = await fixture(t);
   const folder = path.join(root, CHECKPOINT, REVISION);
@@ -211,7 +211,7 @@ test('native weight checks reject symbolic-link ancestors before trusting or rem
   );
 });
 
-test(
+void test(
   'the real native helper exits promptly when its stdin lease closes or its owner signals cancellation',
   { timeout: 10000 },
   async (t) => {
@@ -238,21 +238,23 @@ test(
         diagnostics = '';
       child.stderr.on('data', (streamValue: unknown) => {
         const chunk = bufferChunk(streamValue);
-        diagnostics += chunk;
+        diagnostics += String(chunk);
       });
       const exited = new Promise((resolve, reject) => {
         child.once('error', reject);
-        child.once('exit', (code, signal) => resolve({ code, signal }));
+        child.once('exit', (code, signal) => {
+          resolve({ code, signal });
+        });
       });
       await new Promise<void>((resolve, reject) => {
         child.stdout.on('data', (streamValue: unknown) => {
           const chunk = bufferChunk(streamValue);
-          text += chunk;
+          text += String(chunk);
           if (text.includes('\n')) resolve();
         });
-        child.once('exit', () =>
-          reject(new Error(`Helper exited before running: ${text} ${diagnostics}`)),
-        );
+        child.once('exit', () => {
+          reject(new Error(`Helper exited before running: ${text} ${diagnostics}`));
+        });
         child.once('error', reject);
       });
       const first = JSON.parse(defined(text.split('\n')[0])) as unknown;
@@ -273,7 +275,7 @@ test(
   },
 );
 
-test(
+void test(
   'a terminal helper error is flushed as JSON and its owner retains the process lease',
   { timeout: 10000 },
   async (t) => {
@@ -290,17 +292,19 @@ test(
     let text = '';
     const exited = new Promise((resolve, reject) => {
       child.once('error', reject);
-      child.once('exit', (code, signal) => resolve({ code, signal }));
+      child.once('exit', (code, signal) => {
+        resolve({ code, signal });
+      });
     });
     await new Promise<void>((resolve, reject) => {
       child.stdout.on('data', (streamValue: unknown) => {
         const chunk = bufferChunk(streamValue);
-        text += chunk;
+        text += String(chunk);
         if (text.includes('\n')) resolve();
       });
-      child.once('exit', () =>
-        reject(new Error('Helper exited before its terminal protocol message.')),
-      );
+      child.once('exit', () => {
+        reject(new Error('Helper exited before its terminal protocol message.'));
+      });
       child.once('error', reject);
     });
     assert.equal(object(JSON.parse(text.trim()) as unknown)['type'], 'error');
@@ -312,7 +316,7 @@ test(
 
 function encryptedFixture(
   audio: Buffer<ArrayBuffer>,
-  key: CipherKey | Buffer<ArrayBufferLike>,
+  key: CipherKey | Buffer,
   sizes = [audio.length],
 ) {
   const parts: Buffer[] = [Buffer.from('ECHOPCM1')];
@@ -337,7 +341,7 @@ function encryptedFixture(
   return Buffer.concat(parts);
 }
 
-test('encrypted PCM authenticates odd record boundaries and rejects tampering, truncation, swaps and plaintext', async (t) => {
+void test('encrypted PCM authenticates odd record boundaries and rejects tampering, truncation, swaps and plaintext', async (t) => {
   const root = await fixture(t),
     audioPath = path.join(root, 'audio.enc');
   const key = randomBytes(32),
@@ -375,7 +379,7 @@ test('encrypted PCM authenticates odd record boundaries and rejects tampering, t
   await assert.rejects(readEncryptedPCM({ ...request(), audioPath: path.join(root, 'link.enc') }));
 });
 
-test('private request uses a bounded stdin frame and keeps the owner lease open', async () => {
+void test('private request uses a bounded stdin frame and keeps the owner lease open', async () => {
   const input = new PassThrough(),
     result = readPrivateRequest(input);
   input.write('{"operation":"down');

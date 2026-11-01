@@ -18,7 +18,7 @@ import {
 } from '../../web/models.ts';
 import type { Speaker, Word, DiarizationSegment } from '../../web/types/domain.ts';
 
-test('catalog retires Tiny/Base while existing meetings resolve to Turbo', () => {
+void test('catalog retires Tiny/Base while existing meetings resolve to Turbo', () => {
   assert.deepEqual(
     MODELS.map((model) => model.id),
     ['onnx-community/whisper-large-v3-turbo', 'onnx-community/whisper-large-v3'],
@@ -26,7 +26,7 @@ test('catalog retires Tiny/Base while existing meetings resolve to Turbo', () =>
   assert.equal(resolveSpeechModel('onnx-community/whisper-base'), DEFAULT_SPEECH_MODEL);
   assert.equal(resolveSpeechModel('onnx-community/whisper-tiny.en'), DEFAULT_SPEECH_MODEL);
 });
-test('speech exports expose real word-alignment outputs instead of incompatible plain decoder weights', () => {
+void test('speech exports expose real word-alignment outputs instead of incompatible plain decoder weights', () => {
   assert.equal(
     speechModelConfig(DEFAULT_SPEECH_MODEL).checkpoint,
     'onnx-community/whisper-large-v3-turbo_timestamped',
@@ -35,13 +35,14 @@ test('speech exports expose real word-alignment outputs instead of incompatible 
     speechModelConfig('onnx-community/whisper-large-v3').checkpoint,
     'Xenova/whisper-large-v3',
   );
-  assert.throws(
-    () => assertWordTimestampSupport(['logits', 'present.0.decoder.key']),
-    /cannot create word timestamps/,
-  );
-  assert.doesNotThrow(() => assertWordTimestampSupport(['logits', 'cross_attentions.0']));
+  assert.throws(() => {
+    assertWordTimestampSupport(['logits', 'present.0.decoder.key']);
+  }, /cannot create word timestamps/);
+  assert.doesNotThrow(() => {
+    assertWordTimestampSupport(['logits', 'cross_attentions.0']);
+  });
 });
-test('voices retain their labels when local segmentation channels change across windows or tracks', () => {
+void test('voices retain their labels when local segmentation channels change across windows or tracks', () => {
   const speakers: Speaker[] = [];
   const a = matchSpeakers(
     [
@@ -64,7 +65,7 @@ test('voices retain their labels when local segmentation channels change across 
   assert.equal(c.get(2), 'Speaker 3');
   assert.throws(() => normalize([NaN]), /invalid/);
 });
-test('different local speakers cannot collapse into one voice even with similar embeddings', () => {
+void test('different local speakers cannot collapse into one voice even with similar embeddings', () => {
   const speakers = [{ vector: [1, 0], weight: 4 }];
   const labels = matchSpeakers(
     [
@@ -75,7 +76,7 @@ test('different local speakers cannot collapse into one voice even with similar 
   );
   assert.notEqual(labels.get(0), labels.get(1));
 });
-test('word timestamps split a sentence at a voice change and mark overlap or missing attribution for review', () => {
+void test('word timestamps split a sentence at a voice change and mark overlap or missing attribution for review', () => {
   const words: Word[] = [
     { text: ' Hello', timestamp: [0, 0.5] },
     { text: ' there', timestamp: [0.5, 1] },
@@ -99,7 +100,7 @@ test('word timestamps split a sentence at a voice change and mark overlap or mis
     ],
   );
 });
-test('overlapping segmentation windows keep one continuous timeline and detect final padded samples correctly', async () => {
+void test('overlapping segmentation windows keep one continuous timeline and detect final padded samples correctly', async () => {
   const audio = new Float32Array(19 * 16000);
   const speakers: Speaker[] = [];
   const segmentation = async () => ({ logits: {} });
@@ -127,7 +128,7 @@ test('overlapping segmentation windows keep one continuous timeline and detect f
   assert.equal(new Set(turns.map((t) => t.speaker)).size, 1);
 });
 
-test('similar but different real-world voice directions do not merge at the matching threshold', () => {
+void test('similar but different real-world voice directions do not merge at the matching threshold', () => {
   const speakers: Speaker[] = [];
   const first = matchSpeakers([{ channel: 0, vector: [1, 0], seconds: 8 }], speakers);
   const second = matchSpeakers(
@@ -139,7 +140,7 @@ test('similar but different real-world voice directions do not merge at the matc
   assert.equal(first.get(0), repeated.get(0));
 });
 
-test('the final covering window ends processing without a redundant overlapping tail', async () => {
+void test('the final covering window ends processing without a redundant overlapping tail', async () => {
   for (const seconds of [8, 9, 10, 17, 18]) {
     let calls = 0;
     const processor = Object.assign(async () => ({}), {
@@ -164,7 +165,7 @@ test('the final covering window ends processing without a redundant overlapping 
   }
 });
 
-test('shared clean speech anchors a continuing voice despite embedding variation and channel permutation', () => {
+void test('shared clean speech anchors a continuing voice despite embedding variation and channel permutation', () => {
   const speakers: Speaker[] = [];
   matchSpeakers(
     [
@@ -199,7 +200,7 @@ test('shared clean speech anchors a continuing voice despite embedding variation
   assert.equal(speakers.length, 2);
 });
 
-test('overlap anchors reject uncertain, mixed, short or conflicting evidence without collapsing local voices', () => {
+void test('overlap anchors reject uncertain, mixed, short or conflicting evidence without collapsing local voices', () => {
   const clean = [{ id: 1, start: 0, end: 10, confidence: 0.9 }];
   assert.equal(
     overlapSpeakerAnchors(clean, [{ start: 8, end: 10, speaker: 'Speaker 1', uncertain: true }], 8)
@@ -239,7 +240,7 @@ test('overlap anchors reject uncertain, mixed, short or conflicting evidence wit
   assert.equal(labels.get(0), 'Speaker 2'); // Strong voice disagreement overrules an unreliable temporal anchor.
 });
 
-test('embedding samples preserve continuous speech and exclude short, low-confidence and padded fragments', () => {
+void test('embedding samples preserve continuous speech and exclude short, low-confidence and padded fragments', () => {
   const audio = Float32Array.from({ length: 10 * 16000 }, (_, i) => i);
   const short = [
     { id: 1, start: 0, end: 0.7, confidence: 0.9 },
@@ -275,7 +276,7 @@ test('embedding samples preserve continuous speech and exclude short, low-confid
   assert.equal(speakers.length, 0);
 });
 
-test('rolling continuous speech does not create a new identity at every window boundary', async () => {
+void test('rolling continuous speech does not create a new identity at every window boundary', async () => {
   let window = 0,
     embeddings = 0;
   const processor = Object.assign(async () => ({}), {
@@ -303,7 +304,7 @@ test('rolling continuous speech does not create a new identity at every window b
   assert.equal(defined(turns.at(-1)).end, 43);
 });
 
-test('continuity anchors preserve a real voice change and recognize the first voice after a gap', async () => {
+void test('continuity anchors preserve a real voice change and recognize the first voice after a gap', async () => {
   const audio = Float32Array.from({ length: 39 * 16000 }, (_, i) => i / 16000 + 1);
   const ranges = [
     { start: 0, end: 15, voice: 0 },
@@ -345,7 +346,7 @@ test('continuity anchors preserve a real voice change and recognize the first vo
   }
 });
 
-test('a long contradictory embedding rejects a temporal anchor at measured WavLM similarities', () => {
+void test('a long contradictory embedding rejects a temporal anchor at measured WavLM similarities', () => {
   for (const cosine of [0.84, 0.894, 0.9]) {
     const speakers = [{ vector: [1, 0], weight: 2.06 }];
     const original = structuredClone(speakers[0]);
@@ -363,7 +364,7 @@ test('a long contradictory embedding rejects a temporal anchor at measured WavLM
   }
 });
 
-test('a stronger known voice overrules even a supported overlap anchor', () => {
+void test('a stronger known voice overrules even a supported overlap anchor', () => {
   const other = [0.92, Math.sqrt(1 - 0.92 ** 2)];
   const speakers = [
     { vector: [1, 0], weight: 6 },
@@ -381,7 +382,7 @@ test('a stronger known voice overrules even a supported overlap anchor', () => {
   assert.deepEqual(speakers[0], original);
 });
 
-test('a weak short anchored sample preserves continuity without updating the centroid', () => {
+void test('a weak short anchored sample preserves continuity without updating the centroid', () => {
   const speakers = [{ vector: [1, 0], weight: 6 }];
   const original = structuredClone(speakers);
   const labels = matchSpeakers(
@@ -394,7 +395,7 @@ test('a weak short anchored sample preserves continuity without updating the cen
   assert.deepEqual(speakers, original);
 });
 
-test('rejected anchors release their voice reservation before longer local samples match', () => {
+void test('rejected anchors release their voice reservation before longer local samples match', () => {
   const speakers = [{ vector: [1, 0], weight: 6 }];
   const labels = matchSpeakers(
     [
@@ -410,7 +411,7 @@ test('rejected anchors release their voice reservation before longer local sampl
   assert.equal(speakers.length, 2);
 });
 
-test('weak continuity needs the embedded contiguous segment on both sides of the overlap', async () => {
+void test('weak continuity needs the embedded contiguous segment on both sides of the overlap', async () => {
   const full = [{ id: 1, start: 0, end: 10, confidence: 0.95 }];
   const previousSplit = [
     { id: 1, start: 0, end: 7.6, confidence: 0.95 },
@@ -444,7 +445,7 @@ test('weak continuity needs the embedded contiguous segment on both sides of the
   }
 });
 
-test('disjoint utterances on reused local channels separate similar voices and recognize a return', async () => {
+void test('disjoint utterances on reused local channels separate similar voices and recognize a return', async () => {
   const windows = [
     [
       { id: 1, start: 0, end: 7.6, confidence: 0.95 },
@@ -481,7 +482,7 @@ test('disjoint utterances on reused local channels separate similar voices and r
   assert.equal(defined(turns.at(-1)).speaker, defined(turns[0]).speaker);
 });
 
-test('meeting-scale q8 variation can match across a gap while nearby distinct directions stay separate', () => {
+void test('meeting-scale q8 variation can match across a gap while nearby distinct directions stay separate', () => {
   for (const [cosine, expected] of [
     [0.92, 'Speaker 1'],
     [0.9, 'Speaker 2'],

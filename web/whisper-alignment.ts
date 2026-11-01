@@ -1,6 +1,7 @@
 import type { Word } from './types/domain.ts';
 import { record } from './guards.ts';
 /** Correct the mel-frame count passed by pinned Transformers.js 3.8.1 to DTW. */
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- Preserve the wrapped model method’s concrete input and output types when replacing it.
 export function correctWhisperAlignment<Output, Result>(
   model: {
     _extract_token_timestamps: (
@@ -35,7 +36,9 @@ export function validatedWhisperWords(value: unknown, duration: number): Word[] 
   let previous = 0;
   const words = output['chunks'].map((value: unknown): Word => {
     const word = record(value);
-    const [rawStart, rawEnd]: unknown[] = Array.isArray(word['timestamp']) ? word['timestamp'] : [];
+    const [rawStart, rawEnd]: unknown[] = Array.isArray(word['timestamp'])
+      ? (word['timestamp'] as unknown[])
+      : [];
     if (
       typeof word['text'] !== 'string' ||
       !word['text'].trim() ||
@@ -60,7 +63,7 @@ export function validatedWhisperWords(value: unknown, duration: number): Word[] 
     previous = start;
     return { text: word['text'], timestamp: [start, end] };
   });
-  if (words.length > 1 && words.every((word) => word['timestamp'][0] === word['timestamp'][1]))
+  if (words.length > 1 && words.every((word) => word.timestamp[0] === word.timestamp[1]))
     throw new Error('Word alignment collapsed; no usable word timings were returned.');
   return words;
 }

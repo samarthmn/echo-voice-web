@@ -1,3 +1,4 @@
+import type * as TestModule from '@playwright/test';
 import { bufferChunk } from '../helpers/assertions.ts';
 import { meetingRecord } from '../helpers/assertions.ts';
 import { array } from '../helpers/assertions.ts';
@@ -18,7 +19,9 @@ const data = await mkdtemp(path.join(root, 'tmp', 'echo-workspace-e2e-'));
 const socket = createServer();
 await new Promise((resolve, reject) => {
   socket.once('error', reject);
-  socket.listen(0, '127.0.0.1', () => resolve(undefined));
+  socket.listen(0, '127.0.0.1', () => {
+    resolve(undefined);
+  });
 });
 const port = serverPort(socket);
 await new Promise((resolve) => socket.close(resolve));
@@ -37,18 +40,19 @@ const server = spawn(process.env['ECHO_TEST_BINARY'] || 'target/debug/echo-serve
   },
   stdio: 'pipe',
 });
-let browser: import('@playwright/test').Browser | undefined,
-  serverError: Error,
+let browser: TestModule.Browser | undefined,
+  serverError: Error | undefined,
   serverExited = false,
   serverLog = '';
+const getServerError = () => serverError;
 const errors: string[] = [];
 server.stdout.on('data', (streamValue: unknown) => {
   const value = bufferChunk(streamValue);
-  serverLog = (serverLog + value).slice(-8000);
+  serverLog = (serverLog + String(value)).slice(-8000);
 });
 server.stderr.on('data', (streamValue: unknown) => {
   const value = bufferChunk(streamValue);
-  serverLog = (serverLog + value).slice(-8000);
+  serverLog = (serverLog + String(value)).slice(-8000);
 });
 server.once('error', (error) => {
   serverError = error;
@@ -58,8 +62,9 @@ server.once('exit', () => {
   serverExited = true;
 });
 function requireServer() {
-  if (serverError)
-    throw new Error(`The isolated workspace test server could not start: ${serverError.message}`);
+  const error = getServerError();
+  if (error)
+    throw new Error(`The isolated workspace test server could not start: ${error.message}`);
   if (serverExited)
     throw new Error(
       `The isolated workspace test server exited. Refusing to use another workspace. ${serverLog}`,
@@ -76,7 +81,9 @@ async function ready() {
         const response = await fetch(`${base}/api/storage`, { signal: AbortSignal.timeout(1000) });
         if (response.ok) storage = object((await response.json()) as unknown);
       }
-    } catch {}
+    } catch {
+      /* The isolated server may still be starting; retry until the readiness deadline. */
+    }
     requireServer();
     if (storage) {
       if (

@@ -1,3 +1,4 @@
+import type { OffscreenMessage, ProcessorReply } from './messages.ts';
 import {
   type Recording,
   MAX_BACKLOG_FRAMES,
@@ -18,7 +19,7 @@ import {
 import { transferPending } from './protocol.ts';
 import { type Settled, uploadScheduler } from './upload-scheduler.ts';
 import { connectedPair } from './settings.ts';
-type Capture = {
+interface Capture {
   id: string;
   title: string;
   context: AudioContext;
@@ -37,10 +38,11 @@ type Capture = {
   pausedAt?: number | undefined;
   waiters: Map<string, () => void>;
   sourceState: string;
-};
+}
 let active: Capture | undefined;
 let transition = false;
 let recoveryError: string | undefined;
+const currentRecoveryError = () => recoveryError;
 let transitionDone = Promise.resolve();
 let finishTransition: (() => void) | undefined;
 function beginTransition() {
@@ -55,7 +57,7 @@ function endTransition() {
   finishTransition = undefined;
 }
 function recoverInterrupted(): Promise<void> {
-  return markInterrupted().catch((error) => {
+  return markInterrupted().catch((error: unknown) => {
     console.error('Echo: unfinished recordings could not be marked interrupted.', error);
     recoveryError = `Local recovery metadata could not be updated. Saved audio is retained for export. ${(error as Error).message}`;
   });
@@ -76,9 +78,9 @@ const activeStatus = () =>
     : null;
 export type ActiveStatus = NonNullable<ReturnType<typeof activeStatus>>;
 function toBackground(message: { type: string } & Record<string, unknown>) {
-  chrome.runtime
-    .sendMessage({ ...message, target: 'background' })
-    .catch((error) => console.warn(`Echo: could not report ${message.type}.`, error));
+  chrome.runtime.sendMessage({ ...message, target: 'background' }).catch((error: unknown) => {
+    console.warn(`Echo: could not report ${message.type}.`, error);
+  });
 }
 let published: string | undefined;
 /** Report capture status for the badge and popup. Unchanged status is not resent. */
@@ -94,7 +96,9 @@ function uploadsSettled(state: Settled) {
   if (!active && !transition) toBackground({ type: 'UPLOADS_SETTLED', ...state });
 }
 const uploads = uploadScheduler(async () => {
-  const result = await transferPending(control, () => publish(undefined, true));
+  const result = await transferPending(control, () => {
+    publish(undefined, true);
+  });
   const connected = result === 'idle' && active ? await connectedPair() : undefined;
   return result === 'idle' && active && connected ? 'poll' : result;
 }, uploadsSettled);
@@ -125,11 +129,15 @@ function microphoneFailure(error: unknown): string {
 }
 function cleanup(capture: Capture) {
   capture.worklet.disconnect();
-  capture.tab.getTracks().forEach((track) => track.stop());
-  capture.mic?.getTracks().forEach((track) => track.stop());
-  capture.context
-    .close()
-    .catch((error) => console.warn('Echo: the audio context did not close.', error));
+  capture.tab.getTracks().forEach((track) => {
+    track.stop();
+  });
+  capture.mic?.getTracks().forEach((track) => {
+    track.stop();
+  });
+  capture.context.close().catch((error: unknown) => {
+    console.warn('Echo: the audio context did not close.', error);
+  });
 }
 async function fail(
   capture: Capture,
@@ -149,7 +157,7 @@ async function fail(
     interruption: interruption(reason, capture.persistedFrames),
     transferState: 'attention',
     error: message,
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     console.error('Echo: the interrupted recording could not be updated.', error);
     recoveryError = message;
   });
@@ -181,9 +189,10 @@ async function retryRecovery() {
   initializing = recoverInterrupted();
   await initializing;
   publish();
-  if (recoveryError) throw new Error(recoveryError);
+  const failure = currentRecoveryError();
+  if (failure) throw new Error(failure);
 }
-async function start(message: any) {
+async function start(message: Extract<OffscreenMessage, { type: 'START' }>) {
   await initializing;
   await retryRecovery();
   if (active || transition) throw new Error('A recording is already active.');
@@ -203,7 +212,9 @@ async function start(message: any) {
     tab = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: message.streamId },
-      } as any,
+      } as MediaTrackConstraints & {
+        mandatory: { chromeMediaSource: 'tab'; chromeMediaSourceId: string };
+      },
       video: false,
     });
     if (message.micEnabled) {
@@ -218,7 +229,7 @@ async function start(message: any) {
           video: false,
         });
       } catch (error) {
-        throw new Error(microphoneFailure(error));
+        throw new Error(microphoneFailure(error), { cause: error });
       }
     }
     context = new AudioContext();
@@ -258,7 +269,7 @@ async function start(message: any) {
       sourceState: 'Excluded · unknown mute state',
     };
     active = capture;
-    worklet.port.onmessage = ({ data }) => {
+    worklet.port.onmessage = ({ data }: MessageEvent<ProcessorReply>) => {
       if (data.type === 'flushed') {
         capture.waiters.get(data.requestId)?.();
         capture.waiters.delete(data.requestId);
@@ -272,7 +283,7 @@ async function start(message: any) {
         );
         return;
       }
-      if (data.type !== 'pcm' || capture.failed) return;
+      if (capture.failed) return;
       capture.queuedFrames += data.frames;
       if (capture.queuedFrames > MAX_BACKLOG_FRAMES) {
         void fail(
@@ -306,7 +317,7 @@ async function start(message: any) {
         if (row.totalFrames + frames >= MAX_FRAMES)
           void control(capture.id, 'stop').catch(logFailure('stopping at the recording limit'));
       });
-      capture.queue.catch((error) => {
+      capture.queue.catch((error: unknown) => {
         void fail(
           capture,
           `Local storage stopped accepting audio. Recording stopped; the committed audio prefix is retained. ${(error as Error).name === 'QuotaExceededError' ? 'Storage quota was reached.' : (error as Error).message}`,
@@ -348,11 +359,15 @@ async function start(message: any) {
     uploads.request();
     return { recordingId: row.recordingId };
   } catch (error) {
-    tab?.getTracks().forEach((track) => track.stop());
-    mic?.getTracks().forEach((track) => track.stop());
-    context
-      ?.close()
-      .catch((closeError) => console.warn('Echo: the audio context did not close.', closeError));
+    tab?.getTracks().forEach((track) => {
+      track.stop();
+    });
+    mic?.getTracks().forEach((track) => {
+      track.stop();
+    });
+    context?.close().catch((closeError: unknown) => {
+      console.warn('Echo: the audio context did not close.', closeError);
+    });
     if (active) {
       await updateRecording(active.id, {
         captureState: 'interrupted',
@@ -378,7 +393,7 @@ async function control(
   // startup, pause or resume, then re-check ownership before touching capture.
   if (action === 'stop') while (transition) await transitionDone;
   const capture = active;
-  if (!capture || capture.id !== id) return;
+  if (capture?.id !== id) return;
   if (transition) throw new Error('Recording is changing state. Retry the control.');
   beginTransition();
   try {
@@ -431,102 +446,114 @@ async function control(
   if (action === 'stop') uploads.request();
 }
 function logFailure(task: string) {
-  return (error: unknown) => console.warn(`Echo: ${task} failed.`, error);
-}
-chrome.runtime.onMessage.addListener((message: any, sender: any, respond: any) => {
-  if (
-    message.target !== 'offscreen' ||
-    sender.id !== chrome.runtime.id ||
-    sender.tab ||
-    sender.url !== chrome.runtime.getURL('background.js')
-  )
-    return false;
-  const run = async () => {
-    await initializing;
-    if (message.type === 'START') return start(message);
-    if (message.type === 'CONTROL')
-      return control(
-        message.recordingId,
-        message.action,
-        message.interrupted,
-        Object.hasOwn(INTERRUPTION_DESCRIPTIONS, message.interruptionReason)
-          ? message.interruptionReason
-          : 'capture-failed',
-      );
-    if (message.type === 'MIC_EXCLUSION') {
-      if (!active || message.recordingId !== active.id)
-        throw new Error('That recording is no longer active.');
-      if (!active.mic || active.micDisconnected)
-        throw new Error(
-          'This recording has no available microphone. Stop and start with microphone access to include it.',
-        );
-      active.micExcluded = message.excluded === true;
-      active.exclusionRevision++;
-      active.sourceState = active.micExcluded
-        ? 'Excluded · by you'
-        : 'Excluded · waiting for meeting microphone state';
-      active.worklet.port.postMessage({
-        type: 'exclude-mic',
-        recordingId: active.id,
-        exclusionRevision: active.exclusionRevision,
-        excluded: active.micExcluded,
-      });
-      publish();
-    }
-    if (
-      message.type === 'GATE' &&
-      active &&
-      message.recordingId === active.id &&
-      Number.isSafeInteger(message.gateRevision) &&
-      message.gateRevision > active.lastGateRevision
-    ) {
-      active.lastGateRevision = message.gateRevision;
-      const ttlMs = Math.max(
-        0,
-        Math.min(message.ttlMs ?? 0, (message.expiresAt ?? 0) - Date.now()),
-      );
-      const allowed =
-        message.allowed &&
-        ttlMs > 0 &&
-        !active.pausedAt &&
-        !active.micDisconnected &&
-        !active.micExcluded &&
-        !!active.mic;
-      active.sourceState = active.micDisconnected
-        ? 'Excluded · microphone disconnected; tab audio continues'
-        : active.pausedAt
-          ? 'Excluded · paused'
-          : active.micExcluded
-            ? 'Excluded · by you'
-            : allowed
-              ? 'Included · meeting microphone on'
-              : `Excluded · ${message.state ?? 'unknown mute state'}`;
-      active.worklet.port.postMessage({
-        type: 'gate',
-        recordingId: active.id,
-        gateRevision: message.gateRevision,
-        allowed,
-        ttlMs,
-        expiresAt: message.expiresAt,
-      });
-      publish();
-    }
-    if (message.type === 'SYNC')
-      await uploads.retryNow(Number.isSafeInteger(message.failures) ? message.failures : 0);
-    if (message.type === 'STATUS')
-      return {
-        active: activeStatus(),
-        error: recoveryError,
-        busy: transition || uploads.busy(),
-      };
-    return {};
+  return (error: unknown) => {
+    console.warn(`Echo: ${task} failed.`, error);
   };
-  run().then(
-    (value) => respond({ ok: true, value }),
-    (error) => respond({ ok: false, error: (error as Error).message }),
-  );
-  return true;
-});
+}
+chrome.runtime.onMessage.addListener(
+  (message: OffscreenMessage & { target?: string }, sender, respond) => {
+    if (
+      message.target !== 'offscreen' ||
+      sender.id !== chrome.runtime.id ||
+      sender.tab ||
+      sender.url !== chrome.runtime.getURL('background.js')
+    )
+      return false;
+    const run = async () => {
+      await initializing;
+      if (message.type === 'START') return start(message);
+      if (message.type === 'CONTROL')
+        return control(
+          message.recordingId,
+          message.action,
+          message.interrupted ?? false,
+          message.interruptionReason &&
+            Object.hasOwn(INTERRUPTION_DESCRIPTIONS, message.interruptionReason)
+            ? message.interruptionReason
+            : 'capture-failed',
+        );
+      if (message.type === 'MIC_EXCLUSION') {
+        if (message.recordingId !== active?.id)
+          throw new Error('That recording is no longer active.');
+        if (!active.mic || active.micDisconnected)
+          throw new Error(
+            'This recording has no available microphone. Stop and start with microphone access to include it.',
+          );
+        active.micExcluded = message.excluded;
+        active.exclusionRevision++;
+        active.sourceState = active.micExcluded
+          ? 'Excluded · by you'
+          : 'Excluded · waiting for meeting microphone state';
+        active.worklet.port.postMessage({
+          type: 'exclude-mic',
+          recordingId: active.id,
+          exclusionRevision: active.exclusionRevision,
+          excluded: active.micExcluded,
+        });
+        publish();
+      }
+      if (
+        message.type === 'GATE' &&
+        message.recordingId === active?.id &&
+        Number.isSafeInteger(message.gateRevision) &&
+        message.gateRevision > active.lastGateRevision
+      ) {
+        active.lastGateRevision = message.gateRevision;
+        const ttlMs = Math.max(
+          0,
+          Math.min(message.ttlMs ?? 0, (message.expiresAt ?? 0) - Date.now()),
+        );
+        const allowed =
+          message.allowed &&
+          ttlMs > 0 &&
+          !active.pausedAt &&
+          !active.micDisconnected &&
+          !active.micExcluded &&
+          !!active.mic;
+        active.sourceState = active.micDisconnected
+          ? 'Excluded · microphone disconnected; tab audio continues'
+          : active.pausedAt
+            ? 'Excluded · paused'
+            : active.micExcluded
+              ? 'Excluded · by you'
+              : allowed
+                ? 'Included · meeting microphone on'
+                : `Excluded · ${message.state ?? 'unknown mute state'}`;
+        active.worklet.port.postMessage({
+          type: 'gate',
+          recordingId: active.id,
+          gateRevision: message.gateRevision,
+          allowed,
+          ttlMs,
+          expiresAt: message.expiresAt,
+        });
+        publish();
+      }
+      if (message.type === 'SYNC')
+        await uploads.retryNow(
+          typeof message.failures === 'number' && Number.isSafeInteger(message.failures)
+            ? message.failures
+            : 0,
+        );
+      if (message.type === 'STATUS')
+        return {
+          active: activeStatus(),
+          error: recoveryError,
+          busy: transition || uploads.busy(),
+        };
+      return {};
+    };
+    run().then(
+      (value) => {
+        respond({ ok: true, value });
+      },
+      (error: unknown) => {
+        respond({ ok: false, error: (error as Error).message });
+      },
+    );
+    return true;
+  },
+);
 void initializing.then(() => {
   publish();
   uploads.request();

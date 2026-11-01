@@ -1,3 +1,4 @@
+import type * as TransformersModule from '@huggingface/transformers';
 import type { InferenceSession } from 'onnxruntime-node';
 import type {
   AutomaticSpeechRecognitionPipeline,
@@ -77,6 +78,7 @@ const LARGE_V3_ALIGNMENT_HEADS = [
   [25, 6],
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- Preserve the wrapped model method’s concrete input and output types when replacing it.
 export function correctPinnedAlignment<Output, Result>(model: {
   _extract_token_timestamps: (
     outputs: Output,
@@ -184,16 +186,16 @@ export function decodePCM(bytes: Buffer) {
  * reordering and trailing records all fail closed. No plaintext file is created. */
 export async function readEncryptedPCM(input: unknown) {
   const request = validateRequest(input);
-  if (request['operation'] !== 'transcribe' || typeof request['audioKey'] !== 'string')
+  if (request.operation !== 'transcribe' || typeof request.audioKey !== 'string')
     throw new Error('Native transcription requires encrypted private PCM and its stdin key.');
-  const key = Buffer.from(request['audioKey'], 'base64');
-  delete request['audioKey'];
+  const key = Buffer.from(request.audioKey, 'base64');
+  delete request.audioKey;
   let file: FileHandle | undefined, audio: Float32Array | undefined;
   try {
-    file = await open(request['audioPath'], constants.O_RDONLY | constants.O_NOFOLLOW);
+    file = await open(request.audioPath, constants.O_RDONLY | constants.O_NOFOLLOW);
     const handle = file;
     const entry = await handle.stat();
-    if (!entry.isFile() || entry.size < 8 || entry.size > 8 + request['audioBytes'] * 21)
+    if (!entry.isFile() || entry.size < 8 || entry.size > 8 + request.audioBytes * 21)
       throw new Error('Invalid encrypted native audio.');
     let position = 0;
     const exact = async (bytes: Buffer) => {
@@ -208,15 +210,15 @@ export async function readEncryptedPCM(input: unknown) {
     const header = Buffer.alloc(8);
     await exact(header);
     if (header.toString('ascii') !== 'ECHOPCM1') throw new Error('Native audio must be encrypted.');
-    audio = new Float32Array(request['audioBytes'] / 4);
+    audio = new Float32Array(request.audioBytes / 4);
     const output = Buffer.from(audio.buffer),
       length = Buffer.alloc(4);
     let count = 0,
       index = 0n;
-    while (count < request['audioBytes']) {
+    while (count < request.audioBytes) {
       await exact(length);
       const size = length.readUInt32LE();
-      if (size <= 0 || size > 65536 || count + size > request['audioBytes'])
+      if (size <= 0 || size > 65536 || count + size > request.audioBytes)
         throw new Error('Invalid encrypted native audio record.');
       const sealed = Buffer.alloc(size + 16);
       await exact(sealed);
@@ -269,20 +271,30 @@ export function readPrivateRequest(input: Readable): Promise<unknown> {
     };
     const failed = (error: unknown) => {
       cleanup();
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Preserve the original API/runtime rejection value and its identity for existing error handling.
       reject(error);
     };
-    const ended = () => failed(new Error('The native speech owner disconnected.'));
+    const ended = () => {
+      failed(new Error('The native speech owner disconnected.'));
+    };
     const data = (input: unknown) => {
-      if (!Buffer.isBuffer(input))
-        return failed(new Error('Invalid private native speech request.'));
+      if (!Buffer.isBuffer(input)) {
+        failed(new Error('Invalid private native speech request.'));
+        return;
+      }
       const chunk = input;
-      if (count + chunk.length > bytes.length)
-        return failed(new Error('Native request exceeded its limit.'));
+      if (count + chunk.length > bytes.length) {
+        failed(new Error('Native request exceeded its limit.'));
+        return;
+      }
       chunk.copy(bytes, count);
       count += chunk.length;
       const newline = bytes.subarray(0, count).indexOf(10);
       if (newline < 0) return;
-      if (newline !== count - 1) return failed(new Error('Unsupported native request data.'));
+      if (newline !== count - 1) {
+        failed(new Error('Unsupported native request data.'));
+        return;
+      }
       try {
         const value = JSON.parse(bytes.subarray(0, newline).toString('utf8')) as unknown;
         cleanup();
@@ -350,7 +362,7 @@ export async function validateReady(cache: string) {
     ready.modelId !== MODEL_ID ||
     ready.checkpoint !== CHECKPOINT ||
     ready.revision !== REVISION ||
-    ready.forwardVerified !== true ||
+    !ready.forwardVerified ||
     !Array.isArray(ready.files) ||
     !ready.files.length ||
     ready.files.length > 32
@@ -392,31 +404,32 @@ export async function validateReady(cache: string) {
 
 async function runNative(input: unknown, emit: (message: unknown) => void) {
   const request = validateRequest(input);
-  const downloading = request['operation'] === 'download';
-  await mkdir(request['cacheDir'], { recursive: true, mode: 0o700 });
+  const downloading = request.operation === 'download';
+  await mkdir(request.cacheDir, { recursive: true, mode: 0o700 });
   if (downloading) {
-    await cacheEntry(request['cacheDir'], 'ready.json');
-    await rm(path.join(request['cacheDir'], 'ready.json'), { force: true });
-    await validateWeights(request['cacheDir'], true);
+    await cacheEntry(request.cacheDir, 'ready.json');
+    await rm(path.join(request.cacheDir, 'ready.json'), { force: true });
+    await validateWeights(request.cacheDir, true);
   } else {
-    await validateReady(request['cacheDir']);
+    await validateReady(request.cacheDir);
   }
   let audio: Float32Array | undefined;
   if (!downloading) {
     audio = await readEncryptedPCM(request);
   }
   const { env, pipeline } = await import('@huggingface/transformers');
-  env.cacheDir = request['cacheDir'];
+  env.cacheDir = request.cacheDir;
   env.useFSCache = true;
   env.useBrowserCache = false;
   env.allowLocalModels = !downloading;
   env.allowRemoteModels = downloading;
   let transcriber: AutomaticSpeechRecognitionPipeline | undefined;
-  const progress = (status: string, amount = 0, file?: string) =>
+  const progress = (status: string, amount = 0, file?: string) => {
     emit({
       type: 'progress',
       progress: { status, progress: Math.max(0, Math.min(100, amount)), ...(file ? { file } : {}) },
     });
+  };
   const seen = new Map<string, number>();
   try {
     progress(downloading ? 'Downloading native Large V3' : 'Loading native Large V3');
@@ -429,7 +442,7 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
       revision: REVISION,
       device: 'cpu',
       dtype: { encoder_model: 'q8', decoder_model_merged: 'q8' },
-      cache_dir: request['cacheDir'],
+      cache_dir: request.cacheDir,
       local_files_only: !downloading,
       session_options: {
         intraOpNumThreads: 4,
@@ -439,7 +452,7 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
       },
       progress_callback: (value) => {
         if (value.status === 'progress') {
-          const percent = Math.round(value.progress ?? 0);
+          const percent = Math.round(value.progress);
           if (seen.get(value.file) === percent) return;
           seen.set(value.file, percent);
           progress('Downloading native model file', percent, value.file);
@@ -454,7 +467,7 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
       throw new Error('The pinned native model cannot create word timestamps.');
     correctPinnedAlignment(speechModel(transcriber.model));
     if (downloading) {
-      await validateWeights(request['cacheDir']);
+      await validateWeights(request.cacheDir);
       const forwarded = new Set<string>();
       for (const [name, label] of [
         ['model', 'Checking native encoder execution'],
@@ -483,13 +496,13 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
       if (!input_features || typeof input_features !== 'object')
         throw new Error('Native Large V3 did not complete its execution check.');
       const generate = speechModel(transcriber.model).generate as (options: {
-        inputs: import('@huggingface/transformers').Tensor;
+        inputs: TransformersModule.Tensor;
         language: string;
         task: string;
         max_new_tokens: number;
       }) => Promise<unknown>;
       await generate.call(transcriber.model, {
-        inputs: input_features as import('@huggingface/transformers').Tensor,
+        inputs: input_features as TransformersModule.Tensor,
         language: 'english',
         task: 'transcribe',
         max_new_tokens: 1,
@@ -501,12 +514,12 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
         modelId: MODEL_ID,
         checkpoint: CHECKPOINT,
         revision: REVISION,
-        files: await readyFiles(request['cacheDir']),
+        files: await readyFiles(request.cacheDir),
         forwardVerified: true,
       };
-      const pending = path.join(request['cacheDir'], `ready.json.pending-${process.pid}`);
+      const pending = path.join(request.cacheDir, `ready.json.pending-${process.pid}`);
       await writeFile(pending, JSON.stringify(ready), { mode: 0o600 });
-      await rename(pending, path.join(request['cacheDir'], 'ready.json'));
+      await rename(pending, path.join(request.cacheDir, 'ready.json'));
       progress('Native Large V3 ready', 100);
       return {};
     }
@@ -516,15 +529,19 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
     traceSpeechChunks(
       speechModel(transcriber.model),
       audio.length,
-      (value) => progress(value.status),
-      () => {},
+      (value) => {
+        progress(value.status);
+      },
+      () => {
+        /* No speech progress listener is needed for this model call. */
+      },
     );
     const output = await transcriber(audio, {
       return_timestamps: 'word',
       chunk_length_s: 29,
       stride_length_s: 5,
-      ...(request['language'] && request['language'] !== 'auto'
-        ? { language: LANGUAGES[request['language']], task: 'transcribe' }
+      ...(request.language && request.language !== 'auto'
+        ? { language: LANGUAGES[request.language], task: 'transcribe' }
         : {}),
     });
     const duration = audio.length / 16000;
@@ -570,7 +587,9 @@ async function main() {
     // Normal process teardown in macOS ORT can abort in a native mutex destructor
     // even after successful disposal. Preserve the lease until the owner ends it.
     await new Promise((resolve) => process.stdout.write('', resolve));
-    await new Promise(() => {});
+    await new Promise(() => {
+      /* Disposal must not replace the reported inference error. */
+    });
   }
 }
 

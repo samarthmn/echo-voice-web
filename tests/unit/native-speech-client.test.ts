@@ -12,7 +12,7 @@ import {
 } from '../../web/native-speech.ts';
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
-test('PCM transport uses exactly the subarray samples as little-endian floats', () => {
+void test('PCM transport uses exactly the subarray samples as little-endian floats', () => {
   const pcm = nativePCM(new Float32Array([99, 0.5, -0.25, 99]).subarray(1, 3));
   assert.equal(pcm.byteLength, 8);
   assert.equal(new DataView(pcm).getFloat32(0, true), 0.5);
@@ -20,7 +20,7 @@ test('PCM transport uses exactly the subarray samples as little-endian floats', 
   assert.throws(() => nativePCM(new Float32Array([NaN])), /invalid samples/);
 });
 
-test('native job progress and timestamp result use the client-owned identifier', async (t) => {
+void test('native job progress and timestamp result use the client-owned identifier', async (t) => {
   const previous = globalThis.fetch,
     requests: { url: string; options: RequestInit }[] = [],
     progress: { status: unknown }[] = [];
@@ -56,7 +56,7 @@ test('native job progress and timestamp result use the client-owned identifier',
   assert.equal(requests.length, 2);
 });
 
-test('cancelling a pending upload fences only its exact ID and ignores a late successful reply', async (t) => {
+void test('cancelling a pending upload fences only its exact ID and ignores a late successful reply', async (t) => {
   const previous = globalThis.fetch,
     deleted: (RequestInfo | URL)[] = [];
   t.after(() => {
@@ -69,7 +69,9 @@ test('cancelling a pending upload fences only its exact ID and ignores a late su
       jobId = new URL(fetchUrl(url), 'http://localhost').searchParams.get('jobId');
       // Deliberately ignore abort to model a late response after server reservation.
       return new Promise((resolve) => {
-        releaseUpload = () => resolve(Response.json({ jobId, state: 'queued' }));
+        releaseUpload = () => {
+          resolve(Response.json({ jobId, state: 'queued' }));
+        };
       });
     }
     if (options.method === 'DELETE') {
@@ -88,7 +90,7 @@ test('cancelling a pending upload fences only its exact ID and ignores a late su
   assert.ok(deleted.every((url) => url === `/api/speech/jobs/${jobId}`));
 });
 
-test('native failure and lost upload replies clean up the owned job without cancelling another tab', async (t) => {
+void test('native failure and lost upload replies clean up the owned job without cancelling another tab', async (t) => {
   const previous = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = previous;
@@ -118,7 +120,7 @@ test('native failure and lost upload replies clean up the owned job without canc
   }
 });
 
-test('cancellation during native polling suppresses a late completed result and progress', async (t) => {
+void test('cancellation during native polling suppresses a late completed result and progress', async (t) => {
   const previous = globalThis.fetch,
     progress: unknown = [],
     deleted: (RequestInfo | URL)[] = [];
@@ -137,7 +139,7 @@ test('cancellation during native polling suppresses a late completed result and 
       return Response.json({ jobId, state: 'cancelled' });
     }
     return new Promise((resolve) => {
-      finishPoll = () =>
+      finishPoll = () => {
         resolve(
           Response.json({
             state: 'completed',
@@ -145,6 +147,7 @@ test('cancellation during native polling suppresses a late completed result and 
             result: { words: [] },
           }),
         );
+      };
     });
   };
   const job = runNativeSpeech('download', undefined, 'auto', (value) =>
@@ -212,7 +215,7 @@ function clockFixture() {
   };
 }
 
-test('pagehide keeps only an owned ID and uses keepalive; reload retries until exact acknowledgement', async (t) => {
+void test('pagehide keeps only an owned ID and uses keepalive; reload retries until exact acknowledgement', async (t) => {
   const locks = memoryLocks(),
     storage = memoryStorage(),
     events = new EventTarget(),
@@ -231,18 +234,22 @@ test('pagehide keeps only an owned ID and uses keepalive; reload retries until e
         id = new URL(fetchUrl(url), 'http://localhost').searchParams.get('jobId');
         // Ownership is durable before any server reservation/upload can complete.
         assert.deepEqual(JSON.parse(defined(storage.getItem(storageKey))) as unknown, [id]);
-        return new Promise<Response>((_resolve, reject) =>
+        return new Promise<Response>((_resolve, reject) => {
           defined(options.signal).addEventListener(
             'abort',
-            () => reject(new DOMException('aborted', 'AbortError')),
+            () => {
+              reject(new DOMException('aborted', 'AbortError'));
+            },
             { once: true },
-          ),
-        );
+          );
+        });
       }
       throw new TypeError('offline');
     },
   });
-  t.after(() => client.dispose());
+  t.after(() => {
+    client.dispose();
+  });
   const job = client.run('download'),
     rejected = assert.rejects(job, (error) => object(error)['name'] === 'AbortError');
   await turn();
@@ -270,7 +277,9 @@ test('pagehide keeps only an owned ID and uses keepalive; reload retries until e
       return Response.json({ jobId: id, state: 'cancelled' });
     },
   });
-  t.after(() => afterReload.dispose());
+  t.after(() => {
+    afterReload.dispose();
+  });
   await recoveredClock.tick(0);
   assert.deepEqual(
     recovered.map((request) => request.url),
@@ -280,7 +289,7 @@ test('pagehide keeps only an owned ID and uses keepalive; reload retries until e
   assert.equal(storage.getItem(storageKey), null);
 });
 
-test('cancellation retry backs off, stops after a bounded burst and resumes on reconnection', async (t) => {
+void test('cancellation retry backs off, stops after a bounded burst and resumes on reconnection', async (t) => {
   const id = crypto.randomUUID(),
     storage = memoryStorage(),
     events = new EventTarget(),
@@ -302,7 +311,9 @@ test('cancellation retry backs off, stops after a bounded burst and resumes on r
       return Response.json({ jobId: id, state: 'cancelled' });
     },
   });
-  t.after(() => client.dispose());
+  t.after(() => {
+    client.dispose();
+  });
   await clock.tick(0);
   await clock.tick(5);
   await clock.tick(10);
@@ -316,7 +327,7 @@ test('cancellation retry backs off, stops after a bounded burst and resumes on r
   assert.equal(storage.getItem(storageKey), null);
 });
 
-test('stalled cancellation and status calls have bounded waits; completed IDs need no cleanup DELETE', async (t) => {
+void test('stalled cancellation and status calls have bounded waits; completed IDs need no cleanup DELETE', async (t) => {
   const id = crypto.randomUUID(),
     storage = memoryStorage(),
     events = new EventTarget(),
@@ -328,15 +339,19 @@ test('stalled cancellation and status calls have bounded waits; completed IDs ne
     events,
     ...clock,
     fetchRequest: async (_url, options) =>
-      new Promise<Response>((_resolve, reject) =>
+      new Promise<Response>((_resolve, reject) => {
         defined(defined(options).signal).addEventListener(
           'abort',
-          () => reject(new DOMException('aborted', 'AbortError')),
+          () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          },
           { once: true },
-        ),
-      ),
+        );
+      }),
   });
-  t.after(() => client.dispose());
+  t.after(() => {
+    client.dispose();
+  });
   await clock.tick(0);
   await clock.tick(3000);
   assert.deepEqual(JSON.parse(defined(storage.getItem(storageKey))) as unknown, [id]);
@@ -361,7 +376,9 @@ test('stalled cancellation and status calls have bounded waits; completed IDs ne
       return Response.json({ state: 'completed', result: { words: [] } });
     },
   });
-  t.after(() => completed.dispose());
+  t.after(() => {
+    completed.dispose();
+  });
   await completed.run('download');
   assert.equal(completedStorage.getItem(storageKey), null);
   assert.equal(
@@ -371,7 +388,7 @@ test('stalled cancellation and status calls have bounded waits; completed IDs ne
   );
 });
 
-test('a successful status refresh resumes exhausted owned cancellation without touching server activeJob', async (t) => {
+void test('a successful status refresh resumes exhausted owned cancellation without touching server activeJob', async (t) => {
   const id = crypto.randomUUID(),
     foreign = crypto.randomUUID(),
     storage = memoryStorage(),
@@ -395,7 +412,9 @@ test('a successful status refresh resumes exhausted owned cancellation without t
       return Response.json({ jobId: id, state: 'cancelled' });
     },
   });
-  t.after(() => client.dispose());
+  t.after(() => {
+    client.dispose();
+  });
   await clock.tick(0);
   assert.equal(clock.timers.size, 0);
   ready = true;
@@ -406,12 +425,12 @@ test('a successful status refresh resumes exhausted owned cancellation without t
   assert.equal(storage.getItem(storageKey), null);
 });
 
-test('duplicating session storage cannot cancel a live source-tab job protected by its Web Lock', async (t) => {
+void test('duplicating session storage cannot cancel a live source-tab job protected by its Web Lock', async (t) => {
   const locks = memoryLocks(),
     sourceStorage = memoryStorage(),
     sourceEvents = new EventTarget();
-  let id: string | null | undefined,
-    deletes: unknown = [];
+  let id: string | null | undefined;
+  const deletes: unknown = [];
   const source = createNativeSpeechClient({
     locks,
     storage: () => sourceStorage,
@@ -426,16 +445,20 @@ test('duplicating session storage cannot cancel a live source-tab job protected 
         array(deletes).push(url);
         return Response.json({ jobId: id, state: 'cancelled' });
       }
-      return new Promise<Response>((_resolve, reject) =>
+      return new Promise<Response>((_resolve, reject) => {
         defined(options.signal).addEventListener(
           'abort',
-          () => reject(new DOMException('aborted', 'AbortError')),
+          () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          },
           { once: true },
-        ),
-      );
+        );
+      });
     },
   });
-  t.after(() => source.dispose());
+  t.after(() => {
+    source.dispose();
+  });
   const job = source.run('download'),
     rejected = assert.rejects(job, (error) => object(error)['name'] === 'AbortError');
   await turn();
@@ -447,7 +470,9 @@ test('duplicating session storage cannot cancel a live source-tab job protected 
     events: new EventTarget(),
     fetchRequest: async () => assert.fail('A duplicate must not contact a source-owned job'),
   });
-  t.after(() => duplicate.dispose());
+  t.after(() => {
+    duplicate.dispose();
+  });
   await turn();
   assert.equal(copied.getItem(storageKey), null);
   assert.deepEqual(JSON.parse(defined(sourceStorage.getItem(storageKey))) as unknown, [id]);
@@ -459,7 +484,7 @@ test('duplicating session storage cannot cancel a live source-tab job protected 
   assert.equal(sourceStorage.getItem(storageKey), null);
 });
 
-test('cancellation before recovery or lock acquisition prevents any POST and releases acquired locks', async (t) => {
+void test('cancellation before recovery or lock acquisition prevents any POST and releases acquired locks', async (t) => {
   const locks = memoryLocks(),
     storage = memoryStorage(),
     requests: unknown = [];
@@ -472,7 +497,9 @@ test('cancellation before recovery or lock acquisition prevents any POST and rel
       assert.fail('Cancelled start must not upload');
     },
   });
-  t.after(() => client.dispose());
+  t.after(() => {
+    client.dispose();
+  });
   const job = client.run('download'),
     rejected = assert.rejects(job, (error) => object(error)['name'] === 'AbortError');
   client.cancel();

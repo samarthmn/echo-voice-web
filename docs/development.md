@@ -40,11 +40,15 @@ Knip checks entry-point exports too. `@dynamicImport` marks exports exercised by
 cargo fmt --all
 dx fmt                      # RSX; install: cargo install dioxus-cli --version ^0.7 --locked
 pnpm format                 # prettier --write (pnpm format:check to verify)
+pnpm lint                   # typed ESLint; errors and warnings both fail
+pnpm lint:fix               # apply ESLint fixes
 pnpm typecheck              # TypeScript Native 7.0.2 solution build
 pnpm typecheck:compat       # TypeScript 6.0.3 compatibility build
 ```
 
 `check.sh` skips the RSX check if `dx` is not installed.
+
+ESLint uses `eslint.config.ts` with the recommended JavaScript rules, strict and stylistic type-checked TypeScript rules, and Prettier compatibility. It lints browser, extension, script and test TypeScript plus the config itself, using each project’s TypeScript types. Run `pnpm lint` separately; it is not yet wired into `check.sh` or CI.
 
 Use Node.js 22.18 or newer, which runs `.ts` files through built-in type stripping. Browser, extension, script, and test projects extend `tsconfig.base.json`; relative TypeScript imports include `.ts`. TypeScript 6.0.3 provides the JavaScript API for editors and tooling, while `typescript-native` pins 7.0.2 for `pnpm typecheck`; `pnpm typecheck:compat` checks compiler drift. Both scripts use explicit compiler paths because both packages publish a `tsc` binary. Both compilers require declarations for cross-project references, so solution builds emit declarations and build metadata under `node_modules/.cache/tsbuild/`; esbuild owns JavaScript assets.
 

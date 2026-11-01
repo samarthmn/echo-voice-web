@@ -1,6 +1,12 @@
 import { PCMMixer, PCMResampler } from './audio.ts';
-declare const AudioWorkletProcessor: any;
-declare function registerProcessor(name: string, processor: any): void;
+import type { ProcessorMessage, ProcessorOptions } from './messages.ts';
+declare class AudioWorkletProcessor {
+  readonly port: MessagePort;
+}
+declare function registerProcessor(
+  name: string,
+  processor: new (options: ProcessorOptions) => AudioWorkletProcessor,
+): void;
 declare const sampleRate: number;
 declare const currentTime: number;
 class EchoPCMProcessor extends AudioWorkletProcessor {
@@ -10,7 +16,7 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
   private used = 0;
   private generatedFrames = 0;
   private committedFrames = 0;
-  private recordingId: string;
+  private recordingId: string | undefined;
   private gateRevision = -1;
   private micAllowed = false;
   private gateUntil = -Infinity;
@@ -18,10 +24,10 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
   private paused = false;
   private micExcluded = false;
   private exclusionRevision = -1;
-  constructor(options: any) {
+  constructor(options?: ProcessorOptions) {
     super();
     this.recordingId = options?.processorOptions?.recordingId;
-    this['port'].onmessage = ({ data }: any) => {
+    this.port.onmessage = ({ data }: MessageEvent<ProcessorMessage>) => {
       if (
         data.type === 'gate' &&
         data.recordingId === this.recordingId &&
@@ -29,7 +35,7 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
         data.gateRevision > this.gateRevision
       ) {
         this.gateRevision = data.gateRevision;
-        this.micAllowed = data.allowed === true && Number.isFinite(data.ttlMs) && data.ttlMs > 0;
+        this.micAllowed = data.allowed && Number.isFinite(data.ttlMs) && (data.ttlMs ?? 0) > 0;
         this.gateUntil = currentTime + Math.max(0, Math.min(2000, data.ttlMs ?? 0)) / 1000;
         this.gateEpoch = data.expiresAt ?? -Infinity;
       }
@@ -45,7 +51,7 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
         data.exclusionRevision > this.exclusionRevision
       ) {
         this.exclusionRevision = data.exclusionRevision;
-        this.micExcluded = data.excluded === true;
+        this.micExcluded = data.excluded;
         this.micAllowed = false;
       }
       if (
@@ -58,7 +64,7 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
       if (data.type === 'pause' || data.type === 'stop') {
         this.paused = true;
         this.flush();
-        this['port'].postMessage({ type: 'flushed', requestId: data.requestId });
+        this.port.postMessage({ type: 'flushed', requestId: data.requestId });
       }
       if (data.type === 'resume') {
         this.paused = false;
@@ -73,8 +79,8 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
     const bytes = new ArrayBuffer(this.used * 2);
     const view = new DataView(bytes);
     // used and pcm.length bound all typed-array reads below.
-    for (let i = 0; i < this.used; i++) view.setInt16(i * 2, this.pending[i]!, true);
-    this['port'].postMessage({ type: 'pcm', pcm: bytes, frames: this.used }, [bytes]);
+    for (let i = 0; i < this.used; i++) view.setInt16(i * 2, Number(this.pending[i]), true);
+    this.port.postMessage({ type: 'pcm', pcm: bytes, frames: this.used }, [bytes]);
     this.used = 0;
   }
   process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
@@ -92,15 +98,15 @@ class EchoPCMProcessor extends AudioWorkletProcessor {
         frames,
       ),
     );
-    for (let i = 0; i < pcm.length; i++) {
+    for (const sample of pcm) {
       if (this.generatedFrames - this.committedFrames >= 80000) {
         this.paused = true;
         this.micAllowed = false;
-        this['port'].postMessage({ type: 'failed', reason: 'persistence-backlog' });
+        this.port.postMessage({ type: 'failed', reason: 'persistence-backlog' });
         return true;
       }
       this.generatedFrames++;
-      this.pending[this.used++] = pcm[i]!;
+      this.pending[this.used++] = sample;
       if (this.used === this.pending.length) this.flush();
     }
     return true;

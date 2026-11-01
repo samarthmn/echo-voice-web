@@ -11,11 +11,13 @@
     "test:speakers": "node scripts/smoke-speakers.ts",
     "test:integration": "node --test --test-concurrency=1 \"tests/integration/**/*.test.ts\"",
     "test:e2e": "node scripts/test-browser.ts",
-    "format": "prettier --write \"{web,scripts,tests,extension}/**/*.{ts,json}\" \"tsconfig*.json\" \"extension/*.html\" \"public/*.html\" \"public/*.css\"",
-    "format:check": "prettier --check \"{web,scripts,tests,extension}/**/*.{ts,json}\" \"tsconfig*.json\" \"extension/*.html\" \"public/*.html\" \"public/*.css\"",
+    "format": "prettier --write \"{web,scripts,tests,extension}/**/*.{ts,json}\" \"tsconfig*.json\" \"eslint.config.ts\" \"extension/*.html\" \"public/*.html\" \"public/*.css\"",
+    "format:check": "prettier --check \"{web,scripts,tests,extension}/**/*.{ts,json}\" \"tsconfig*.json\" \"eslint.config.ts\" \"extension/*.html\" \"public/*.html\" \"public/*.css\"",
     "typecheck": "node node_modules/typescript-native/lib/tsc.js -b",
     "knip": "knip",
-    "typecheck:compat": "node node_modules/typescript/lib/tsc.js -b"
+    "typecheck:compat": "node node_modules/typescript/lib/tsc.js -b",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",
@@ -25,14 +27,20 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
+    "@eslint/js": "10.0.1",
     "@playwright/test": "^1.55.0",
     "@types/chrome": "0.3.7",
+    "@types/node": "22.18.0",
     "esbuild": "^0.25.0",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.13.0",
+    "jiti": "2.7.0",
     "knip": "6.44.0",
     "prettier": "3.6.2",
     "typescript": "6.0.3",
-    "typescript-native": "npm:typescript@7.0.2",
-    "@types/node": "22.18.0"
+    "typescript-eslint": "8.72.1",
+    "typescript-native": "npm:typescript@7.0.2"
   },
   "packageManager": "pnpm@12.11.2",
   "engines": {

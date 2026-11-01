@@ -1,3 +1,4 @@
+import type * as TestModule from '@playwright/test';
 import { bufferChunk } from '../helpers/assertions.ts';
 import { text } from '../helpers/assertions.ts';
 import { object } from '../helpers/assertions.ts';
@@ -20,7 +21,9 @@ const data = path.join(scratch, 'data');
 const socket = createServer();
 await new Promise((resolve, reject) => {
   socket.once('error', reject);
-  socket.listen(0, '127.0.0.1', () => resolve(undefined));
+  socket.listen(0, '127.0.0.1', () => {
+    resolve(undefined);
+  });
 });
 const port = serverPort(socket);
 await new Promise((resolve) => socket.close(resolve));
@@ -41,7 +44,8 @@ const child = spawn(process.env['ECHO_TEST_BINARY'] || 'target/debug/echo-server
 let exited = false,
   startupError: Error,
   log = '',
-  browser: import('@playwright/test').Browser | undefined;
+  browser: TestModule.Browser | undefined;
+const hasExited = () => exited;
 const exit = new Promise<void>((resolve) => {
   child.once('error', (error) => {
     startupError = error;
@@ -56,10 +60,13 @@ const exit = new Promise<void>((resolve) => {
 for (const output of [child.stdout, child.stderr])
   output.on('data', (streamValue: unknown) => {
     const value = bufferChunk(streamValue);
-    log = (log + value).slice(-8000);
+    log = (log + String(value)).slice(-8000);
   });
 function requireServer() {
-  if (exited) throw new Error(`Isolated Calendar server exited: ${startupError?.message || log}`);
+  if (hasExited())
+    throw new Error(
+      `Isolated Calendar server exited: ${(startupError as Error | undefined)?.message || log}`,
+    );
 }
 async function ready() {
   for (let i = 0; i < 150; i++) {
@@ -68,7 +75,9 @@ async function ready() {
     try {
       const response = await fetch(`${base}/api/storage`, { signal: AbortSignal.timeout(1000) });
       if (response.ok) storage = object((await response.json()) as unknown);
-    } catch {}
+    } catch {
+      /* The isolated server may still be starting; retry until the readiness deadline. */
+    }
     requireServer();
     if (storage) {
       assert.equal(
@@ -303,13 +312,13 @@ try {
   );
 } finally {
   await browser?.close();
-  if (!exited) child.kill('SIGINT');
+  if (!hasExited()) child.kill('SIGINT');
   await Promise.race([exit, delay(2000, undefined, { ref: false })]);
-  if (!exited) {
+  if (!hasExited()) {
     child.kill('SIGKILL');
     await Promise.race([exit, delay(1000, undefined, { ref: false })]);
   }
-  if (exited) await rm(scratch, { recursive: true, force: true });
+  if (hasExited()) await rm(scratch, { recursive: true, force: true });
   else console.error(`Isolated Calendar server did not exit; preserved ${scratch}.`);
   if (previousTmp === undefined) delete process.env['TMPDIR'];
   else process.env['TMPDIR'] = previousTmp;

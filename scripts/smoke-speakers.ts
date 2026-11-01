@@ -38,7 +38,7 @@ async function main() {
       'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/' + name + '.wav',
       { signal: AbortSignal.timeout(60000) },
     );
-    if (!response.ok) throw new Error('Speech fixture download failed: ' + response.status);
+    if (!response.ok) throw new Error('Speech fixture download failed: ' + String(response.status));
     const buffer = await response.arrayBuffer(),
       view = new DataView(buffer);
     let format, channels, rate, bits, start, length;
@@ -93,8 +93,8 @@ async function main() {
     });
     const embedProcessor = await AutoProcessor.from_pretrained(SPEAKER_MODELS.embedding);
     const model = tensorModel(embedding, 'embeddings');
-    const voiceA = (await model(await audioProcessor(embedProcessor)(a))).embeddings.data;
-    const voiceB = (await model(await audioProcessor(embedProcessor)(b))).embeddings.data;
+    const voiceA: unknown = (await model(await audioProcessor(embedProcessor)(a))).embeddings.data;
+    const voiceB: unknown = (await model(await audioProcessor(embedProcessor)(b))).embeddings.data;
     const unit = (input: unknown) => {
       const vector = numericVector(input);
       const norm = Math.hypot(...vector);
@@ -126,7 +126,9 @@ async function main() {
       measuredEmbedding,
       audioProcessor(embedProcessor),
       speakers,
-      (status) => console.log(status),
+      (status) => {
+        console.log(status);
+      },
     );
     function dominant(start: number, end: number) {
       const totals = new Map<string, number>();
@@ -151,6 +153,7 @@ async function main() {
   } finally {
     const disposed = await Promise.allSettled([segmentation?.dispose(), embedding?.dispose()]);
     const failure = disposed.find((result) => result.status === 'rejected');
+    // eslint-disable-next-line no-unsafe-finally -- Disposal failures must fail this smoke command even after a successful inference.
     if (failure) throw failure.reason;
   }
 }

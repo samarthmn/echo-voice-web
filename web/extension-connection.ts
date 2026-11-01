@@ -6,7 +6,11 @@ async function extensionMessage(message: ExtensionMessage): Promise<ExtensionRep
   const response = await fetch('/js/extension-id.json', { cache: 'no-store' });
   if (!response.ok) throw new Error('Extension ID is unavailable');
   const id = extensionId(await responseJson(response));
-  if (!globalThis.chrome?.runtime?.sendMessage) throw new Error('Extension is not installed');
+  if (
+    !(globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } }).chrome?.runtime
+      ?.sendMessage
+  )
+    throw new Error('Extension is not installed');
   return new Promise<ExtensionReply>((resolve, reject: (reason?: unknown) => void) => {
     chrome.runtime.sendMessage(id, message, (reply: unknown) => {
       const error = chrome.runtime.lastError;
@@ -15,15 +19,21 @@ async function extensionMessage(message: ExtensionMessage): Promise<ExtensionRep
         try {
           resolve(extensionReply(reply));
         } catch (error) {
+          // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Preserve the original API/runtime rejection value and its identity for existing error handling.
           reject(error);
         }
       }
     });
   });
 }
-if (globalThis.document?.body && globalThis.location) {
+if (
+  (globalThis as { document?: Document; location?: Location }).document?.body &&
+  (globalThis as { location?: Location }).location
+) {
   window.echoExtensionMessage = extensionMessage;
-  void extensionMessage({ type: 'ECHO_PRESENT', origin: location.origin }).catch(() => {});
+  void extensionMessage({ type: 'ECHO_PRESENT', origin: location.origin }).catch(() => {
+    /* Presence is best effort when the extension is unavailable. */
+  });
 
   // Native modal dialogs trap focus, restore focus on close, and handle Escape.
   const dialog = document.createElement('dialog');
@@ -38,6 +48,7 @@ if (globalThis.document?.body && globalThis.location) {
   let dismissed: string | null | undefined = null;
   let busy = false;
   let polling = false;
+  const isBusy = () => busy;
   const buttons = dialog.querySelectorAll('button');
   const invalidate = () => {
     current = null;
@@ -47,7 +58,7 @@ if (globalThis.document?.body && globalThis.location) {
     if (dialog.open) dialog.close();
   };
   const customLayerOpen = () =>
-    document.querySelector('div[role="dialog"][aria-modal="true"]') ||
+    document.querySelector('div[role="dialog"][aria-modal="true"]') ??
     (matchMedia('(max-width:700px)').matches && document.querySelector('.sidebar.open'));
   async function poll() {
     if (document.hidden || busy || polling) return;
@@ -56,14 +67,16 @@ if (globalThis.document?.body && globalThis.location) {
       const response = await fetch('/api/extensions/connections', { cache: 'no-store' });
       if (!response.ok) return;
       const data = record(await responseJson(response));
-      if (busy) return;
+      if (isBusy()) return;
       const pending = Array.isArray(data['pending']) ? data['pending'].map(connectionRequest) : [];
       if (dismissed && !pending.some((request) => request.requestId === dismissed))
         dismissed = null;
       if (current && !pending.some((request) => request.requestId === current?.requestId)) {
         invalidate();
         // A later poll presents the next request as a separate focus transition.
-        setTimeout(poll, 100);
+        setTimeout(() => {
+          void poll();
+        }, 100);
         return;
       }
       if (current && (customLayerOpen() || dialog.inert)) {
@@ -96,7 +109,10 @@ if (globalThis.document?.body && globalThis.location) {
     dismissed = current?.requestId;
     invalidate();
   });
-  dialog.addEventListener('click', async (event) => {
+  dialog.addEventListener('click', (event) => {
+    void decide(event);
+  });
+  async function decide(event: MouseEvent) {
     const action =
       event.target instanceof Element
         ? event.target.closest<HTMLElement>('[data-action]')?.dataset['action']
@@ -114,7 +130,9 @@ if (globalThis.document?.body && globalThis.location) {
       );
       if (!response.ok) throw new Error('Could not finish this request. Check Echo and try again.');
       if (action === 'approve')
-        void extensionMessage({ type: 'ECHO_APPROVED', requestId }).catch(() => {});
+        void extensionMessage({ type: 'ECHO_APPROVED', requestId }).catch(() => {
+          /* The extension also polls for completed approvals. */
+        });
       dismissed = requestId;
       invalidate();
     } catch (error) {
@@ -129,14 +147,17 @@ if (globalThis.document?.body && globalThis.location) {
       busy = false;
       void poll();
     }
-  });
+  }
   let hadCustomLayer = Boolean(customLayerOpen());
   new MutationObserver(() => {
     const hasCustomLayer = Boolean(customLayerOpen());
     if (hasCustomLayer === hadCustomLayer) return;
     hadCustomLayer = hasCustomLayer;
     if (hasCustomLayer && current && !busy) invalidate();
-    if (!hasCustomLayer) setTimeout(poll, 0);
+    if (!hasCustomLayer)
+      setTimeout(() => {
+        void poll();
+      }, 0);
   }).observe(document.body, {
     childList: true,
     subtree: true,
@@ -146,6 +167,8 @@ if (globalThis.document?.body && globalThis.location) {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) void poll();
   });
-  setInterval(poll, 3000);
+  setInterval(() => {
+    void poll();
+  }, 3000);
   void poll();
 }

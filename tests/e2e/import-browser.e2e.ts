@@ -1,3 +1,4 @@
+import type * as TestModule from '@playwright/test';
 import { browserGuards } from '../helpers/browser-guards.ts';
 import { text } from '../helpers/assertions.ts';
 import { object } from '../helpers/assertions.ts';
@@ -16,7 +17,11 @@ import { chromium } from '@playwright/test';
 await mkdir(join(process.cwd(), 'tmp'), { recursive: true });
 const data = await mkdtemp(join(process.cwd(), 'tmp', 'echo-import-browser-'));
 const reservation = createPortReservation();
-await new Promise((resolve) => reservation.listen(0, '127.0.0.1', () => resolve(undefined)));
+await new Promise((resolve) =>
+  reservation.listen(0, '127.0.0.1', () => {
+    resolve(undefined);
+  }),
+);
 const freePort = serverPort(reservation);
 await new Promise((resolve) => reservation.close(resolve));
 const port = process.env['ECHO_IMPORT_TEST_PORT'] || String(freePort);
@@ -31,7 +36,7 @@ const server = spawn(process.env['ECHO_TEST_BINARY'] || './target/debug/echo-ser
   },
   stdio: 'pipe',
 });
-let browser: import('@playwright/test').Browser | undefined;
+let browser: TestModule.Browser | undefined;
 try {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (server.exitCode !== null)
@@ -40,7 +45,9 @@ try {
       );
     try {
       if ((await fetch(`${origin}/api/health`)).ok) break;
-    } catch {}
+    } catch {
+      /* The isolated server may still be starting; retry until the readiness deadline. */
+    }
     if (attempt === 99) throw new Error('Test server did not start.');
     await delay(100);
   }
@@ -57,15 +64,17 @@ try {
   const page = await browser.newPage();
   await page.addInitScript({ content: browserGuards });
   await page.goto(origin);
-  await page.waitForFunction(() => window.echo && window.echoInference);
+  await page.waitForFunction(
+    () => typeof window.echo !== 'undefined' && typeof window.echoInference !== 'undefined',
+  );
   await page.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
   const sequences: unknown = [];
   let failOnce = true;
   await page.route('**/api/meetings/*/audio', async (route) => {
     const sequence = Number(
-      defined(route.request().postDataBuffer())
-        .toString('latin1')
-        .match(/name="sequence"\r\n\r\n(\d+)/)?.[1],
+      /name="sequence"\r\n\r\n(\d+)/.exec(
+        defined(route.request().postDataBuffer()).toString('latin1'),
+      )?.[1],
     );
     array(sequences).push(sequence);
     await page.getByRole('status').filter({ hasText: 'Saving recording…' }).waitFor();
@@ -98,8 +107,11 @@ try {
     const dataBytes = 17 * 1024 * 1024;
     const header = new ArrayBuffer(44);
     const view = new DataView(header);
-    const str = (offset: number, value: string) =>
-      [...value].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
+    const str = (offset: number, value: string) => {
+      Array.from(value).forEach((char, index) => {
+        view.setUint8(offset + index, char.charCodeAt(0));
+      });
+    };
     str(0, 'RIFF');
     view.setUint32(4, dataBytes + 36, true);
     str(8, 'WAVE');
@@ -200,12 +212,12 @@ try {
       form.append('trackId', 'auto-fixture');
       form.append('sequence', '0');
       form.append('label', title);
-      const uploaded = await fetch(`/api/meetings/${row['id']}/audio`, {
+      const uploaded = await fetch(`/api/meetings/${String(row['id'])}/audio`, {
         method: 'POST',
         body: form,
       });
       if (!uploaded.ok) throw new Error(`Fixture audio failed (${uploaded.status}).`);
-      const saved = await fetch(`/api/meetings/${row['id']}`);
+      const saved = await fetch(`/api/meetings/${String(row['id'])}`);
       if (!saved.ok) throw new Error(`Fixture read failed (${saved.status}).`);
       return testMeeting((await saved.json()) as unknown);
     };
@@ -245,7 +257,7 @@ try {
       noModelCalls,
       totalCalls: calls,
       calledIds,
-      readyId: ready['id'],
+      readyId: ready.id,
       skipped,
     };
   });

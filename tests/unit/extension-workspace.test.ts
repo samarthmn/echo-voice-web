@@ -3,7 +3,7 @@ import { defined } from '../helpers/assertions.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createExtensionImportMonitor } from '../../web/extension-workspace.ts';
-test('only complete durable imports trigger saved workflow; retries do not duplicate processing', async () => {
+void test('only complete durable imports trigger saved workflow; retries do not duplicate processing', async () => {
   let status = 'receiving';
   let calls = 0;
   const saved: unknown = [];
@@ -25,7 +25,7 @@ test('only complete durable imports trigger saved workflow; retries do not dupli
   assert.equal(calls, 1);
   monitor.stop();
 });
-test('temporary Echo outage preserves later completion and remains retryable', async () => {
+void test('temporary Echo outage preserves later completion and remains retryable', async () => {
   let offline = true;
   let saved = 0;
   let ready = 0;
@@ -50,7 +50,7 @@ test('temporary Echo outage preserves later completion and remains retryable', a
   monitor.stop();
 });
 
-test('historical imports can resume processing without save notifications or navigation on each workspace load', async () => {
+void test('historical imports can resume processing without save notifications or navigation on each workspace load', async () => {
   const ready: unknown = [];
   const saved: unknown = [];
   let changes = 0;
@@ -74,7 +74,7 @@ test('historical imports can resume processing without save notifications or nav
   assert.equal(changes, 0);
 });
 
-test('receiving imports enter the library and advance duration without triggering final processing or navigation', async () => {
+void test('receiving imports enter the library and advance duration without triggering final processing or navigation', async () => {
   let frames = 1600000;
   let final = false;
   const progress: unknown = [];
@@ -123,7 +123,7 @@ test('receiving imports enter the library and advance duration without triggerin
   assert.deepEqual(ready, ['m']);
   monitor.stop();
 });
-test('a stopped workspace monitor does not publish a late receiving response', async () => {
+void test('a stopped workspace monitor does not publish a late receiving response', async () => {
   let reply:
     | ((value: {
         recordings: { recordingId: string; meetingId: string; status: string }[];

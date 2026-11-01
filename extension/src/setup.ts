@@ -3,11 +3,16 @@ import type { ExtensionState } from './background.ts';
 import { exportParts, recording } from './storage.ts';
 import { action, element, renderRecordings, request, showError } from './ui.ts';
 import { connectionCard } from './connection-card.ts';
-type ExportPart = { blob: Blob; part: number; startFrame: number; frames: number };
+interface ExportPart {
+  blob: Blob;
+  part: number;
+  startFrame: number;
+  frames: number;
+}
 const providers = MEETING_SITES;
 let initialized = false;
 let checkingConnection = false;
-let connectRequest: { id: string; endpoint: string; previous?: string } | undefined;
+let connectRequest: { id: string; endpoint: string; previous?: string | undefined } | undefined;
 let pendingCount = 0;
 let capturing = false;
 let refreshing: Promise<void> | undefined;
@@ -32,10 +37,7 @@ async function saveChoice(patch: Partial<typeof choices>) {
 }
 async function microphonePermission(): Promise<boolean> {
   try {
-    return (
-      (await navigator.permissions.query({ name: 'microphone' as PermissionName })).state ===
-      'granted'
-    );
+    return (await navigator.permissions.query({ name: 'microphone' })).state === 'granted';
   } catch (error) {
     console.warn('Echo: microphone permission state is unavailable.', error);
     return false;
@@ -60,10 +62,9 @@ function status(text: string) {
   element('status').hidden = false;
 }
 function refresh(): Promise<void> {
-  if (!refreshing)
-    refreshing = refreshState().finally(() => {
-      refreshing = undefined;
-    });
+  refreshing ??= refreshState().finally(() => {
+    refreshing = undefined;
+  });
   return refreshing;
 }
 async function refreshState() {
@@ -189,7 +190,9 @@ element('microphone').addEventListener('click', () => {
   void action(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      stream.getTracks().forEach((track) => track.stop());
+      stream.getTracks().forEach((track) => {
+        track.stop();
+      });
       await request({ type: 'MIC_GRANTED', granted: true });
       await saveChoice({ callOnly: false });
       status('Microphone allowed. Return to your meeting tab and press Start.');

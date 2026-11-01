@@ -42,7 +42,9 @@ const emit = (name: string, detail: unknown) =>
 /** Call the local API while preserving meaningful JSON or HTTP errors. */
 async function request(path: string, init: RequestInit = {}): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 60_000);
   try {
     const response = await fetch(`/api${path}`, { ...init, signal: controller.signal });
     const value = await responseJson(response).catch(() => null);
@@ -54,7 +56,10 @@ async function request(path: string, init: RequestInit = {}): Promise<unknown> {
     return value;
   } catch (error) {
     if (errorInfo(error).name === 'AbortError')
-      throw new Error('The local server took too long to save this audio chunk. Retry the import.');
+      throw new Error(
+        'The local server took too long to save this audio chunk. Retry the import.',
+        { cause: error },
+      );
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -121,11 +126,12 @@ async function audioDuration(file: File): Promise<number> {
       };
       audio.ondurationchange = finish;
       audio.ontimeupdate = finish;
-      audio.onerror = () => resolve(0);
-      timer = setTimeout(
-        () => resolve(Number.isFinite(audio.duration) ? Math.max(0, audio.duration) : 0),
-        8000,
-      );
+      audio.onerror = () => {
+        resolve(0);
+      };
+      timer = setTimeout(() => {
+        resolve(Number.isFinite(audio.duration) ? Math.max(0, audio.duration) : 0);
+      }, 8000);
       audio.src = url;
     });
   } finally {
@@ -191,11 +197,13 @@ async function finishImport(session: ImportSession): Promise<Meeting> {
       await request(
         `/meetings/${session.meeting.id}`,
         json('PATCH', { status: 'error', error: message }),
-      ).catch(() => {});
+      ).catch(() => {
+        /* The original import error remains the user-visible failure. */
+      });
       if (errorInfo(error).status === 404) imports.delete(session.fingerprint);
       uploadProgress(session, 'Import interrupted', message);
       emit('echo-library-changed', { meetingId: session.meeting.id });
-      throw new Error(message);
+      throw new Error(message, { cause: error });
     } finally {
       session.running = null;
     }
@@ -210,7 +218,7 @@ async function upload(
   const file = input?.files?.[0];
   if (!file) return;
   // Copy the File reference, then reset the existing input so choosing it again can resume.
-  if (input) input.value = '';
+  input.value = '';
   if (!file.size) throw new Error('This audio file is empty. Choose another recording.');
   if (file.size > 500 * 1024 * 1024)
     throw new Error('This recording is larger than 500 MB. Split it into smaller files first.');
@@ -260,7 +268,7 @@ async function upload(
 export async function autoTranscribeMeeting(meeting: Meeting): Promise<void> {
   if (!automaticTranscriptionEligible(meeting)) return;
   const key = `${meeting.id}:${meeting.tracks.map((track) => `${track.id}:${track.bytes}`).join(',')}`;
-  if (autoHandled.has(key) || meeting.transcripts?.length) return;
+  if (autoHandled.has(key) || meeting.transcripts.length) return;
   autoHandled.add(key);
   const token = automaticGeneration;
   pendingAutomatic.add(meeting.id);
@@ -279,7 +287,9 @@ export async function autoTranscribeMeeting(meeting: Meeting): Promise<void> {
       return;
     }
     const job = automaticQueue
-      .catch(() => {})
+      .catch(() => {
+        /* A new import has no automatic transcription to suppress. */
+      })
       .then(async () => {
         if (token !== automaticGeneration) return;
         const current = parseMeeting(await request(`/meetings/${encodeURIComponent(meeting.id)}`));
@@ -311,6 +321,7 @@ window.addEventListener('echo-extension-import-ready', (event) => {
 window.addEventListener('beforeunload', (event) => {
   if (imports.size || startingImports.size) {
     event.preventDefault();
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- Older Chromium requires returnValue as well as preventDefault for the unsaved-work prompt.
     event.returnValue = '';
   }
 });
@@ -324,7 +335,7 @@ window.echo = {
       : Promise.reject(new Error('Choose the original audio file again to restart this import.'));
   },
   async testMicrophone() {
-    if (!navigator.mediaDevices?.getUserMedia)
+    if (!(navigator as Partial<Navigator>).mediaDevices?.getUserMedia)
       throw new Error('Microphone access needs localhost or HTTPS and a supported browser.');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     try {
@@ -332,7 +343,9 @@ window.echo = {
         .filter((device) => device.kind === 'audioinput')
         .map((device) => ({ id: device.deviceId, label: device.label || 'Microphone' }));
     } finally {
-      stream.getTracks().forEach((track) => track.stop());
+      stream.getTracks().forEach((track) => {
+        track.stop();
+      });
     }
   },
   date(

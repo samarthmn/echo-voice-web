@@ -9,7 +9,7 @@ const notes = await import('../../web/notes.ts');
 const files = await import('../../web/files.ts');
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
-test('notes pulls retain streamed progress across page visits and reuse one active request', async () => {
+void test('notes pulls retain streamed progress across page visits and reuse one active request', async () => {
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   const requests: unknown = [];
   globalThis.fetch = async (_url, options) => {
@@ -64,7 +64,7 @@ test('notes pulls retain streamed progress across page visits and reuse one acti
   }
 });
 
-test('notes pulls reject truncated streams without success and retain failure for returning pages', async () => {
+void test('notes pulls reject truncated streams without success and retain failure for returning pages', async () => {
   globalThis.fetch = async () =>
     new Response('{"status":"pulling weights","completed":1,"total":2}\n');
   await assert.rejects(notes.downloadModel('qwen2.5:3b'), /before Ollama confirmed success/);
@@ -75,7 +75,7 @@ test('notes pulls reject truncated streams without success and retain failure fo
   assert.equal(notes.getDownloadState().status, 'completed');
 });
 
-test('notes pulls preserve server errors and streamed Ollama errors', async () => {
+void test('notes pulls preserve server errors and streamed Ollama errors', async () => {
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ error: 'Ollama is not reachable.' }), { status: 503 });
   await assert.rejects(notes.downloadModel('qwen2.5:3b'), /Ollama is not reachable/);
@@ -113,7 +113,7 @@ function picker() {
   return inputs;
 }
 
-test('JSON picker stays connected through selection and removes the node after successful parsing', async () => {
+void test('JSON picker stays connected through selection and removes the node after successful parsing', async () => {
   const inputs = picker();
   const selected = files.chooseJsonFile();
   const input = inputs[0];
@@ -126,7 +126,7 @@ test('JSON picker stays connected through selection and removes the node after s
   assert.equal(defined(input).isConnected, false);
 });
 
-test('JSON picker cancels cleanly and removes oversized or invalid files', async () => {
+void test('JSON picker cancels cleanly and removes oversized or invalid files', async () => {
   const inputs = picker();
   const cancelled = files.chooseJsonFile();
   defined(inputs[0]).dispatchEvent(new Event('cancel'));
@@ -152,7 +152,7 @@ test('JSON picker cancels cleanly and removes oversized or invalid files', async
   assert.equal(defined(inputs[2]).isConnected, false);
 });
 
-test('JSON picker removes its temporary input when the document leaves', async () => {
+void test('JSON picker removes its temporary input when the document leaves', async () => {
   const inputs = picker();
   const selected = files.chooseJsonFile();
   window.dispatchEvent(new Event('pagehide'));

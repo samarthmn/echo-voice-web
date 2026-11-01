@@ -22,10 +22,11 @@ export async function jsonRequest(
   path: string,
   options: RequestInit = {},
   credential?: string,
-): Promise<any> {
+): Promise<unknown> {
   const headers = new Headers(options.headers);
   if (credential) headers.set('Authorization', `Bearer ${credential}`);
-  const runtime = (globalThis as any).chrome?.runtime;
+  const runtime = (globalThis as { chrome?: { runtime?: { getURL?: (path: string) => string } } })
+    .chrome?.runtime;
   if (runtime?.getURL) {
     const origin = runtime.getURL('').replace(/\/$/, '');
     if (!/^chrome-extension:\/\/[a-p]{32}$/.test(origin))
@@ -50,7 +51,7 @@ export async function jsonRequest(
   }
   if (!response.ok) {
     if (response.status === 401 && credential) await revokeCredential(credential, endpoint);
-    const errorBody = await response.json().catch(() => null);
+    const errorBody = (await response.json().catch(() => null)) as { error?: unknown } | null;
     const reason = typeof errorBody?.error === 'string' ? errorBody.error.slice(0, 200) : '';
     throw new ProtocolError(
       response.status === 401
@@ -60,19 +61,35 @@ export async function jsonRequest(
     );
   }
   if (response.status === 204) return {};
-  const body = await response.json();
-  if (body.protocolVersion !== undefined && ![1, 2].includes(body.protocolVersion))
+  const body = (await response.json()) as { protocolVersion?: unknown };
+  if (
+    body.protocolVersion !== undefined &&
+    body.protocolVersion !== 1 &&
+    body.protocolVersion !== 2
+  )
     throw new ProtocolError('This Echo version is incompatible. Audio is retained.');
   return body;
 }
-function checkStatus(status: any, row: Recording, pair: Pair): void {
+interface RecordingStatus {
+  recordingId: string;
+  libraryId: string;
+  status: string;
+  nextSequence: number;
+  totalFrames: number;
+  meetingId?: string;
+  controls?: ({ commandId?: string; action?: string } | null)[];
+}
+function checkStatus(value: unknown, row: Recording, pair: Pair): asserts value is RecordingStatus {
+  const status = value as Partial<RecordingStatus> | null;
   if (
-    status.recordingId !== row.recordingId ||
+    status?.recordingId !== row.recordingId ||
     status.libraryId !== pair.libraryId ||
-    !['receiving', 'complete', 'deleted'].includes(status.status) ||
+    !['receiving', 'complete', 'deleted'].some((state) => state === status.status) ||
+    typeof status.nextSequence !== 'number' ||
     !Number.isSafeInteger(status.nextSequence) ||
     status.nextSequence < 0 ||
     status.nextSequence > row.chunkCount ||
+    typeof status.totalFrames !== 'number' ||
     !Number.isSafeInteger(status.totalFrames) ||
     status.totalFrames < 0 ||
     status.totalFrames > row.totalFrames
@@ -101,7 +118,9 @@ async function transferLocked(
   onControl: (id: string, action: string) => Promise<void>,
 ): Promise<boolean> {
   if (row.receipt) return false;
-  const companion = await jsonRequest(pair.endpoint, '/connection', {}, pair.credential);
+  const companion = (await jsonRequest(pair.endpoint, '/connection', {}, pair.credential)) as {
+    libraryId?: unknown;
+  };
   if (companion.libraryId !== pair.libraryId)
     throw new ProtocolError(
       'Echo returned an inconsistent library acknowledgement. Audio is retained.',
@@ -135,6 +154,7 @@ async function transferLocked(
     if (
       !control ||
       typeof control.commandId !== 'string' ||
+      typeof control.action !== 'string' ||
       !['pause', 'resume', 'stop'].includes(control.action)
     )
       continue;

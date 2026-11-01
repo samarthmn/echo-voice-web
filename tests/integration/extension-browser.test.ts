@@ -1,3 +1,5 @@
+import type * as TestModule from '@playwright/test';
+import type * as CoreModule from '../../extension/src/core.ts';
 import { bufferChunk } from '../helpers/assertions.ts';
 import { array } from '../helpers/assertions.ts';
 import type { Recording } from '../../extension/src/core.ts';
@@ -35,7 +37,7 @@ const privateHarness = defined(
     })
   ).outputFiles[0],
 ).text;
-test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through interruption', async () => {
+void test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through interruption', async () => {
   await mkdir(scratch, { recursive: true });
   const output = await buildExtension({ outdir: path.join(scratch, 'unpacked') });
   const executablePath =
@@ -44,7 +46,7 @@ test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through in
       ? '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
       : '/usr/bin/chromium');
   await access(executablePath);
-  let context: import('@playwright/test').BrowserContext | undefined;
+  let context: TestModule.BrowserContext | undefined;
   try {
     // Chromium's Unix singleton socket must fit sun_path. Keep its random temp
     // directory directly under project tmp rather than this deeper fixture path.
@@ -316,7 +318,7 @@ test('unpacked MV3 runtime and real IndexedDB preserve durable prefix through in
     await rm(scratch, { recursive: true, force: true, maxRetries: 3 });
   }
 });
-test('actual Echo server and unpacked extension pair, approve, ingest chunks and verify completion', async () => {
+void test('actual Echo server and unpacked extension pair, approve, ingest chunks and verify completion', async () => {
   const runRoot = path.join(project, 'tmp', 'extension-runtime', 'wire');
   await mkdir(runRoot, { recursive: true });
   process.env['TMPDIR'] = runRoot;
@@ -326,7 +328,9 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
   const socket = createServer();
   await new Promise((resolve, reject) => {
     socket.once('error', reject);
-    socket.listen(0, '127.0.0.1', () => resolve(undefined));
+    socket.listen(0, '127.0.0.1', () => {
+      resolve(undefined);
+    });
   });
   const port = serverPort(socket);
   await new Promise((resolve) => socket.close(resolve));
@@ -359,7 +363,7 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
       const bytes = bufferChunk(streamValue);
       logs = (logs + bytes.toString()).slice(-4000);
     });
-  let context: import('@playwright/test').BrowserContext | undefined;
+  let context: TestModule.BrowserContext | undefined;
   const api = async (route: string, method = 'GET', body?: unknown) => {
     const response = await fetch(base + route, {
       method,
@@ -566,10 +570,10 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
     }, pairCode.libraryId);
     let receipt:
       | {
-          receipt: import('../../extension/src/core.ts').Recording['receipt'];
+          receipt: CoreModule.Recording['receipt'];
           state: string;
           error: string | undefined;
-          interruption: import('../../extension/src/core.ts').Recording['interruption'];
+          interruption: CoreModule.Recording['interruption'];
           chunkCount: number;
           totalFrames: number;
           pcmRemoved: boolean;
@@ -642,7 +646,7 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
         // Hold the same cross-context transfer lock while modeling a completed
         // server response whose independent verification has not reached Chrome.
         await new Promise<void>((resolve) => {
-          navigator.locks.request(`echo-recording:${id}`, async () => {
+          void navigator.locks.request(`echo-recording:${id}`, async () => {
             resolve();
             await new Promise<void>((release) => {
               globalThis.releaseCorruptionTransfer = release;
@@ -775,7 +779,7 @@ test('actual Echo server and unpacked extension pair, approve, ingest chunks and
       await journal.appendChunk(id, 0, new ArrayBuffer(32000));
       return id;
     }, pairCode.libraryId);
-    await api(`/api/extensions/connections/${installationId}`, 'DELETE');
+    await api(`/api/extensions/connections/${String(installationId)}`, 'DELETE');
     // Echo's 401 clears the credential; every local recording stays readable and pending.
     const afterRevoke = await page.evaluate(async (id) => {
       function object(v: unknown): Record<string, unknown> {

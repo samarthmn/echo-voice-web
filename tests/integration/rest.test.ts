@@ -37,13 +37,13 @@ function rawGet(
         const p = bufferChunk(streamValue);
         return parts.push(p);
       });
-      response.on('end', () =>
+      response.on('end', () => {
         resolve({
           status: response.statusCode,
           headers: response.headers,
           text: Buffer.concat(parts).toString(),
-        }),
-      );
+        });
+      });
     });
     request.on('error', reject);
     request.end();
@@ -79,11 +79,11 @@ async function launch(
   });
   child.stdout.on('data', (streamValue: unknown) => {
     const chunk = bufferChunk(streamValue);
-    logs += chunk;
+    logs += String(chunk);
   });
   child.stderr.on('data', (streamValue: unknown) => {
     const chunk = bufferChunk(streamValue);
-    logs += chunk;
+    logs += String(chunk);
   });
   const base = `http://127.0.0.1:${port}`;
   for (let attempt = 0; attempt < 80; attempt++) {
@@ -94,7 +94,9 @@ async function launch(
         signal: AbortSignal.timeout(200),
       });
       if (response.ok) return { child, base, logs: () => logs };
-    } catch {}
+    } catch {
+      /* The isolated server may still be starting; retry until the readiness deadline. */
+    }
     await pause(100);
   }
   child.kill('SIGKILL');
@@ -105,7 +107,7 @@ async function stop(
     | { child: ChildProcessByStdio<null, Readable, Readable>; base: string; logs: () => string }
     | undefined,
 ) {
-  if (!server || server.child.exitCode !== null) return;
+  if (server?.child.exitCode !== null) return;
   const exited: Promise<unknown[]> = once(server.child, 'exit');
   server.child.kill('SIGINT');
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -138,7 +140,7 @@ function wavFixture() {
   return data;
 }
 
-test('encrypted backup moves to a different library key only with its recovery phrase', async () => {
+void test('encrypted backup moves to a different library key only with its recovery phrase', async () => {
   const scratch = resolve('tmp');
   await mkdir(scratch, { recursive: true });
   const first = await mkdtemp(join(scratch, 'recovery-from-'));
@@ -217,7 +219,7 @@ test('encrypted backup moves to a different library key only with its recovery p
   }
 });
 
-test(
+void test(
   'real Rust REST server preserves meeting lifecycle, audio, history, privacy and backups',
   { timeout: 60000 },
   async () => {
@@ -298,7 +300,7 @@ test(
         status: 201,
       });
       assert.equal(word['enabled'], true);
-      await api(`/vocabulary/${word['id']}`, {
+      await api(`/vocabulary/${String(word['id'])}`, {
         method: 'PATCH',
         body: { aliases: ['echo boys', 'echo voice'] },
       });
@@ -321,7 +323,7 @@ test(
         form.append('trackId', 'room');
         form.append('label', 'Room microphone');
         form.append('sequence', String(sequence));
-        return api(`/meetings/${id}/audio`, { method: 'POST', body: form, status });
+        return api(`/meetings/${String(id)}/audio`, { method: 'POST', body: form, status });
       };
       const firstUpload = await upload(wav, 0);
       assert.deepEqual(await upload(wav, 0), firstUpload);
@@ -329,10 +331,10 @@ test(
       await upload(tail, 2, 409);
       const track = await upload(tail, 1);
       assert.equal(track['bytes'], wav.length + tail.length);
-      const fullAudio = await fetch(`${server.base}${track['url']}`);
+      const fullAudio = await fetch(`${server.base}${String(track['url'])}`);
       assert.equal(fullAudio.status, 200);
       assert.deepEqual(Buffer.from(await fullAudio.arrayBuffer()), Buffer.concat([wav, tail]));
-      const ranged = await fetch(`${server.base}${track['url']}`, {
+      const ranged = await fetch(`${server.base}${String(track['url'])}`, {
         headers: { Range: 'bytes=60-70' },
       });
       assert.equal(ranged.status, 206);
@@ -341,15 +343,15 @@ test(
         Buffer.from(await ranged.arrayBuffer()),
         Buffer.concat([wav, tail]).subarray(60, 71),
       );
-      const invalidRange = await fetch(`${server.base}${track['url']}`, {
+      const invalidRange = await fetch(`${server.base}${String(track['url'])}`, {
         headers: { Range: 'bytes=999-' },
       });
       assert.equal(invalidRange.status, 416);
       assert.equal(invalidRange.headers.get('content-range'), `bytes */${track['bytes']}`);
-      const download = await fetch(`${server.base}${track['url']}?download=1`);
+      const download = await fetch(`${server.base}${String(track['url'])}?download=1`);
       assert.match(defined(download.headers.get('content-disposition')), /Room-microphone.wav/);
       await download.arrayBuffer();
-      const first = await api(`/meetings/${id}/transcripts`, {
+      const first = await api(`/meetings/${String(id)}/transcripts`, {
         method: 'POST',
         body: {
           model: 'local-test-model',
@@ -377,9 +379,9 @@ test(
           },
         ],
       };
-      const withNotes = await api(`/meetings/${id}/notes`, { method: 'POST', body: notes });
+      const withNotes = await api(`/meetings/${String(id)}/notes`, { method: 'POST', body: notes });
       assert.equal(array(withNotes['notes']).length, 1);
-      await api(`/meetings/${id}/notes`, {
+      await api(`/meetings/${String(id)}/notes`, {
         method: 'POST',
         body: {
           ...notes,
@@ -387,7 +389,7 @@ test(
         },
         status: 400,
       });
-      const edited = await api(`/meetings/${id}/transcripts`, {
+      const edited = await api(`/meetings/${String(id)}/transcripts`, {
         method: 'POST',
         body: {
           model: 'local-test-model',
@@ -407,22 +409,22 @@ test(
         object(array(object(array(edited['transcripts'])[0])['passages'])[0])['text'],
         'We will ship Friday.',
       );
-      await api(`/meetings/${id}`, {
+      await api(`/meetings/${String(id)}`, {
         method: 'PATCH',
         body: { activeTranscriptId: 'another-meeting-version' },
         status: 400,
       });
-      const marked = await api(`/meetings/${id}/moments`, {
+      const marked = await api(`/meetings/${String(id)}/moments`, {
         method: 'POST',
         body: { time: 1, label: 'Release date', passageId: 'p1', kind: 'highlight' },
       });
       const moment = object(marked['moments'])[0];
-      const renamed = await api(`/meetings/${id}/moments/${object(moment)['id']}`, {
+      const renamed = await api(`/meetings/${String(id)}/moments/${String(object(moment)['id'])}`, {
         method: 'PATCH',
         body: { label: 'Verify release date' },
       });
       assert.equal(object(object(renamed['moments'])[0])['label'], 'Verify release date');
-      await api(`/meetings/${id}`, {
+      await api(`/meetings/${String(id)}`, {
         method: 'PATCH',
         body: {
           duration: 3,
@@ -430,18 +432,20 @@ test(
           gaps: [{ start: 2, end: 3, reason: 'Microphone muted' }],
         },
       });
-      await api(`/meetings/${id}`, {
+      await api(`/meetings/${String(id)}`, {
         method: 'PATCH',
         body: { liveTranscription: true },
         status: 409,
       });
       const markdown = await (
-        await fetch(`${server.base}/api/meetings/${id}/export?format=md`)
+        await fetch(`${server.base}/api/meetings/${String(id)}/export?format=md`)
       ).text();
       assert.match(markdown, /earlier transcript version/);
       assert.match(markdown, /Verify release date/);
       assert.match(markdown, /Microphone muted/);
-      const srt = await (await fetch(`${server.base}/api/meetings/${id}/export?format=srt`)).text();
+      const srt = await (
+        await fetch(`${server.base}/api/meetings/${String(id)}/export?format=srt`)
+      ).text();
       assert.match(srt, /00:00:00,000 --> 00:00:02,000/);
       assert.match(srt, /Asha: We will ship next Friday/);
       await api('/storage/export', { status: 409 });
@@ -454,19 +458,19 @@ test(
       assert.equal(array(object(backup)['audio']).length, 2);
       assert.equal(object(object(backup)['settings'])['ollamaUrl'], undefined);
       await api('/storage/import', { method: 'POST', body: backup, status: 409 });
-      await api(`/meetings/${id}`, { method: 'PATCH', body: { status: 'recording' } });
-      await api(`/meetings/${id}`, { method: 'DELETE', status: 409 });
+      await api(`/meetings/${String(id)}`, { method: 'PATCH', body: { status: 'recording' } });
+      await api(`/meetings/${String(id)}`, { method: 'DELETE', status: 409 });
       await assert.rejects(() => launch(directory, port + 1), /Another Echo Voice server/);
-      assert.equal((await api(`/meetings/${id}`))['status'], 'recording');
+      assert.equal((await api(`/meetings/${String(id)}`))['status'], 'recording');
       await stop(server);
       server = await launch(directory, port);
-      const recovered = await api(`/meetings/${id}`);
+      const recovered = await api(`/meetings/${String(id)}`);
       assert.equal(recovered['status'], 'interrupted');
       assert.equal(array(recovered['transcripts']).length, 2);
       assert.equal(object(object(recovered['tracks'])[0])['bytes'], track['bytes']);
       assert.match(text(recovered['error']), /interrupted/i);
-      await api(`/meetings/${id}`, { method: 'DELETE' });
-      await api(`/vocabulary/${word['id']}`, { method: 'DELETE' });
+      await api(`/meetings/${String(id)}`, { method: 'DELETE' });
+      await api(`/vocabulary/${String(word['id'])}`, { method: 'DELETE' });
       await assert.rejects(access(join(directory, 'audio', text(id))));
       const unsafePath = structuredClone(backup);
       object(object(object(unsafePath)['meetings'])[0])['id'] = '../credentials';
@@ -485,11 +489,11 @@ test(
       const imported = await api('/storage/import', { method: 'POST', body: encryptedBackup });
       assert.equal(imported['meetings'], 1);
       assert.equal(imported['vocabulary'], 1);
-      const restored = await api(`/meetings/${id}`);
+      const restored = await api(`/meetings/${String(id)}`);
       assert.equal(array(restored['transcripts']).length, 2);
       assert.equal(array(restored['notes']).length, 1);
       assert.equal(array(restored['moments']).length, 1);
-      const restoredAudio = await fetch(`${server.base}${track['url']}`);
+      const restoredAudio = await fetch(`${server.base}${String(track['url'])}`);
       assert.deepEqual(Buffer.from(await restoredAudio.arrayBuffer()), Buffer.concat([wav, tail]));
       const storage = await api('/storage');
       assert.equal(storage['meetings'], 1);
@@ -534,20 +538,22 @@ test(
       large.writeUInt32LE(large.length - 44, 40);
       const largeForm = new FormData();
       largeForm.append('file', new Blob([large], { type: 'audio/wav' }), 'longer.wav');
-      const largeTrack = await api(`/meetings/${largeMeeting['id']}/audio`, {
+      const largeTrack = await api(`/meetings/${String(largeMeeting['id'])}/audio`, {
         method: 'POST',
         body: largeForm,
         status: 201,
       });
       assert.equal(largeTrack['bytes'], large.length);
       const largeBackup = await api('/storage/export');
-      await api(`/meetings/${id}`, { method: 'DELETE' });
-      await api(`/meetings/${largeMeeting['id']}`, { method: 'DELETE' });
-      await api(`/vocabulary/${word['id']}`, { method: 'DELETE' });
+      await api(`/meetings/${String(id)}`, { method: 'DELETE' });
+      await api(`/meetings/${String(largeMeeting['id'])}`, { method: 'DELETE' });
+      await api(`/vocabulary/${String(word['id'])}`, { method: 'DELETE' });
       const importedLarge = await api('/storage/import', { method: 'POST', body: largeBackup });
       assert.equal(importedLarge['meetings'], 2);
       assert.equal(
-        object(object((await api(`/meetings/${largeMeeting['id']}`))['tracks'])[0])['bytes'],
+        object(object((await api(`/meetings/${String(largeMeeting['id'])}`))['tracks'])[0])[
+          'bytes'
+        ],
         large.length,
       );
       assert.notEqual(

@@ -36,12 +36,13 @@ export function traceSpeechSessions(
     const run = session.run.bind(session);
     session.run = (...args) => {
       onPhase(phase, name);
-      return Reflect.apply(run, session, args) as ReturnType<typeof run>;
+      return Reflect.apply(run, session, args);
     };
   }
 }
 
 /** Observe actual Whisper generation calls; v3 has no pipeline chunk callback. */
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- Preserve the wrapped model method’s concrete input and output types when replacing it.
 export function traceSpeechChunks<Args extends unknown[], Result>(
   model: { generate: (...args: Args) => Promise<Result>; sessions: SpeechModel['sessions'] },
   samples: number,
@@ -53,7 +54,9 @@ export function traceSpeechChunks<Args extends unknown[], Result>(
   const total = 1 + Math.ceil(Math.max(0, samples - window) / jump);
   let chunk = 0,
     decoderSteps = 0;
-  const publish = (status: string) => onProgress({ status, chunk, totalChunks: total });
+  const publish = (status: string) => {
+    onProgress({ status, chunk, totalChunks: total });
+  };
   const generate = model.generate.bind(model);
   model.generate = async (...args) => {
     chunk++;

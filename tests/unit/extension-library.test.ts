@@ -1,3 +1,6 @@
+import type * as LibraryActionsModule from '../../extension/src/library-actions.ts';
+import type * as ProtocolModule from '../../extension/src/protocol.ts';
+import type * as StorageModule from '../../extension/src/storage.ts';
 import { moduleExports } from '../helpers/assertions.ts';
 import { text } from '../helpers/assertions.ts';
 import { defined } from '../helpers/assertions.ts';
@@ -10,14 +13,14 @@ const id = '11111111-1111-4111-8111-111111111111';
 const oldLibrary = '22222222-2222-4222-8222-222222222222';
 const newLibrary = '33333333-3333-4333-8333-333333333333';
 const meeting = '44444444-4444-4444-8444-444444444444';
-type Row = {
+interface Row {
   recordingId: string;
   libraryId: string;
   captureState: string;
   totalFrames: number;
   chunkCount: number;
   receipt: { libraryId: string; meetingId: string } | undefined;
-};
+}
 const row = (): Row => ({
   recordingId: id,
   libraryId: oldLibrary,
@@ -80,13 +83,14 @@ function actionsHarness() {
   };
   vm.runInNewContext(defined(actionsBuild.outputFiles[0]).text, context);
   return Object.assign(context, {
-    api: moduleExports<typeof import('../../extension/src/library-actions.ts')>(
-      Reflect.get(context, 'api'),
-      ['openEcho', 'echoURL', 'deleteLocalRecording'],
-    ),
+    api: moduleExports<typeof LibraryActionsModule>(Reflect.get(context, 'api'), [
+      'openEcho',
+      'echoURL',
+      'deleteLocalRecording',
+    ]),
   });
 }
-test('receipt opens only its original library, never another connected library', async () => {
+void test('receipt opens only its original library, never another connected library', async () => {
   const h = actionsHarness();
   defined(h.rows.get(id)).receipt = { libraryId: oldLibrary, meetingId: meeting };
   await h.api.openEcho(id);
@@ -98,7 +102,7 @@ test('receipt opens only its original library, never another connected library',
   await assert.rejects(h.api.openEcho(id), /different Echo library/);
   assert.equal(h.opened.length, 1);
 });
-test('Echo links reject unsafe endpoints and malformed or cross-library receipts', () => {
+void test('Echo links reject unsafe endpoints and malformed or cross-library receipts', () => {
   const h = actionsHarness();
   const value = { ...row(), receipt: { libraryId: oldLibrary, meetingId: meeting } };
   h.pair.endpoint = 'https://example.invalid';
@@ -110,7 +114,7 @@ test('Echo links reject unsafe endpoints and malformed or cross-library receipts
   value.libraryId = newLibrary;
   assert.throws(() => h.api.echoURL(h.pair, value), /invalid Echo receipt/);
 });
-test('local deletion requires explicit confirmation and rejects the active recording', async () => {
+void test('local deletion requires explicit confirmation and rejects the active recording', async () => {
   const h = actionsHarness();
   await assert.rejects(h.api.deleteLocalRecording(id, false), /Confirm deletion/);
   await assert.rejects(h.api.deleteLocalRecording(id, true, id), /Stop this recording/);
@@ -119,7 +123,7 @@ test('local deletion requires explicit confirmation and rejects the active recor
   assert.deepEqual(h.deleted, [id]);
   assert.equal(h.opened.length, 0);
 });
-test('delete waits for an in-flight transfer holding the same cross-context lock', async () => {
+void test('delete waits for an in-flight transfer holding the same cross-context lock', async () => {
   const h = actionsHarness();
   let release: (() => void) | undefined;
   const transfer = h.navigator.locks.request(
@@ -139,7 +143,7 @@ test('delete waits for an in-flight transfer holding the same cross-context lock
   await deletion;
   assert.deepEqual(h.deleted, [id]);
 });
-test('a queued transfer re-reads the journal after deletion and cannot recreate or upload the row', async () => {
+void test('a queued transfer re-reads the journal after deletion and cannot recreate or upload the row', async () => {
   const result = await build({
     entryPoints: ['extension/src/protocol.ts'],
     bundle: true,
@@ -184,10 +188,9 @@ test('a queued transfer re-reads the journal after deletion and cannot recreate 
       }),
   );
   await Promise.resolve();
-  const transfer = moduleExports<typeof import('../../extension/src/protocol.ts')>(
-    Reflect.get(context, 'protocol'),
-    ['transferOne'],
-  ).transferOne(row(), oldPair(), async () => {});
+  const transfer = moduleExports<typeof ProtocolModule>(Reflect.get(context, 'protocol'), [
+    'transferOne',
+  ]).transferOne(row(), oldPair(), async () => {});
   defined(release)();
   await deletion;
   await transfer;
@@ -287,7 +290,7 @@ function journalHarness(
                     ([, value]) => value.recordingId === target,
                   );
                   let index = 0;
-                  const next = () =>
+                  const next = () => {
                     queueMicrotask(() => {
                       const entry = entries[index++];
                       req.result = entry
@@ -298,6 +301,7 @@ function journalHarness(
                         : null;
                       req.onsuccess?.({ target: req });
                     });
+                  };
                   next();
                   return req;
                 },
@@ -334,15 +338,12 @@ function journalHarness(
   };
   vm.runInNewContext(defined(storageBuild.outputFiles[0]).text, context);
   return {
-    api: moduleExports<typeof import('../../extension/src/storage.ts')>(
-      Reflect.get(context, 'journal'),
-      ['deleteRecording'],
-    ),
+    api: moduleExports<typeof StorageModule>(Reflect.get(context, 'journal'), ['deleteRecording']),
     data,
     strict: () => strict,
   };
 }
-test('atomic local audio deletion removes chunks and releases pending byte budget', async () => {
+void test('atomic local audio deletion removes chunks and releases pending byte budget', async () => {
   const h = journalHarness(row());
   await h.api.deleteRecording(id);
   assert.equal(h.strict(), true);
@@ -350,14 +351,14 @@ test('atomic local audio deletion removes chunks and releases pending byte budge
   assert.equal(h.data.chunks.size, 0);
   assert.equal(defined(h.data.meta.get('pendingBytes')).value, 0);
 });
-test('receipt removal leaves other recordings’ pending byte budget unchanged', async () => {
+void test('receipt removal leaves other recordings’ pending byte budget unchanged', async () => {
   const h = journalHarness({ ...row(), receipt: { libraryId: oldLibrary, meetingId: meeting } });
   h.data.chunks.clear();
   await h.api.deleteRecording(id);
   assert.equal(defined(h.data.meta.get('pendingBytes')).value, 32000);
   assert.equal(h.data.recordings.size, 0);
 });
-test('recording and paused rows abort local deletion without mutating chunks or budget', async () => {
+void test('recording and paused rows abort local deletion without mutating chunks or budget', async () => {
   for (const captureState of ['recording', 'paused']) {
     const h = journalHarness({ ...row(), captureState });
     await assert.rejects(h.api.deleteRecording(id), /Stop this recording/);

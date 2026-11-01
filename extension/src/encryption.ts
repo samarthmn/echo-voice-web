@@ -1,6 +1,10 @@
 // Keep this envelope and AAD encoding stable: existing PCM uses it.
-export type Ciphertext = { version: 1; nonce: string; ciphertext: string };
-export type Binding = ReadonlyArray<string | number>;
+export interface Ciphertext {
+  version: 1;
+  nonce: string;
+  ciphertext: string;
+}
+export type Binding = readonly (string | number)[];
 const LIMIT = 8 * 1024 * 1024;
 const encoder = new TextEncoder();
 function base64(value: ArrayBuffer | Uint8Array): string {
@@ -32,7 +36,7 @@ function aad(binding: Binding): Uint8Array<ArrayBuffer> {
     )
   )
     throw new Error('Invalid encryption context.');
-  return encoder.encode(JSON.stringify(['echo-vault', 1, ...binding]));
+  return encoder.encode(JSON.stringify(['echo-vault', 1, ...(binding as Binding)]));
 }
 export async function encryptPayload(
   key: CryptoKey,
@@ -51,10 +55,10 @@ export async function encryptPayload(
 }
 export async function decryptPayload(
   key: CryptoKey,
-  value: Ciphertext,
+  value: (Partial<Omit<Ciphertext, 'version'>> & { version?: number }) | null | undefined,
   binding: Binding,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  if (!value || value.version !== 1) throw new Error('Unsupported encrypted recording version.');
+  if (value?.version !== 1) throw new Error('Unsupported encrypted recording version.');
   const nonce = decode(value.nonce, 12);
   const ciphertext = decode(value.ciphertext);
   if (nonce.length !== 12 || ciphertext.length < 16)

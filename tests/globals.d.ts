@@ -1,12 +1,16 @@
+import type * as GuardsModule from '../web/guards.ts';
+import type * as StorageModule from '../extension/src/storage.ts';
+import type * as CoreModule from '../extension/src/core.ts';
+import type * as SettingsModule from '../extension/src/settings.ts';
 import type { Meeting, RecorderState } from '../web/types/domain.ts';
 import type { Chunk, Pair } from '../extension/src/core.ts';
 declare global {
-  var testMeeting: typeof import('../web/guards.ts').meeting;
+  var testMeeting: typeof GuardsModule.meeting;
 
-  var journal: typeof import('../extension/src/storage.ts');
-  var core: typeof import('../extension/src/core.ts');
-  var readTestLink: typeof import('../extension/src/settings.ts').readLink;
-  var testAPI: { journal: typeof journal; settings: typeof import('../extension/src/settings.ts') };
+  var journal: typeof StorageModule;
+  var core: typeof CoreModule;
+  var readTestLink: typeof SettingsModule.readLink;
+  var testAPI: { journal: typeof journal; settings: typeof SettingsModule };
   var testExtensionRequest: (
     path: string,
     options?: RequestInit,

@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { resolve, join, sep } from 'node:path';
 import { writeAssetManifest } from '../../scripts/asset-manifest.ts';
 
-test('fingerprints change with WASM bytes independently of JavaScript and are included in packaged assets', async () => {
+void test('fingerprints change with WASM bytes independently of JavaScript and are included in packaged assets', async () => {
   const scratchRoot = resolve('tmp');
   await mkdir(scratchRoot, { recursive: true });
   const fixture = await mkdtemp(join(scratchRoot, 'asset-manifest-test-'));
@@ -31,7 +31,7 @@ test('fingerprints change with WASM bytes independently of JavaScript and are in
   }
 });
 
-test('public roots with trailing separators preserve full nested asset URL names', async () => {
+void test('public roots with trailing separators preserve full nested asset URL names', async () => {
   const scratchRoot = resolve('tmp');
   await mkdir(scratchRoot, { recursive: true });
   const fixture = await mkdtemp(join(scratchRoot, 'asset-manifest-trailing-separator-'));
@@ -53,7 +53,7 @@ test('public roots with trailing separators preserve full nested asset URL names
 });
 
 const html = await readFile(new URL('../../public/index.html', import.meta.url), 'utf8');
-const loaderSource = defined(html.match(/<script type="module">([\s\S]*?)<\/script>/))[1];
+const loaderSource = defined(/<script type="module">([\s\S]*?)<\/script>/.exec(html))[1];
 type Loader = (
   fetcher: (url: string, options: { cache: string }) => Promise<unknown>,
   window: object,
@@ -61,8 +61,10 @@ type Loader = (
   loadModule: (url: string) => Promise<unknown>,
 ) => Promise<void>;
 // The page loader's imports are supplied explicitly by this isolated harness.
-const AsyncFunction: new (...parameters: string[]) => Loader = Object.getPrototypeOf(
-  async function () {},
+const AsyncFunction = (
+  Object.getPrototypeOf(async function () {}) as {
+    constructor: new (...parameters: string[]) => Loader;
+  }
 ).constructor;
 const runLoader = new AsyncFunction(
   'fetch',
@@ -72,14 +74,16 @@ const runLoader = new AsyncFunction(
   defined(loaderSource).replaceAll('import(', 'loadModule('),
 );
 
-test('the real HTML loader waits for the bridge and independently versions wrapper, WASM, and styles', async () => {
+void test('the real HTML loader waits for the bridge and independently versions wrapper, WASM, and styles', async () => {
   const versions: Record<string, string> = Object.fromEntries(
-    [
-      ['/js/bridge.js', '1'],
-      ['/assets/echo_app.js', '2'],
-      ['/assets/echo_app_bg.wasm', '3'],
-      ['/theme.css', '4'],
-    ].map(([path, digit]) => [path, defined(digit).repeat(64)]),
+    (
+      [
+        ['/js/bridge.js', '1'],
+        ['/assets/echo_app.js', '2'],
+        ['/assets/echo_app_bg.wasm', '3'],
+        ['/theme.css', '4'],
+      ] as const
+    ).map(([path, digit]) => [path, digit.repeat(64)] as const),
   );
   const calls: unknown = [];
   const window: { echoAssetVersions?: unknown } = {};
@@ -117,7 +121,7 @@ test('the real HTML loader waits for the bridge and independently versions wrapp
   ]);
 });
 
-test('the HTML loader exposes a retry screen if a required fingerprint is missing', async () => {
+void test('the HTML loader exposes a retry screen if a required fingerprint is missing', async () => {
   const main: { innerHTML?: string } = {};
   await runLoader(
     async () => ({ ok: true, json: async () => ({}) }),

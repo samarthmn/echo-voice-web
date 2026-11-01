@@ -49,7 +49,7 @@ function appearance(storage: {
     listeners,
   };
 }
-test('manual appearance survives operating-system changes when storage is unavailable', () => {
+void test('manual appearance survives operating-system changes when storage is unavailable', () => {
   const { api, media, listeners } = appearance({
     getItem() {
       throw Error('blocked');
@@ -66,7 +66,7 @@ test('manual appearance survives operating-system changes when storage is unavai
   defined(listeners['media'])();
   assert.equal(api.current(), 'dark');
 });
-test('appearance follows the system until saved and synchronizes cross-tab resets', () => {
+void test('appearance follows the system until saved and synchronizes cross-tab resets', () => {
   let saved: string | null = null;
   const { api, media, listeners } = appearance({
     getItem: () => saved,

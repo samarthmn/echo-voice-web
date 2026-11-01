@@ -19,20 +19,20 @@ async function processFixture(t: test.TestContext, handler: string) {
   return child;
 }
 
-test('graceful cleanup waits beyond the former two-second kill deadline', async (t) => {
+void test('graceful cleanup waits beyond the former two-second kill deadline', async (t) => {
   const child = await processFixture(t, '() => setTimeout(() => process.exit(0), 2200)');
   await stopTestServer(child, { graceMs: 5000 });
   assert.equal(child.exitCode, 0);
   assert.equal(child.signalCode, null);
 });
 
-test('forced termination is reaped and reports preservation instead of allowing removal', async (t) => {
+void test('forced termination is reaped and reports preservation instead of allowing removal', async (t) => {
   const child = await processFixture(t, '() => {}');
   await assert.rejects(stopTestServer(child, { graceMs: 20 }), /forced termination.*preserved/);
   assert.equal(child.signalCode, 'SIGKILL');
 });
 
-test('cleanup refuses to traverse a mounted filesystem', async () => {
+void test('cleanup refuses to traverse a mounted filesystem', async () => {
   const root = path.resolve('tmp/synthetic-cleanup-guard');
   const mounted = path.join(root, 'mounted-volume');
   const visited: unknown = [];

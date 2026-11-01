@@ -16,7 +16,7 @@ const baseURL = process.env['ECHO_E2E_URL'] || 'http://localhost:3011';
 const screenshotDir =
   process.env['ECHO_E2E_SCREENSHOTS'] || path.resolve('tmp/echo-settings-screenshots');
 
-test(
+void test(
   'Settings persist local preferences, vocabulary, backups, and explicit microphone access',
   { timeout: 120_000 },
   async (t) => {
@@ -40,7 +40,9 @@ test(
     await page.addInitScript(() => {
       window.__microphoneRequests = 0;
       window.__testTracks = [];
-      const original = navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices);
+      const original = (navigator as Partial<Navigator>).mediaDevices?.getUserMedia.bind(
+        navigator.mediaDevices,
+      );
       if (original)
         navigator.mediaDevices.getUserMedia = async (...args) => {
           window.__microphoneRequests++;

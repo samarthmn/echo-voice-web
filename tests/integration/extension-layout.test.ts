@@ -1,3 +1,4 @@
+import type * as TestModule from '@playwright/test';
 import { defined } from '../helpers/assertions.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,11 +8,11 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-test('popup has an intrinsic width, reachable controls at zoom, and responsive setup', async () => {
+void test('popup has an intrinsic width, reachable controls at zoom, and responsive setup', async () => {
   const scratch = path.join(project, 'tmp', 'extension-popup-layout');
   await mkdir(scratch, { recursive: true });
   process.env['TMPDIR'] = scratch;
-  let browser: import('@playwright/test').Browser | undefined;
+  let browser: TestModule.Browser | undefined;
   try {
     await mkdir(path.join(scratch, 'fonts'));
     await mkdir(path.join(scratch, 'icons'));

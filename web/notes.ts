@@ -42,6 +42,7 @@ export function downloadModel(model: string) {
       const decoder = new TextDecoder();
       let rest = '',
         success = false;
+      const succeeded = () => success;
       const consume = (line: string) => {
         if (!line.trim()) return;
         let progress: ReturnType<typeof ollamaProgress>;
@@ -71,7 +72,7 @@ export function downloadModel(model: string) {
         if (done) break;
       }
       consume(rest);
-      if (!success)
+      if (!succeeded())
         throw new Error('Download ended before Ollama confirmed success. Retry the download.');
       publish({ status: 'completed', model, progress: 100 });
     } catch (error) {
@@ -83,7 +84,9 @@ export function downloadModel(model: string) {
       });
       throw error;
     } finally {
-      await reader?.cancel().catch(() => {});
+      await reader?.cancel().catch(() => {
+        /* The stream already completed; cancellation is only reader cleanup. */
+      });
     }
   })().finally(() => {
     if (activePull?.promise === job) activePull = null;

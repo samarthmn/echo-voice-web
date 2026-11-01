@@ -14,7 +14,7 @@ async function key(): Promise<CryptoKey> {
     if (saved.extractable || saved.type !== 'secret' || saved.algorithm.name !== 'AES-GCM')
       throw new Error('The browser credential key is unavailable.');
     return saved;
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     deviceKey = undefined;
     throw error;
   }));
@@ -28,7 +28,7 @@ export async function sealSecret(value: unknown, purpose: string): Promise<Ciphe
 export async function openSecret<T>(value: Ciphertext, purpose: string): Promise<T> {
   const bytes = await decryptPayload(await key(), value, ['device-secret', purpose]);
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
   } finally {
     bytes.fill(0);
   }

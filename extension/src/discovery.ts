@@ -11,9 +11,9 @@ const ECHO_NOT_FOUND = "Echo isn't running on this Mac — start it with ./scrip
 /** The library an Echo v2 server at `origin` serves, if it answers GET /hello within 700 ms. */
 export async function hello(origin: string): Promise<{ libraryId: string } | undefined> {
   try {
-    const body = await jsonRequest(endpointURL(origin), '/hello', {
+    const body = (await jsonRequest(endpointURL(origin), '/hello', {
       signal: AbortSignal.timeout(700),
-    });
+    })) as { service?: unknown; protocolVersion?: unknown; libraryId?: unknown };
     return body.service === 'echo-voice' &&
       body.protocolVersion === 2 &&
       typeof body.libraryId === 'string'
@@ -41,6 +41,6 @@ export async function discover(manual?: string): Promise<string> {
   // Probe together; the earliest candidate that answers wins over faster later ones.
   const probes = candidates.map((origin) => probe(origin));
   // The loop bounds the candidate returned after its matching probe.
-  for (let i = 0; i < candidates.length; i++) if (await probes[i]) return candidates[i]!;
+  for (const [i, candidate] of candidates.entries()) if (await probes[i]) return candidate;
   throw new Error(ECHO_NOT_FOUND);
 }

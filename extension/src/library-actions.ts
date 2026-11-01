@@ -14,7 +14,7 @@ export function echoURL(
   const libraryId = row?.receipt?.libraryId ?? row?.libraryId ?? pair?.libraryId;
   if (!libraryId || !uuid.test(libraryId))
     throw new Error('Connect this recording’s Echo library in Setup before opening it.');
-  if (!pair || pair.libraryId !== libraryId)
+  if (pair?.libraryId !== libraryId)
     throw new Error(
       'This recording belongs to a different Echo library. Reconnect that library to open it.',
     );

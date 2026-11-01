@@ -43,7 +43,7 @@ const page = {
   createElement: () => ({ append() {}, setAttribute() {}, addEventListener() {} }),
   getElementById: () => null,
 };
-test('setup has three steps — Connect, Meeting sites, Microphone — and no recovery phrase', async () => {
+void test('setup has three steps — Connect, Meeting sites, Microphone — and no recovery phrase', async () => {
   const html = await readFile('extension/setup.html', 'utf8');
   const steps = [...html.matchAll(/<strong>(\d) · ([^<]+)<\/strong/g)].map((match) => match[2]);
   assert.deepEqual(steps, ['Connect to Echo', 'Meeting sites', 'Microphone']);
@@ -56,7 +56,7 @@ test('setup has three steps — Connect, Meeting sites, Microphone — and no re
   assert.match(popup, /Recordings are saved in this browser until you connect/);
   assert.doesNotMatch(popup, /phrase|unlock/i);
 });
-test('approval page never approves on load, renders labels as text, and tells the extension after Allow', async () => {
+void test('approval page never approves on load, renders labels as text, and tells the extension after Allow', async () => {
   const buildResult = await build({
     entryPoints: ['web/extension-connect.ts'],
     bundle: true,
@@ -80,7 +80,7 @@ test('approval page never approves on load, renders labels as text, and tells th
           requestId,
           name: '<img src=x onerror=alert(1)>',
           origin: 'chrome-extension://poonbmodjfijfbfiopememgfijahgbag',
-          status: options?.method === 'POST' ? 'approved' : 'pending',
+          status: options.method === 'POST' ? 'approved' : 'pending',
           expiresAt: Math.floor(Date.now() / 1000) + 300,
         }),
       };
@@ -115,7 +115,7 @@ test('approval page never approves on load, renders labels as text, and tells th
     { id: 'poonbmodjfijfbfiopememgfijahgbag', message: { type: 'ECHO_APPROVED', requestId } },
   ]);
 });
-test('popup checks actual host and microphone permission before enabling Start', async () => {
+void test('popup checks actual host and microphone permission before enabling Start', async () => {
   const element = elements(false);
   let hostGranted = false;
   let interval: (() => void) | undefined;
@@ -170,7 +170,7 @@ test('popup checks actual host and microphone permission before enabling Start',
   defined(element('mic').listeners['change'])();
   assert.equal(element('start').disabled, false, 'not being connected never blocks Start');
 });
-test('setup submits Cancel immediately while a state refresh is still waiting', async () => {
+void test('setup submits Cancel immediately while a state refresh is still waiting', async () => {
   const element = elements(true);
   const calls: string[] = [];
   const intervals = new Map<number, () => void>();

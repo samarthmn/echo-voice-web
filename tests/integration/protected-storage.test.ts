@@ -28,11 +28,11 @@ async function port() {
   await new Promise((resolve) => listener.close(resolve));
   return value;
 }
-type RunningServer = {
+interface RunningServer {
   child: ChildProcessByStdio<null, Readable, Readable>;
   base: string;
   logs: () => string;
-};
+}
 function launch(directory: string, key: string, expectFailure?: false): Promise<RunningServer>;
 function launch(directory: string, key: string, expectFailure: true): Promise<{ logs: string }>;
 async function launch(directory: string, key: string, expectFailure = false) {
@@ -60,7 +60,7 @@ async function launch(directory: string, key: string, expectFailure = false) {
   for (const stream of [child.stdout, child.stderr])
     stream.on('data', (streamValue: unknown) => {
       const data = bufferChunk(streamValue);
-      logs = (logs + data).slice(-6000);
+      logs = (logs + String(data)).slice(-6000);
     });
   for (let attempt = 0; attempt < 100; attempt++) {
     if (spawnError) throw spawnError;
@@ -96,10 +96,11 @@ async function stop(
     | { child: ChildProcessByStdio<null, Readable, Readable>; base: string; logs: () => string }
     | undefined,
 ) {
-  if (!server?.child || server.child.exitCode !== null) return;
-  const exited: Promise<unknown[]> = once(server.child, 'exit');
-  server.child.kill('SIGINT');
-  const timer = setTimeout(() => server.child.kill('SIGKILL'), 3000);
+  if (server?.child?.exitCode !== null) return;
+  const child = defined(server.child);
+  const exited: Promise<unknown[]> = once(child, 'exit');
+  child.kill('SIGINT');
+  const timer = setTimeout(() => child.kill('SIGKILL'), 3000);
   try {
     await exited;
   } finally {
@@ -124,7 +125,7 @@ function wav(length: number) {
   return bytes;
 }
 
-test(
+void test(
   'real server encrypts metadata and audio, authenticates range blocks, and fails closed with a wrong key',
   { timeout: 30000 },
   async () => {
@@ -143,7 +144,7 @@ test(
             : { body: body instanceof FormData ? body : JSON.stringify(body) }),
         });
         const value = object((await response.json()) as unknown);
-        assert.ok(response.ok, `${path}: ${value['error']}`);
+        assert.ok(response.ok, `${path}: ${String(value['error'])}`);
         return value;
       }
       const title = 'Private encrypted storage regression meeting';
@@ -157,7 +158,7 @@ test(
         form.append('trackId', 'room');
         form.append('label', 'Room');
         form.append('sequence', String(sequence));
-        return api(`/meetings/${meeting['id']}/audio`, 'POST', form);
+        return api(`/meetings/${String(meeting['id'])}/audio`, 'POST', form);
       }
       const initial = await upload(first, 0);
       assert.deepEqual(await upload(first, 0), initial);
@@ -177,7 +178,7 @@ test(
         [139990, 140020],
         [whole.length - 12, whole.length - 1],
       ]) {
-        const response: Response = await fetch(`${defined(server).base}${track['url']}`, {
+        const response: Response = await fetch(`${defined(server).base}${String(track['url'])}`, {
           headers: { Range: `bytes=${start}-${end}` },
         });
         assert.equal(response.status, 206);
@@ -210,14 +211,14 @@ test(
         'wrong-key attempt changed the database',
       );
       server = await launch(directory, key);
-      assert.equal((await api(`/meetings/${meeting['id']}`))['title'], title);
+      assert.equal((await api(`/meetings/${String(meeting['id'])}`))['title'], title);
       const ciphertextPath = join(audioDir, defined(files[0]));
       const original = await readFile(ciphertextPath),
         damaged = Buffer.from(original);
       damaged[80] = defined(damaged[80]) ^ 1;
       await writeFile(ciphertextPath, damaged);
       await assert.rejects(async () => {
-        const response: Response = await fetch(`${defined(server).base}${track['url']}`, {
+        const response: Response = await fetch(`${defined(server).base}${String(track['url'])}`, {
           headers: { Range: 'bytes=0-100' },
           signal: AbortSignal.timeout(5000),
         });
@@ -225,7 +226,7 @@ test(
       });
       assert.deepEqual(await readFile(ciphertextPath), damaged);
       await writeFile(ciphertextPath, original);
-      const playback = await fetch(`${defined(server).base}${track['url']}`);
+      const playback = await fetch(`${defined(server).base}${String(track['url'])}`);
       assert.deepEqual(Buffer.from(await playback.arrayBuffer()), whole);
       assert.ok(!defined(server).logs().includes(key));
       assert.ok(!defined(server).logs().includes(title));

@@ -1,3 +1,4 @@
+import type * as BridgeModule from '../../web/bridge.ts';
 import { moduleExports, text } from '../helpers/assertions.ts';
 import { object } from '../helpers/assertions.ts';
 import { defined } from '../helpers/assertions.ts';
@@ -78,14 +79,14 @@ function harness(
   };
   vm.runInNewContext(defined(built.outputFiles[0]).text, context);
   return {
-    api: moduleExports<typeof import('../../web/bridge.ts')>(Reflect.get(context, 'bridge'), [
+    api: moduleExports<typeof BridgeModule>(Reflect.get(context, 'bridge'), [
       'autoTranscribeMeeting',
     ]),
     window,
     calls,
   };
 }
-test('a completed import cancelled previously stays suppressed across fresh workspace controllers', async () => {
+void test('a completed import cancelled previously stays suppressed across fresh workspace controllers', async () => {
   for (const cancelled of [
     { ...meeting('cancelled'), autoTranscribeSuppressed: true },
     { ...meeting('legacy'), error: TRANSCRIPTION_CANCELLED },
@@ -98,14 +99,14 @@ test('a completed import cancelled previously stays suppressed across fresh work
     }
   }
 });
-test('automatic queue rechecks durable cancellation instead of trusting an old import event', async () => {
+void test('automatic queue rechecks durable cancellation instead of trusting an old import event', async () => {
   const original = meeting('stale');
   const rows = new Map([['stale', { ...original, autoTranscribeSuppressed: true }]]);
   const h = harness(rows);
   await h.api.autoTranscribeMeeting(original);
   assert.equal(h.calls.length, 0);
 });
-test('new eligible imports still process once and are marked automatic', async () => {
+void test('new eligible imports still process once and are marked automatic', async () => {
   const row = meeting('new');
   const h = harness(new Map([['new', row]]));
   await h.api.autoTranscribeMeeting(row);
@@ -113,7 +114,7 @@ test('new eligible imports still process once and are marked automatic', async (
   assert.equal(h.calls.length, 1);
   assert.equal(object(defined(h.calls[0])[3])['automatic'], true);
 });
-test('unsupported saved model is rejected before download guidance or inference', async () => {
+void test('unsupported saved model is rejected before download guidance or inference', async () => {
   const row = { ...meeting('unsupported'), speechModel: 'unsupported/custom-model' };
   const h = harness(new Map([[row.id, row]]));
   const skipped: unknown[] = [];
@@ -133,20 +134,20 @@ test('unsupported saved model is rejected before download guidance or inference'
   assert.equal(object(skipped[0])['reason'], 'processing-unavailable');
   assert.match(text(object(skipped[0])['message']), /Choose one of the supported speech models/);
 });
-test('retired speech selections still resolve to Turbo for automatic transcription', async () => {
+void test('retired speech selections still resolve to Turbo for automatic transcription', async () => {
   const row = { ...meeting('retired'), speechModel: 'onnx-community/whisper-tiny.en' };
   const h = harness(new Map([[row.id, row]]));
   await h.api.autoTranscribeMeeting(row);
   assert.equal(h.calls.length, 1);
   assert.equal(defined(h.calls[0])[1], turbo);
 });
-test('a generic previous processing error does not permanently suppress automatic processing', async () => {
+void test('a generic previous processing error does not permanently suppress automatic processing', async () => {
   const row = { ...meeting('retryable'), error: 'The local server was temporarily unavailable.' };
   const h = harness(new Map([[row.id, row]]));
   await h.api.autoTranscribeMeeting(row);
   assert.equal(h.calls.length, 1);
 });
-test('Cancel all suppresses queued automatic jobs before they start and remains durable on reload', async () => {
+void test('Cancel all suppresses queued automatic jobs before they start and remains durable on reload', async () => {
   const first = meeting('one'),
     second = meeting('two');
   const rows = new Map([

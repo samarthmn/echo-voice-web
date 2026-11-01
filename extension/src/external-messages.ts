@@ -49,7 +49,7 @@ export async function externalMessage(raw: unknown, sender: chrome.runtime.Messa
     );
     if (tab?.id !== undefined) {
       await chrome.tabs.update(tab.id, { active: true });
-      if (tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true });
+      await chrome.windows.update(tab.windowId, { focused: true });
     } else await chrome.tabs.create({ url });
     return { ok: true, status: 'confirm-in-extension' };
   }
@@ -57,7 +57,7 @@ export async function externalMessage(raw: unknown, sender: chrome.runtime.Messa
   const version = chrome.runtime.getManifest().version;
   if (message.type === 'ECHO_PRESENT')
     return { installed: true, version, ...(await connectionStatus()) };
-  if (message.type === 'ECHO_APPROVED') await resumePairing(message.requestId);
+  await resumePairing(message.requestId);
   const status = await connectionStatus();
   return { ok: status.status === 'connected', ...status };
 }

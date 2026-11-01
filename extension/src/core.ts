@@ -40,14 +40,14 @@ export type InterruptionReason = keyof typeof INTERRUPTION_DESCRIPTIONS;
 export function interruption(reason: InterruptionReason, atFrame: number) {
   return { reason, at: new Date().toISOString(), atFrame };
 }
-export type Observation = {
+export interface Observation {
   state: 'unmuted' | 'muted' | 'prejoin' | 'ended' | 'unknown';
   seq: number;
   url: string;
   documentId: string;
   receivedAt: number;
-};
-export type Recording = {
+}
+export interface Recording {
   recordingId: string;
   title: string;
   provider: Provider;
@@ -67,16 +67,20 @@ export type Recording = {
   error?: string | undefined;
   interruption?: ReturnType<typeof interruption> | undefined;
   receipt?: { libraryId: string; meetingId: string; verifiedAt: string } | undefined;
-};
-export type Chunk = {
+}
+export interface Chunk {
   recordingId: string;
   sequence: number;
   frames: number;
   sha256: string;
   pcm: ArrayBuffer;
-};
-export type Pair = { libraryId: string; credential: string; endpoint: string };
-export type Settings = {
+}
+export interface Pair {
+  libraryId: string;
+  credential: string;
+  endpoint: string;
+}
+export interface Settings {
   installationId: string;
   enabledProviders: Provider[];
   micGranted: boolean;
@@ -85,7 +89,7 @@ export type Settings = {
   rememberedConsent: Provider[];
   /** Default for the popup's "Show live text in Echo" choice. */
   liveTranscription: boolean;
-};
+}
 
 export function endpointURL(raw: string): string {
   const url = new URL(raw);
@@ -121,7 +125,11 @@ export function unixSecondsToMilliseconds(value: unknown): number {
     throw new Error('Echo returned an invalid expiry timestamp.');
   return value * 1000;
 }
-type Meeting = { provider: Provider; identity: string; originPattern: string };
+interface Meeting {
+  provider: Provider;
+  identity: string;
+  originPattern: string;
+}
 type MeetingPage = Meeting & { joinable: boolean };
 // Meet serves calls at /<code>, and at /meet/<code> or /_meet/<code> for some accounts and apps.
 const MEET_CODE = /^\/(?:_?meet\/)?([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/i;
@@ -209,10 +217,12 @@ export function microphoneAllowed(
     meetingIdentity(observation.url) === identity
   );
 }
-export function validObservation(value: any): boolean {
+export function validObservation(input: unknown): boolean {
+  const value = input as Partial<Observation> | null;
   return (
-    value &&
-    ['unmuted', 'muted', 'prejoin', 'ended', 'unknown'].includes(value.state) &&
+    !!value &&
+    ['unmuted', 'muted', 'prejoin', 'ended', 'unknown'].some((state) => state === value.state) &&
+    typeof value.seq === 'number' &&
     Number.isSafeInteger(value.seq) &&
     value.seq >= 0 &&
     typeof value.url === 'string'
@@ -226,8 +236,11 @@ export async function sha256(pcm: ArrayBuffer): Promise<string> {
 export function wavHeader(frames: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(44);
   const view = new DataView(bytes.buffer);
-  const text = (at: number, str: string) =>
-    [...str].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+  const text = (at: number, str: string) => {
+    Array.from(str).forEach((c, i) => {
+      view.setUint8(at + i, c.charCodeAt(0));
+    });
+  };
   text(0, 'RIFF');
   view.setUint32(4, 36 + frames * 2, true);
   text(8, 'WAVE');

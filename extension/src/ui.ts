@@ -1,3 +1,4 @@
+import type { Reply, PageReplies } from './messages.ts';
 import { BUILD_ID } from './build.ts';
 import { type Provider, type Recording, INTERRUPTION_DESCRIPTIONS } from './core.ts';
 const PROVIDER_NAMES: Record<Provider, string> = {
@@ -5,15 +6,22 @@ const PROVIDER_NAMES: Record<Provider, string> = {
   zoom: 'Zoom Web',
   teams: 'Teams Web',
 };
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- Callers specify the concrete DOM element subtype at this lookup boundary.
 export function element<T extends HTMLElement = HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
 // Replies are validated by the service worker, which owns every extension action.
-export async function request(message: { type: string } & Record<string, unknown>): Promise<any> {
-  const response = await chrome.runtime.sendMessage(message);
+export async function request<T extends string>(
+  message: { type: T } & Record<string, unknown>,
+): Promise<T extends keyof PageReplies ? PageReplies[T] : unknown> {
+  const response: Reply | undefined = await chrome.runtime.sendMessage(message);
   if (!response?.ok) throw new Error(response?.error ?? 'Echo extension did not respond.');
-  if (message.type === 'STATE') reloadIfStale(response.value?.build, !!response.value?.active);
-  return response.value;
+  if (message.type === 'STATE')
+    reloadIfStale(
+      (response.value as PageReplies['STATE'] | undefined)?.build,
+      !!(response.value as PageReplies['STATE'] | undefined)?.active,
+    );
+  return response.value as T extends keyof PageReplies ? PageReplies[T] : unknown;
 }
 /**
  * After an in-place update the browser can keep running the previous service worker while
@@ -32,7 +40,7 @@ function reloadIfStale(running: unknown, recording: boolean) {
 }
 export function showError(error: unknown) {
   const node = element('error');
-  node.textContent = (error as Error).message ?? String(error);
+  node.textContent = (error as { message?: string } | null)?.message ?? String(error);
   node.hidden = false;
 }
 export async function action(work: () => Promise<void>, button?: HTMLButtonElement) {
@@ -98,7 +106,7 @@ export function renderRecordings(
     if (row.interruption) {
       const reason = document.createElement('p');
       reason.className = 'attention';
-      reason.textContent = `Interrupted at ${duration(row.interruption.atFrame)}: ${INTERRUPTION_DESCRIPTIONS[row.interruption.reason] ?? INTERRUPTION_DESCRIPTIONS['capture-failed']}`;
+      reason.textContent = `Interrupted at ${duration(row.interruption.atFrame)}: ${(INTERRUPTION_DESCRIPTIONS as Partial<Record<string, string>>)[row.interruption.reason] ?? INTERRUPTION_DESCRIPTIONS['capture-failed']}`;
       copy.append(reason);
     }
     item.append(copy);
@@ -119,7 +127,9 @@ export function renderRecordings(
       const button = document.createElement('button');
       button.className = 'quiet';
       button.textContent = 'Export';
-      button.addEventListener('click', () => exportRecording(row));
+      button.addEventListener('click', () => {
+        exportRecording(row);
+      });
       actions.append(button);
     }
     if (row.recordingId !== activeRecordingId) {

@@ -129,7 +129,7 @@ export function mergeLiveWindow(
   let previousStart = 0;
   const incoming = words
     .map((word) => {
-      const [start, finish] = word.timestamp || [];
+      const [start, finish] = word.timestamp;
       if (
         typeof word.text !== 'string' ||
         !word.text.trim() ||
@@ -154,7 +154,12 @@ export function mergeLiveWindow(
       };
     })
     .filter((word) => !draft.throughFrame || word.midpoint > previousBoundary)
-    .map(({ midpoint, ...word }) => word);
+    .map(({ text, startFrame, endFrame, provisional }) => ({
+      text,
+      startFrame,
+      endFrame,
+      provisional,
+    }));
   return {
     throughFrame: end,
     committedThroughFrame: Math.max(previousBoundary, boundary),
@@ -311,9 +316,13 @@ export function createExtensionLiveController({
   setDeadline = globalThis.setTimeout.bind(globalThis),
   clearDeadline = globalThis.clearTimeout.bind(globalThis),
   requestTimeoutMs = 8000,
-  onState = () => {},
+  onState = () => {
+    /* The caller may omit state notifications. */
+  },
   language = 'auto',
 }: LiveControllerOptions = {}) {
+  const isRunning = () => running;
+  const hasPrepared = () => !!prepared;
   let running = false,
     polling: Promise<void> | null = null,
     renewing: Promise<void> | null = null,
@@ -355,7 +364,9 @@ export function createExtensionLiveController({
       statusReports.set(state.recordingId, report);
       // Best effort: status outages must never cancel inference or draft persistence.
       void request((signal) => api.status?.(state.recordingId, body, signal) ?? Promise.resolve())
-        .catch(() => {})
+        .catch(() => {
+          /* Lease cleanup is best effort; the server also expires abandoned leases. */
+        })
         .finally(() => {
           report.pending = false;
         });
@@ -377,16 +388,19 @@ export function createExtensionLiveController({
     const controller = new AbortController();
     fetches.add(controller);
     let timeout: number | ReturnType<typeof setTimeout> | undefined;
-    let abort: () => void = () => {};
+    let abort: () => void = () => {
+      /* Cancellation is best effort while the controller relinquishes ownership. */
+    };
     // Racing the abort also settles a misbehaving transport that ignores its
     // signal, so it cannot monopolize the poll/renew guard indefinitely.
     const interrupted = new Promise<never>((_resolve, reject: (reason?: unknown) => void) => {
-      abort = () => reject(controller.signal.reason || aborted());
+      abort = () => {
+        reject((controller.signal.reason as Error | undefined) ?? aborted());
+      };
       controller.signal.addEventListener('abort', abort, { once: true });
-      timeout = setDeadline(
-        () => controller.abort(new DOMException('Echo live request timed out.', 'TimeoutError')),
-        requestTimeoutMs,
-      );
+      timeout = setDeadline(() => {
+        controller.abort(new DOMException('Echo live request timed out.', 'TimeoutError'));
+      }, requestTimeoutMs);
     });
     try {
       return await Promise.race([
@@ -416,7 +430,7 @@ export function createExtensionLiveController({
     session = null;
   };
   const watchdog = () => {
-    if (!running || !session || now() < session.expiresAt) return;
+    if (!isRunning() || !session || now() < session.expiresAt) return;
     const id = session.recordingId;
     lifecycle++;
     discardSession();
@@ -443,13 +457,13 @@ export function createExtensionLiveController({
   };
   async function renewLease() {
     watchdog();
-    if (!running || !session || renewing) return;
+    if (!isRunning() || !session || renewing) return;
     const captured = session;
     const work = (async () => {
       try {
         const grant = await request((signal) => api.lease(captured.recordingId, ownerId, signal));
         watchdog();
-        if (session !== captured || !running) return;
+        if (session !== captured || !isRunning()) return;
         const lease = parseLease(grant);
         if (lease.generation !== captured.generation) {
           discardSession();
@@ -459,7 +473,7 @@ export function createExtensionLiveController({
         captured.expiresAt = lease.expiresAt;
         armExpiry();
       } catch (error) {
-        if (session !== captured || !running) return;
+        if (session !== captured || !isRunning()) return;
         discardSession();
         mark(
           captured.recordingId,
@@ -503,7 +517,7 @@ export function createExtensionLiveController({
   function pump() {
     watchdog();
     if (
-      !running ||
+      !isRunning() ||
       active ||
       !session ||
       !prepared?.audio ||
@@ -566,7 +580,7 @@ export function createExtensionLiveController({
           },
         );
       } catch (error) {
-        if (active !== job || !running) return;
+        if (active !== job || !isRunning()) return;
         // An ambiguous draft acknowledgement must reload the durable cursor;
         // replaying an older local cursor could regress a successful write.
         discardSession();
@@ -591,7 +605,7 @@ export function createExtensionLiveController({
     const token = lifecycle;
     try {
       const reply = await request((signal) => api.recordings(signal));
-      if (!running || token !== lifecycle) return;
+      if (!isRunning() || token !== lifecycle) return;
       records = reply.recordings.filter((record) => record.status !== 'deleted');
       const oldStates = new Map(states.map((state) => [state.recordingId, state]));
       states = records.map((record) => ({
@@ -622,7 +636,7 @@ export function createExtensionLiveController({
         return;
       }
       const model = await inference.getLiveModelStatus();
-      if (!running || token !== lifecycle) return;
+      if (!isRunning() || token !== lifecycle) return;
       if (!model.ready) {
         discardSession();
         for (const record of eligible) mark(record.recordingId, 'model-missing');
@@ -658,7 +672,7 @@ export function createExtensionLiveController({
         for (const record of ready.length ? ready : available) {
           try {
             const grant = await request((signal) => api.lease(record.recordingId, ownerId, signal));
-            if (!running || token !== lifecycle) return;
+            if (!isRunning() || token !== lifecycle) return;
             const lease = parseLease(grant);
             if (
               typeof grant.totalFrames !== 'number' ||
@@ -681,7 +695,7 @@ export function createExtensionLiveController({
             mark(record.recordingId, 'waiting-audio', { draft });
             break;
           } catch (error) {
-            if (!running || token !== lifecycle) return;
+            if (!isRunning() || token !== lifecycle) return;
             leaseBackoff.set(record.recordingId, now() + 10000);
             mark(
               record.recordingId,
@@ -700,13 +714,13 @@ export function createExtensionLiveController({
           ? session.draft.throughFrame - (LIVE_WINDOW_FRAMES - LIVE_STRIDE_FRAMES)
           : 0;
         prepare(session, start, record?.totalFrames ?? 0);
-        if (!prepared && record) mark(record.recordingId, 'waiting-audio');
+        if (!hasPrepared() && record) mark(record.recordingId, 'waiting-audio');
       } else if (active && !prepared)
         prepare(session, active.item.startFrame + LIVE_STRIDE_FRAMES, record?.totalFrames ?? 0);
       publish();
       pump();
     } catch (error) {
-      if (!running || token !== lifecycle) return;
+      if (!isRunning() || token !== lifecycle) return;
       discardSession();
       states = states.map((state) => ({
         ...state,
@@ -719,7 +733,7 @@ export function createExtensionLiveController({
   }
   const poll = () => {
     watchdog();
-    if (!running) return Promise.resolve();
+    if (!isRunning()) return Promise.resolve();
     if (polling) return polling;
     const work = tick();
     polling = work;
@@ -790,11 +804,13 @@ export function installExtensionLive(options: LiveControllerOptions = {}) {
     },
   });
   const busy = (event: WindowEventMap['echo-inference-state']) => {
-    if (event.detail?.busy) controller.preempt();
+    if (event.detail.busy) controller.preempt();
     else void controller.poll();
   };
   const open = () => void controller.start();
-  const close = () => controller.stop();
+  const close = () => {
+    controller.stop();
+  };
   window.addEventListener('echo-inference-state', busy);
   window.addEventListener('pagehide', close);
   window.addEventListener('pageshow', open);

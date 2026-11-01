@@ -109,7 +109,7 @@ function harness({
           setupOpened++;
         },
         id: 'synthetic',
-        getURL: (path: unknown) => `chrome-extension://synthetic/${path}`,
+        getURL: (path: unknown) => `chrome-extension://synthetic/${String(path)}`,
         getContexts: async () => [{}],
         sendMessage: async (message: unknown) => {
           sent.push(object(message));
@@ -140,7 +140,7 @@ function harness({
       storage: {
         session: {
           get: async (key: string) => (key === 'captureOwner' ? { captureOwner: owner } : session),
-          set: async (value: { [s: string]: unknown } | ArrayLike<unknown>) => {
+          set: async (value: Record<string, unknown> | ArrayLike<unknown>) => {
             for (const [key, item] of Object.entries(value))
               if (key === 'captureOwner') {
                 const o = object(item);
@@ -155,7 +155,7 @@ function harness({
           },
           remove: async (key: string) => {
             if (key === 'captureOwner') owner = undefined;
-            else delete session[key];
+            else Reflect.deleteProperty(session, key);
           },
           setAccessLevel: async () => {},
         },
@@ -244,14 +244,20 @@ async function settle() {
 for (const [reason, trigger] of [
   [
     'meeting-changed',
-    (h) =>
+    (h) => {
       defined(h.events.updated)(
         7,
         { url: 'https://meet.google.com/xyz-abcd-efg' },
         { url: 'https://meet.google.com/xyz-abcd-efg' },
-      ),
+      );
+    },
   ],
-  ['tab-closed', (h) => defined(h.events.removed)(7)],
+  [
+    'tab-closed',
+    (h) => {
+      defined(h.events.removed)(7);
+    },
+  ],
   ['document-changed', (h) => h.observation('muted', 'new-document')],
   [
     'meeting-changed',
@@ -259,7 +265,7 @@ for (const [reason, trigger] of [
   ],
   ['meeting-ended', (h) => h.observation('ended')],
 ] satisfies [string, (h: ReturnType<typeof harness>) => unknown][])
-  test(`background ${reason} pathway sends a fixed interrupted-stop reason`, async () => {
+  void test(`background ${reason} pathway sends a fixed interrupted-stop reason`, async () => {
     const h = harness();
     defined(trigger)(h);
     await settle();
@@ -270,7 +276,7 @@ for (const [reason, trigger] of [
     assert.equal(defined(control)['recordingId'], 'recording');
     assert.equal(JSON.stringify(control).includes('https://'), false);
   });
-test('mute and unrelated tab loading do not stop a healthy recording', async () => {
+void test('mute and unrelated tab loading do not stop a healthy recording', async () => {
   const h = harness();
   defined(h.events.updated)(8, { status: 'loading' }, {});
   h.observation('muted');
@@ -280,7 +286,7 @@ test('mute and unrelated tab loading do not stop a healthy recording', async () 
     false,
   );
 });
-test('same-document loading and completion keep capture active with microphone excluded during verification', async () => {
+void test('same-document loading and completion keep capture active with microphone excluded during verification', async () => {
   const h = harness();
   defined(h.events.updated)(
     7,
@@ -300,7 +306,7 @@ test('same-document loading and completion keep capture active with microphone e
   );
   assert.ok(h.sent.some((message) => message['type'] === 'GATE' && !message['allowed']));
 });
-test('same-URL replacement is stopped using Chrome document identity even without a pagehide report', async () => {
+void test('same-URL replacement is stopped using Chrome document identity even without a pagehide report', async () => {
   const h = harness();
   defined(h.events.updated)(
     7,
@@ -320,7 +326,7 @@ test('same-URL replacement is stopped using Chrome document identity even withou
     'document-changed',
   );
 });
-test('Start pins the owner document from Chrome injection even before a mute observation arrives', async () => {
+void test('Start pins the owner document from Chrome injection even before a mute observation arrives', async () => {
   const h = harness();
   h.clear();
   const reply = await new Promise((resolve) =>
@@ -334,7 +340,7 @@ test('Start pins the owner document from Chrome injection even before a mute obs
   assert.equal(defined(h.owner()).documentId, 'original');
 });
 for (const documentId of [null, new Error('permission lost')])
-  test('an unavailable document probe stops conservatively', async () => {
+  void test('an unavailable document probe stops conservatively', async () => {
     const h = harness();
     h.probe(documentId);
     defined(h.events.updated)(7, { status: 'loading' }, {});
@@ -344,7 +350,7 @@ for (const documentId of [null, new Error('permission lost')])
       'document-unavailable',
     );
   });
-test('original top-frame pagehide stops capture and excludes microphone before stop', async () => {
+void test('original top-frame pagehide stops capture and excludes microphone before stop', async () => {
   const h = harness();
   h.pagehide();
   await settle();
@@ -361,7 +367,7 @@ for (const patch of [
   { documentId: 'unrelated-document' },
   { url: 'https://private.invalid/' },
 ])
-  test(`untrusted/subframe/stale document pagehide cannot stop the original capture: ${JSON.stringify(patch)}`, async () => {
+  void test(`untrusted/subframe/stale document pagehide cannot stop the original capture: ${JSON.stringify(patch)}`, async () => {
     const h = harness();
     h.pagehide(patch);
     await settle();
@@ -384,7 +390,11 @@ function contentHarness() {
   let failSend: string | undefined;
   const sent: Record<string, unknown>[] = [];
   const observers: { callback: () => void; disconnected: boolean }[] = [];
-  type Timer = { callback: () => void; due: number; interval: number };
+  interface Timer {
+    callback: () => void;
+    due: number;
+    interval: number;
+  }
   const timers = new Map<number, Timer>();
   const handlers = new Set<(event: { isTrusted: boolean }) => void>();
   const addTimer = (callback: () => void, ms: number, repeat = false) => {
@@ -454,7 +464,9 @@ function contentHarness() {
       },
     },
   });
-  const inject = () => vm.runInContext(defined(contentBuilt.outputFiles[0]).text, context);
+  const inject = () => {
+    vm.runInContext(defined(contentBuilt.outputFiles[0]).text, context);
+  };
   inject();
   const advance = (ms: number) => {
     const end = now + ms;
@@ -493,7 +505,7 @@ function contentHarness() {
     },
   };
 }
-test('mutation bursts scan once per 100 ms and report the latest mute state without stale caching', () => {
+void test('mutation bursts scan once per 100 ms and report the latest mute state without stale caching', () => {
   const h = contentHarness();
   assert.equal(h.scans(), 1);
   assert.equal(defined(h.sent[0])['state'], 'unmuted');
@@ -516,14 +528,15 @@ test('mutation bursts scan once per 100 ms and report the latest mute state with
   }
   assert.equal(defined(h.sent.at(-1))['state'], 'unknown');
   assert.equal(h.scans(), h.sent.length);
-  assert.ok(h.sent.length <= 12);
+  const sentCount = () => h.sent.length;
+  assert.ok(sentCount() <= 12);
   for (let i = 1; i < h.sent.length; i++)
     assert.ok(
       numeric(defined(h.sent[i])['observedAt']) - numeric(defined(h.sent[i - 1])['observedAt']) >=
         100,
     );
 });
-test('the independent 500 ms heartbeat scans fresh controls without mutation events', () => {
+void test('the independent 500 ms heartbeat scans fresh controls without mutation events', () => {
   const h = contentHarness();
   h.label('Turn on microphone');
   h.advance(500);
@@ -534,7 +547,7 @@ test('the independent 500 ms heartbeat scans fresh controls without mutation eve
   assert.equal(h.sent.length, 3);
   assert.equal(defined(h.sent[2])['observedAt'], 2000);
 });
-test('trusted pagehide sends unknown immediately and cancels pending scans; forged events do neither', () => {
+void test('trusted pagehide sends unknown immediately and cancels pending scans; forged events do neither', () => {
   const h = contentHarness();
   h.advance(50);
   h.mutate();
@@ -553,7 +566,7 @@ test('trusted pagehide sends unknown immediately and cancels pending scans; forg
   h.advance(1000);
   assert.equal(h.sent.length, 2);
 });
-test('reinjecting content cancels pending scans and preserves sequence across observer replacement', () => {
+void test('reinjecting content cancels pending scans and preserves sequence across observer replacement', () => {
   const h = contentHarness();
   h.advance(50);
   h.mutate();
@@ -574,7 +587,7 @@ test('reinjecting content cancels pending scans and preserves sequence across ob
   assert.equal(defined(h.sent.at(-1))['seq'], 2);
 });
 for (const failure of ['sync', 'async'])
-  test(`observer ${failure} runtime disconnect disposes heartbeat and pending mutation timer`, async () => {
+  void test(`observer ${failure} runtime disconnect disposes heartbeat and pending mutation timer`, async () => {
     const h = contentHarness();
     h.advance(50);
     h.mutate();
@@ -589,7 +602,7 @@ for (const failure of ['sync', 'async'])
     h.mutate();
     assert.equal(h.scans(), scans);
   });
-test('an observer retires when the worker reports that its tab is not recording', async () => {
+void test('an observer retires when the worker reports that its tab is not recording', async () => {
   const h = contentHarness();
   h.fail('retire');
   h.advance(500);
@@ -599,7 +612,7 @@ test('an observer retires when the worker reports that its tab is not recording'
   assert.equal(h.handlers.size, 0);
 });
 
-test('setup opens on first install only, never on extension update', async () => {
+void test('setup opens on first install only, never on extension update', async () => {
   const h = harness();
   defined(h.events.installed)({ reason: 'update' });
   await settle();
@@ -608,7 +621,7 @@ test('setup opens on first install only, never on extension update', async () =>
   await settle();
   assert.equal(h.setupOpened(), 1);
 });
-test('an idle worker keeps no timers and retires observers of tabs that are not recording', async () => {
+void test('an idle worker keeps no timers and retires observers of tabs that are not recording', async () => {
   const h = harness({ recording: false });
   await settle();
   assert.equal(h.intervals.length, 0, 'no gate or claim polling while nothing records');
@@ -623,7 +636,7 @@ test('an idle worker keeps no timers and retires observers of tabs that are not 
     false,
   );
 });
-test('a recording runs the gate on observations and once a second, and keeps its observer', async () => {
+void test('a recording runs the gate on observations and once a second, and keeps its observer', async () => {
   const h = harness();
   let reply: unknown;
   h.observation('unmuted', 'original', MEET_URL, (value: unknown) => {
@@ -634,7 +647,7 @@ test('a recording runs the gate on observations and once a second, and keeps its
   assert.deepEqual([...h.intervals], [1000]);
   assert.ok(h.sent.some((message) => message['type'] === 'GATE' && message['allowed']));
 });
-test('Teams in-meeting hash navigation keeps recording and the microphone gate', async () => {
+void test('Teams in-meeting hash navigation keeps recording and the microphone gate', async () => {
   const join =
     'https://teams.microsoft.com/v2/?meetingjoin=true#/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%7d';
   const h = harness({ url: join, identity: 'https://teams.microsoft.com/v2' });
@@ -655,7 +668,7 @@ test('Teams in-meeting hash navigation keeps recording and the microphone gate',
     'meeting-changed',
   );
 });
-test('the shortcut stops an active recording', async () => {
+void test('the shortcut stops an active recording', async () => {
   const h = harness();
   defined(h.events.command)('toggle-recording', { id: 7, url: MEET_URL });
   await settle();
@@ -664,7 +677,7 @@ test('the shortcut stops an active recording', async () => {
   assert.equal(defined(stop)['interrupted'], undefined);
   assert.equal(h.owner(), undefined);
 });
-test('the shortcut starts only where consent is remembered, otherwise it opens the popup', async () => {
+void test('the shortcut starts only where consent is remembered, otherwise it opens the popup', async () => {
   const unconfirmed = harness({ recording: false });
   defined(unconfirmed.events.command)('toggle-recording', {
     id: 7,
@@ -691,7 +704,7 @@ test('the shortcut starts only where consent is remembered, otherwise it opens t
   assert.equal(defined(start)['micEnabled'], false);
   assert.equal(defined(remembered.owner()).tabId, 7);
 });
-test('settled uploads close an idle offscreen document and schedule the offline retry', async () => {
+void test('settled uploads close an idle offscreen document and schedule the offline retry', async () => {
   const h = harness({ recording: false });
   h.fromOffscreen({ type: 'UPLOADS_SETTLED', failures: 2, retryAt: 123456 });
   await settle();
@@ -703,7 +716,7 @@ test('settled uploads close an idle offscreen document and schedule the offline 
   await settle();
   assert.equal(recording.closedDocuments(), 0, 'a recording keeps its offscreen document');
 });
-test('an enabled meeting tab shows the ready badge; recording shows REC everywhere', async () => {
+void test('an enabled meeting tab shows the ready badge; recording shows REC everywhere', async () => {
   const h = harness({ recording: false });
   defined(h.events.activated)({ tabId: 7 });
   await settle();

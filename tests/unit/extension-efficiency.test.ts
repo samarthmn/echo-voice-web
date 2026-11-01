@@ -1,3 +1,7 @@
+import type * as CoreModule from '../../extension/src/core.ts';
+import type * as AdaptersModule from '../../extension/src/adapters.ts';
+import type * as AudioModule from '../../extension/src/audio.ts';
+import type * as UploadSchedulerModule from '../../extension/src/upload-scheduler.ts';
 import { object as moduleObject } from '../helpers/assertions.ts';
 import { defined, installGlobal } from '../helpers/assertions.ts';
 import { array } from '../helpers/assertions.ts';
@@ -10,12 +14,12 @@ import path from 'node:path';
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const scratch = path.join(project, 'tmp', 'extension-runtime', 'efficiency');
 await mkdir(scratch, { recursive: true });
-type Modules = {
-  core: typeof import('../../extension/src/core.ts');
-  adapters: typeof import('../../extension/src/adapters.ts');
-  audio: typeof import('../../extension/src/audio.ts');
-  'upload-scheduler': typeof import('../../extension/src/upload-scheduler.ts');
-};
+interface Modules {
+  core: typeof CoreModule;
+  adapters: typeof AdaptersModule;
+  audio: typeof AudioModule;
+  'upload-scheduler': typeof UploadSchedulerModule;
+}
 async function moduleFor<K extends keyof Modules>(name: K): Promise<Modules[K]> {
   const outfile = path.join(scratch, `${name}.mjs`);
   await build({
@@ -65,7 +69,7 @@ function fakeClock() {
     },
   };
 }
-function scheduler(outcomes: import('../../extension/src/upload-scheduler.ts').PassOutcome[]) {
+function scheduler(outcomes: UploadSchedulerModule.PassOutcome[]) {
   const clock = fakeClock();
   const passes: number[] = [];
   const settled: unknown[] = [];
@@ -79,7 +83,7 @@ function scheduler(outcomes: import('../../extension/src/upload-scheduler.ts').P
   );
   return { clock, passes, settled, api };
 }
-test('committed audio uploads are coalesced and spaced; nothing is scheduled while idle', async () => {
+void test('committed audio uploads are coalesced and spaced; nothing is scheduled while idle', async () => {
   const h = scheduler([]);
   h.api.request();
   h.api.request();
@@ -96,7 +100,7 @@ test('committed audio uploads are coalesced and spaced; nothing is scheduled whi
   assert.equal(h.passes.length, 2, 'no polling without new audio');
   assert.equal(h.api.busy(), false);
 });
-test('a backlog continues immediately; offline Echo backs off exponentially up to five minutes', async () => {
+void test('a backlog continues immediately; offline Echo backs off exponentially up to five minutes', async () => {
   const h = scheduler(['more', 'more', 'offline', 'offline', 'offline']);
   await h.api.retryNow();
   await h.clock.advance(0);
@@ -114,7 +118,7 @@ test('a backlog continues immediately; offline Echo backs off exponentially up t
   assert.equal(uploads.backoffDelay(20), uploads.BACKOFF_MAX_MS);
   assert.equal(uploads.BACKOFF_MAX_MS, 5 * 60_000);
 });
-test('connect or a user retry uploads at once, and a resumed backoff keeps growing', async () => {
+void test('connect or a user retry uploads at once, and a resumed backoff keeps growing', async () => {
   const h = scheduler(['offline', 'offline']);
   await h.api.retryNow(4);
   assert.deepEqual(h.settled.at(-1), { failures: 5, retryAt: 160_000 });
@@ -122,7 +126,7 @@ test('connect or a user retry uploads at once, and a resumed backoff keeps growi
   assert.deepEqual(h.passes, [0, 0], 'retryNow ignores the pending backoff');
   assert.deepEqual(h.settled.at(-1), { failures: 1, retryAt: 10_000 });
 });
-test('an unexpected pass failure backs off instead of looping', async () => {
+void test('an unexpected pass failure backs off instead of looping', async () => {
   const clock = fakeClock();
   const settled: unknown = [];
   const api = uploads.uploadScheduler(
@@ -141,7 +145,7 @@ test('an unexpected pass failure backs off instead of looping', async () => {
   }
   assert.deepEqual(settled, [{ failures: 1, retryAt: 10_000 }]);
 });
-test('active control polling repeats every three seconds and stops on capture end', async () => {
+void test('active control polling repeats every three seconds and stops on capture end', async () => {
   const h = scheduler(['poll', 'poll', 'idle']);
   await h.api.retryNow();
   await h.clock.advance(2999);
@@ -152,7 +156,7 @@ test('active control polling repeats every three seconds and stops on capture en
   await h.clock.advance(10_000);
   assert.deepEqual(h.passes, [0, 3000]);
 });
-test('meeting identity ignores hash and volatile query parameters for every service', () => {
+void test('meeting identity ignores hash and volatile query parameters for every service', () => {
   const same = (urls: string[]) => {
     const identities = urls.map((url: string) => core.meetingIdentity(url));
     assert.ok(identities[0], urls[0]);
@@ -196,14 +200,14 @@ test('meeting identity ignores hash and volatile query parameters for every serv
   );
   assert.equal(core.meetingIdentity('https://zoom.us.evil/wc/123/join'), undefined);
 });
-test('a Teams view without a meeting cannot start recording but keeps a running one', () => {
+void test('a Teams view without a meeting cannot start recording but keeps a running one', () => {
   const chat = 'https://teams.microsoft.com/v2/#/conversations/19:abc';
   assert.equal(core.meetingFor(chat), null);
   assert.equal(core.meetingProvider(chat), 'teams');
   const join = 'https://teams.microsoft.com/v2/?meetingjoin=true#/l/meetup-join/19%3ameeting_abc';
   const meeting = core.meetingFor(join);
   assert.equal(defined(meeting).provider, 'teams');
-  const observation: import('../../extension/src/core.ts').Observation = {
+  const observation: CoreModule.Observation = {
     url: chat,
     state: 'unmuted',
     seq: 1,
@@ -266,7 +270,7 @@ function page({
   };
 }
 installGlobal('getComputedStyle', () => ({ visibility: 'visible', display: 'block' }));
-test('Meet microphone state is read from data-is-muted in any interface language', () => {
+void test('Meet microphone state is read from data-is-muted in any interface language', () => {
   const mic = (muted: boolean) =>
     element({ 'data-is-muted': String(muted), 'aria-label': 'Mikrofon deaktivieren (Strg + D)' });
   const camera = element({
@@ -284,7 +288,7 @@ test('Meet microphone state is read from data-is-muted in any interface language
     'muted',
   );
 });
-test('localized controls without a language-independent signal stay unknown and exclude the mic', () => {
+void test('localized controls without a language-independent signal stay unknown and exclude the mic', () => {
   const german = element({ 'aria-label': 'Mikrofon deaktivieren (Strg + D)' });
   assert.equal(adapters.observeDocument('meet', page({ buttons: [german] })), 'unknown');
   const zoom = element({ 'aria-label': 'Stummschaltung aufheben', 'aria-pressed': 'true' });
@@ -296,7 +300,7 @@ test('localized controls without a language-independent signal stay unknown and 
     'aria-pressed polarity is never guessed',
   );
 });
-test('Teams data-state is language independent; conflicts and duplicates are ambiguous', () => {
+void test('Teams data-state is language independent; conflicts and duplicates are ambiguous', () => {
   const teams = (state: string, label = 'マイクをミュート') =>
     element({ id: 'microphone-button', 'data-state': state, 'aria-label': label });
   assert.equal(adapters.observeDocument('teams', page({ buttons: [teams('mic-off')] })), 'muted');
@@ -311,7 +315,7 @@ test('Teams data-state is language independent; conflicts and duplicates are amb
     'unknown',
   );
 });
-test('scans stay inside the call toolbar and measure layout only for microphone candidates', () => {
+void test('scans stay inside the call toolbar and measure layout only for microphone candidates', () => {
   const mic = element({
     'data-is-muted': 'false',
     'aria-label': 'Mikrofon deaktivieren (Strg + D)',
@@ -340,7 +344,7 @@ test('scans stay inside the call toolbar and measure layout only for microphone 
   });
   assert.equal(adapters.observeDocument('meet', page({ buttons: [hidden] })), 'unknown');
 });
-test('English prejoin and ended texts still win over a microphone toggle', () => {
+void test('English prejoin and ended texts still win over a microphone toggle', () => {
   const mic = element({ 'data-is-muted': 'false', 'aria-label': 'Turn off microphone (⌘ + d)' });
   const join = element({}, 'Join now');
   assert.equal(
@@ -348,7 +352,7 @@ test('English prejoin and ended texts still win over a microphone toggle', () =>
     'prejoin',
   );
 });
-test('audio thread reuses its mixing and resampling buffers', () => {
+void test('audio thread reuses its mixing and resampling buffers', () => {
   const mixer = new audio.PCMMixer();
   const tab = [new Float32Array(128).fill(0.25)];
   const mic = [new Float32Array(128).fill(0.25)];

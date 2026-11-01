@@ -12,7 +12,10 @@ interface ObservedDocument {
 }
 type MicState = 'unmuted' | 'muted';
 /** One candidate microphone control: its label and any language-independent state attribute. */
-type MicControl = { label: string; toggle?: MicState | null };
+interface MicControl {
+  label: string;
+  toggle?: MicState | null;
+}
 // English labels: the fallback when a provider exposes no language-independent state.
 const labels: Record<Provider, { on: RegExp; off: RegExp }> = {
   meet: {
@@ -79,7 +82,7 @@ function stateFromControls(
   controls: MicControl[],
   texts: string[],
 ): MeetingState {
-  if (!labels[provider]) return 'unknown';
+  if (!Object.hasOwn(labels, provider)) return 'unknown';
   if (texts.some((text) => ENDED.test(text.trim()))) return 'ended';
   if (texts.some((text) => PREJOIN.test(text.trim()))) return 'prejoin';
   const states = controls

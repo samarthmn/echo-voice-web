@@ -64,9 +64,11 @@ async function ready() {
       const health = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1000) });
       if (health.ok) {
         const response = await fetch(`${base}/api/storage`, { signal: AbortSignal.timeout(1000) });
-        if (response.ok) storage = record(record((await response.json()) as unknown) as unknown);
+        if (response.ok) storage = record(record((await response.json()) as unknown));
       }
-    } catch {}
+    } catch {
+      /* The isolated server may still be starting; retry until the readiness deadline. */
+    }
     requireServer();
     if (storage) {
       if (
@@ -101,9 +103,10 @@ async function run(script: string) {
       stdio: 'inherit',
     });
     child.once('error', reject);
-    child.once('exit', (code) =>
-      code === 0 ? resolve() : reject(new Error(`${script} failed (${code})`)),
-    );
+    child.once('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${script} failed (${code})`));
+    });
   });
   requireServer();
 }

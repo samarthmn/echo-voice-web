@@ -4,7 +4,11 @@ import { meetingFor } from './core.ts';
 import { allRecordings } from './storage.ts';
 import { settings } from './settings.ts';
 import type { ActiveStatus } from './offscreen.ts';
-type Badge = { text: string; color: string; title: string };
+interface Badge {
+  text: string;
+  color: string;
+  title: string;
+}
 const RECORDING_COLOR = '#6858d9';
 const ATTENTION_COLOR = '#af3543';
 const READY_COLOR = '#70707b';

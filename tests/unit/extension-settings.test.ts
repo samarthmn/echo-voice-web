@@ -34,7 +34,7 @@ async function harness(local = {}) {
 }
 const pair = { libraryId: library, endpoint, credential: 'existing-credential' };
 const preferences = { enabledProviders: ['zoom'], micGranted: true, micDeviceId: 'selected' };
-test('concurrent first reads create one durable installation identity and an empty link', async () => {
+void test('concurrent first reads create one durable installation identity and an empty link', async () => {
   const h = await harness();
   const rows = await Promise.all([h.api.settings(), h.api.settings(), h.api.settings()]);
   assert.equal(new Set(rows.map((row: { installationId: unknown }) => row.installationId)).size, 1);
@@ -42,7 +42,7 @@ test('concurrent first reads create one durable installation identity and an emp
   assert.equal((await h.api.readLink()).state, 'none');
   assert.equal(defined(h.meta.get('credential-device-key')).extractable, false);
 });
-test('pairing v1 plaintext pairs migrate to a sealed connected link; obsolete state is removed', async () => {
+void test('pairing v1 plaintext pairs migrate to a sealed connected link; obsolete state is removed', async () => {
   const h = await harness({
     settings: {
       installationId: 'existing',
@@ -68,7 +68,7 @@ test('pairing v1 plaintext pairs migrate to a sealed connected link; obsolete st
   await h.api.readLink();
   assert.equal(h.writes, writes, 'a migrated profile is read without rewriting it');
 });
-test('device-sealed v1 pairs migrate; a missing active pair becomes an empty link', async () => {
+void test('device-sealed v1 pairs migrate; a missing active pair becomes an empty link', async () => {
   const sealed = await harness();
   const encryptedPairs = await sealed.api.sealSecret({ [library]: pair }, 'settings-pairs');
   const h = await harness({
@@ -87,7 +87,7 @@ test('device-sealed v1 pairs migrate; a missing active pair becomes an empty lin
   });
   assert.deepEqual({ ...(await none.api.readLink()) }, { state: 'none' });
 });
-test('queued provider updates derive their lists from the latest saved state and recover after a failed write', async () => {
+void test('queued provider updates derive their lists from the latest saved state and recover after a failed write', async () => {
   const h = await harness();
   await Promise.all(
     (['meet', 'zoom'] as const).map((provider) =>
@@ -103,7 +103,7 @@ test('queued provider updates derive their lists from the latest saved state and
   assert.equal(object(h.local['settings'])['micDeviceId'], 'selected');
   assert.deepEqual(object(h.local['settings'])['enabledProviders'], ['meet', 'zoom']);
 });
-test('saving a link clears the revoked flag; revoking only matches the current credential', async () => {
+void test('saving a link clears the revoked flag; revoking only matches the current credential', async () => {
   const h = await harness();
   await h.api.saveLink({ state: 'connected', ...pair });
   await h.api.revokeCredential('stale-credential', endpoint);
@@ -117,7 +117,7 @@ test('saving a link clears the revoked flag; revoking only matches the current c
     h.api.saveLink({ state: 'connected', ...pair, endpoint: 'https://example.invalid' }),
   );
 });
-test('an open popup refreshes provider status without resetting an explicit microphone choice', async () => {
+void test('an open popup refreshes provider status without resetting an explicit microphone choice', async () => {
   const elements = new Map<string, TestElement>();
   const element = (id: string) => {
     if (!elements.has(id))
@@ -186,7 +186,7 @@ test('an open popup refreshes provider status without resetting an explicit micr
   assert.match(element('meeting').textContent, /Enabled/);
   assert.equal(element('mic').checked, false);
 });
-test('overlapping first popup refreshes cannot re-enable a microphone explicitly excluded by the user', async () => {
+void test('overlapping first popup refreshes cannot re-enable a microphone explicitly excluded by the user', async () => {
   const elements = new Map<string, TestElement>();
   const element = (id: string) => {
     if (!elements.has(id))
@@ -196,7 +196,7 @@ test('overlapping first popup refreshes cannot re-enable a microphone explicitly
         checked: false,
         hidden: false,
         className: '',
-        listeners: {} as Record<string, () => unknown>,
+        listeners: {},
         append() {},
         replaceChildren() {},
         setAttribute() {},

@@ -54,7 +54,10 @@ export function connectionCard(onChange: () => Promise<void>) {
     element('cancel-connect').hidden = current !== 'waiting';
   }
   async function pairing(
-    message: { type: string; endpoint?: string | undefined },
+    message: {
+      type: 'PAIR_BEGIN' | 'PAIR_SHOW_APPROVAL' | 'PAIR_CANCEL';
+      endpoint?: string | undefined;
+    },
     button: HTMLButtonElement,
   ) {
     button.disabled = true;

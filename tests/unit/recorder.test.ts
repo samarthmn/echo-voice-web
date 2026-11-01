@@ -85,7 +85,7 @@ const meeting: Meeting = {
 };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-test('captures only after explicit start, serializes chunks, excludes paused duration, and logs mute gaps', async () => {
+void test('captures only after explicit start, serializes chunks, excludes paused duration, and logs mute gaps', async () => {
   const track = environment();
   const calls: Record<string, unknown>[] = [];
   let pending = 0;
@@ -137,7 +137,7 @@ test('captures only after explicit start, serializes chunks, excludes paused dur
   controller.dispose();
 });
 
-test('failed audio upload stops capture and retains the failing and final chunks for retry', async () => {
+void test('failed audio upload stops capture and retains the failing and final chunks for retry', async () => {
   const track = environment();
   let failing = true;
   const sequences: unknown = [];
@@ -172,7 +172,7 @@ test('failed audio upload stops capture and retains the failing and final chunks
   controller.dispose();
 });
 
-test('a failed final metadata save can be retried without reuploading acknowledged audio', async () => {
+void test('a failed final metadata save can be retried without reuploading acknowledged audio', async () => {
   environment();
   let patches = 0,
     uploads = 0;
@@ -198,7 +198,7 @@ test('a failed final metadata save can be retried without reuploading acknowledg
   controller.dispose();
 });
 
-test('a disconnected microphone saves the final chunk as interrupted', async () => {
+void test('a disconnected microphone saves the final chunk as interrupted', async () => {
   const track = environment();
   let result: (Pick<Meeting, 'id'> & Partial<Meeting>) | undefined;
   const controller = createRecorderController({
@@ -216,7 +216,7 @@ test('a disconnected microphone saves the final chunk as interrupted', async () 
   controller.dispose();
 });
 
-test('device errors are actionable and do not prevent a later start', async () => {
+void test('device errors are actionable and do not prevent a later start', async () => {
   environment();
   let requests = 0;
   const original = navigator.mediaDevices.getUserMedia;
@@ -242,7 +242,7 @@ test('device errors are actionable and do not prevent a later start', async () =
   controller.dispose();
 });
 
-test('server status is recorded before capture and failed setup releases the microphone', async () => {
+void test('server status is recorded before capture and failed setup releases the microphone', async () => {
   const track = environment();
   const controller = createRecorderController({
     request: async (_path, options) => {

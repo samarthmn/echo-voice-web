@@ -10,15 +10,17 @@ import type { Progress } from './types/domain.ts';
 interface NativeClientOptions {
   fetchRequest?: typeof fetch;
   storage?: () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
-  events?: Pick<Window, 'addEventListener' | 'removeEventListener'>;
+  events?: Pick<Window, 'addEventListener' | 'removeEventListener'> | undefined;
   online?: () => boolean;
-  locks?: {
-    request: <T>(
-      name: string,
-      options: { ifAvailable: true },
-      callback: (lock: Pick<Lock, 'name'> | null) => Promise<T>,
-    ) => Promise<T>;
-  };
+  locks?:
+    | {
+        request: <T>(
+          name: string,
+          options: { ifAvailable: true },
+          callback: (lock: Pick<Lock, 'name'> | null) => Promise<T>,
+        ) => Promise<T>;
+      }
+    | undefined;
   setTimer?: (callback: () => void, ms: number) => number | ReturnType<typeof setTimeout>;
   clearTimer?: (id: number | ReturnType<typeof setTimeout> | undefined) => void;
   retryDelays?: number[];
@@ -49,9 +51,9 @@ export function nativePCM(audio: Float32Array | undefined) {
 export function createNativeSpeechClient({
   fetchRequest = (...args: Parameters<typeof fetch>) => fetch(...args),
   storage = () => globalThis.sessionStorage,
-  events = globalThis.window,
-  online = () => globalThis.navigator?.onLine !== false,
-  locks = globalThis.navigator?.locks,
+  events = (globalThis as { window?: Window }).window,
+  online = () => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine !== false,
+  locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   retryDelays = [1000, 2000, 4000, 8000, 16000, 30000],
@@ -96,7 +98,7 @@ export function createNativeSpeechClient({
     if (heldLocks.has(id)) return Promise.resolve(true);
     // Without cross-tab ownership proof, a copied marker must never cancel a
     // source tab. Live jobs can still cancel through their in-memory owner.
-    if (!locks?.request) return Promise.resolve(!recovered);
+    if (!locks) return Promise.resolve(!recovered);
     return new Promise<boolean>((resolve) => {
       try {
         void locks
@@ -105,7 +107,9 @@ export function createNativeSpeechClient({
               resolve(false);
               return;
             }
-            let release: () => void = () => {};
+            let release: () => void = () => {
+              /* Replaced synchronously by the lock lifetime promise executor. */
+            };
             const lifetime = new Promise<void>((done) => {
               release = done;
             });
@@ -113,7 +117,9 @@ export function createNativeSpeechClient({
             resolve(true);
             await lifetime;
           })
-          .catch(() => resolve(false));
+          .catch(() => {
+            resolve(false);
+          });
       } catch {
         resolve(false);
       }
@@ -123,7 +129,10 @@ export function createNativeSpeechClient({
     const controller = new AbortController(),
       parent = options.signal;
     let expired = false;
-    const abort = () => controller.abort();
+    const hasExpired = () => expired;
+    const abort = () => {
+      controller.abort();
+    };
     parent?.addEventListener('abort', abort, { once: true });
     if (parent?.aborted) abort();
     // Large loopback PCM uploads have a separate generous bound; status/polls
@@ -142,14 +151,16 @@ export function createNativeSpeechClient({
         signal: controller.signal,
       });
       const data = await responseJson(response).catch(() => null);
-      if (expired)
+      if (hasExpired())
         throw new Error('The local speech engine did not respond. Check the server and retry.');
       if (!response.ok)
         throw new Error(apiError(data) || `The local speech engine returned ${response.status}.`);
       return data;
     } catch (error) {
-      if (expired && !parent?.aborted)
-        throw new Error('The local speech engine did not respond. Check the server and retry.');
+      if (hasExpired() && !parent?.aborted)
+        throw new Error('The local speech engine did not respond. Check the server and retry.', {
+          cause: error,
+        });
       throw error;
     } finally {
       clearTimer(timer);
@@ -173,7 +184,9 @@ export function createNativeSpeechClient({
     if (!owned.has(id) || disposed) return Promise.resolve();
     if (stopping.has(id) && !keepalive) return stopping.get(id) ?? Promise.resolve();
     const controller = new AbortController();
-    const timeout = setTimer(() => controller.abort(), 3000);
+    const timeout = setTimer(() => {
+      controller.abort();
+    }, 3000);
     unrefTimer(timeout);
     const job = jsonRequest(`/jobs/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -182,7 +195,7 @@ export function createNativeSpeechClient({
     })
       .then((value) => {
         const data = nativeJob(value);
-        if (data?.jobId !== id || !['cancelled', 'completed', 'failed'].includes(data.state ?? ''))
+        if (data.jobId !== id || !['cancelled', 'completed', 'failed'].includes(data.state ?? ''))
           throw new Error('The local speech cancellation was not acknowledged.');
         forget(id);
       })
@@ -236,7 +249,10 @@ export function createNativeSpeechClient({
   });
   function pause(signal: AbortSignal) {
     return new Promise<void>((resolve, reject: (reason?: unknown) => void) => {
-      if (signal.aborted) return reject(cancelled());
+      if (signal.aborted) {
+        reject(cancelled());
+        return;
+      }
       const abort = () => {
         clearTimer(timer);
         reject(cancelled());
@@ -290,7 +306,7 @@ export function createNativeSpeechClient({
         }),
       );
       check();
-      if (created?.jobId !== id)
+      if (created.jobId !== id)
         throw new Error('The local speech engine returned an unexpected job identifier.');
       while (true) {
         check();
@@ -356,5 +372,7 @@ export function createNativeSpeechClient({
 
 const client = createNativeSpeechClient();
 export const getNativeSpeechStatus = () => client.getStatus();
-export const cancelNativeSpeech = () => client.cancel();
+export const cancelNativeSpeech = () => {
+  client.cancel();
+};
 export const runNativeSpeech = (...args: Parameters<typeof client.run>) => client.run(...args);

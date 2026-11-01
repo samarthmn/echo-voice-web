@@ -10,7 +10,7 @@ function syncLayer() {
   const dialog = document.querySelector<HTMLElement>('div[role="dialog"][aria-modal="true"]');
   const drawer =
     matchMedia('(max-width:700px)').matches && document.querySelector<HTMLElement>('.sidebar.open');
-  const layer = dialog || drawer || null;
+  const layer = dialog ?? (drawer === false ? null : drawer);
   if (layer === activeLayer) return;
   releaseLayer?.();
   activeLayer = layer;
@@ -41,7 +41,7 @@ function syncLayer() {
     [...layer.querySelectorAll<HTMLElement>(focusable)].filter(
       (item) => item.getClientRects().length && !item.closest('[inert]'),
     );
-  const initial = layer.querySelector<HTMLElement>('#new-meeting-title') || items()[0];
+  const initial = layer.querySelector<HTMLElement>('#new-meeting-title') ?? items()[0];
   initial?.focus({ preventScroll: true });
 
   const onKey = (event: KeyboardEvent) => {

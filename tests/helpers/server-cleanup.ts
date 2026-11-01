@@ -8,7 +8,9 @@ async function waitForExit(exit: Promise<unknown>, milliseconds: number | undefi
     return await Promise.race([
       exit.then(() => true),
       new Promise((resolve) => {
-        timer = setTimeout(() => resolve(false), milliseconds);
+        timer = setTimeout(() => {
+          resolve(false);
+        }, milliseconds);
       }),
     ]);
   } finally {

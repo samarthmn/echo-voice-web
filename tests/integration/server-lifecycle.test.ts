@@ -18,7 +18,11 @@ const key = Buffer.alloc(32, 42).toString('base64');
 async function listener() {
   const server = net.createServer();
   await new Promise((resolve, reject) =>
-    server.listen(0, '127.0.0.1', () => resolve(undefined)).once('error', reject),
+    server
+      .listen(0, '127.0.0.1', () => {
+        resolve(undefined);
+      })
+      .once('error', reject),
   );
   return server;
 }
@@ -31,7 +35,7 @@ function start(dir: string, port: unknown, extra = {}) {
       ECHO_TEST_MODE: '1',
       ECHO_TEST_STORAGE_KEY: key,
       ECHO_DATA_DIR: dir,
-      ECHO_BIND: `127.0.0.1:${port}`,
+      ECHO_BIND: `127.0.0.1:${String(port)}`,
       ...extra,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -39,21 +43,23 @@ function start(dir: string, port: unknown, extra = {}) {
   let output = '';
   child.stdout.on('data', (streamValue: unknown) => {
     const chunk = bufferChunk(streamValue);
-    output += chunk;
+    output += String(chunk);
   });
   child.stderr.on('data', (streamValue: unknown) => {
     const chunk = bufferChunk(streamValue);
-    output += chunk;
+    output += String(chunk);
   });
   const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }>(
     (resolve, reject) => {
       child.once('error', reject);
-      child.once('exit', (code, signal) => resolve({ code, signal, output }));
+      child.once('exit', (code, signal) => {
+        resolve({ code, signal, output });
+      });
     },
   );
   return { child, exit };
 }
-test('server lifecycle and startup errors', async () => {
+void test('server lifecycle and startup errors', async () => {
   await mkdir(path.join(root, 'tmp'), { recursive: true });
   const dir = await mkdtemp(path.join(root, 'tmp/server-lifecycle-'));
   let child: ChildProcessByStdio<null, Readable, Readable> | undefined;
@@ -102,7 +108,7 @@ test('server lifecycle and startup errors', async () => {
       await new Promise((resolve) => occupied.close(resolve));
     }
   } finally {
-    if (child && child.exitCode === null) {
+    if (child?.exitCode === null) {
       child.kill('SIGKILL');
       await new Promise((resolve) => defined(child).once('exit', resolve));
     }

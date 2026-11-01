@@ -19,13 +19,13 @@ export class PCMResampler {
       const left = Math.floor(this.position);
       const fraction = this.position - left;
       // position < end - 1 bounds both interpolation samples.
-      const a = left < this.seen ? this.previous : input[left - this.seen]!;
-      const b = input[left + 1 - this.seen]!;
+      const a = left < this.seen ? this.previous : Number(input[left - this.seen]);
+      const b = Number(input[left + 1 - this.seen]);
       const sample = Math.max(-1, Math.min(1, a + (b - a) * fraction));
       this.output[count++] = Math.round(sample < 0 ? sample * 32768 : sample * 32767);
       this.position += step;
     }
-    if (input.length) this.previous = input[input.length - 1]!;
+    if (input.length) this.previous = Number(input[input.length - 1]);
     this.seen = end;
     return this.output.subarray(0, count);
   }

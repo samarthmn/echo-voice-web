@@ -95,7 +95,7 @@ async function notifyExtension() {
     const response = await fetch('/js/extension-id.json');
     const id = extensionId(await responseJson(response));
     chrome.runtime.sendMessage(id, { type: 'ECHO_APPROVED', requestId }, () => {
-      void chrome.runtime.lastError;
+      if (chrome.runtime.lastError) return;
     });
   } catch {
     /* The extension also polls for approval. */
@@ -129,9 +129,15 @@ async function decide(action: string) {
     element('reject').disabled = false;
   }
 }
-element('approve').addEventListener('click', () => decide('approve'));
-element('reject').addEventListener('click', () => decide('reject'));
-element('retry').addEventListener('click', load);
+element('approve').addEventListener('click', () => {
+  void decide('approve');
+});
+element('reject').addEventListener('click', () => {
+  void decide('reject');
+});
+element('retry').addEventListener('click', () => {
+  void load();
+});
 setInterval(() => {
   if (!busy && !terminal && expiresAt && Date.now() >= expiresAt) render('expired');
 }, 1000);

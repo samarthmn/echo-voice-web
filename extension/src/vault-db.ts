@@ -22,7 +22,7 @@ export function database(): Promise<IDBDatabase> {
     };
     request.onerror = () => {
       opening = undefined;
-      reject(request.error);
+      reject(request.error ?? new Error('IndexedDB request failed.'));
     };
     request.onblocked = () => {
       opening = undefined;
@@ -32,19 +32,31 @@ export function database(): Promise<IDBDatabase> {
 }
 export function result<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      reject(request.error ?? new Error('IndexedDB request failed.'));
+    };
   });
 }
 export function committed(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('Local storage did not commit.'));
+    tx.oncomplete = () => {
+      resolve();
+    };
+    tx.onabort = tx.onerror = () => {
+      reject(tx.error ?? new Error('Local storage did not commit.'));
+    };
   });
 }
 export async function readMeta<T>(key: string): Promise<T | undefined> {
   const db = await database();
-  return (await result<any>(db.transaction('meta').objectStore('meta').get(key)))?.value;
+  return (
+    await result(
+      db.transaction('meta').objectStore('meta').get(key) as IDBRequest<{ value: T } | undefined>,
+    )
+  )?.value;
 }
 export async function writeMeta(key: string, value: unknown): Promise<void> {
   const db = await database();
@@ -54,7 +66,7 @@ export async function writeMeta(key: string, value: unknown): Promise<void> {
   await done;
 }
 export function storageLock<T>(id: string, work: () => Promise<T>): Promise<T> {
-  if (!globalThis.navigator?.locks)
+  if (!(globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks)
     throw new Error('This browser cannot safely coordinate encrypted recording storage.');
   return navigator.locks.request(`echo-encrypted-storage:${id}`, { mode: 'exclusive' }, work);
 }

@@ -1,5 +1,7 @@
 const KEY = 'echo-theme';
-const media = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
+const media = (globalThis as { matchMedia?: typeof matchMedia }).matchMedia?.(
+  '(prefers-color-scheme: dark)',
+);
 /** Read a valid persisted appearance, tolerating blocked browser storage. */
 function savedTheme() {
   try {
@@ -25,7 +27,9 @@ export function setTheme(theme: string) {
   preference = theme;
   try {
     localStorage.setItem(KEY, theme);
-  } catch {}
+  } catch {
+    /* Keep the in-memory preference when browser storage is blocked. */
+  }
   return apply(theme);
 }
 /** Return the active document appearance, falling back to the system. */

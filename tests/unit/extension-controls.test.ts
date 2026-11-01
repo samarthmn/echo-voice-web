@@ -1,3 +1,5 @@
+import type * as ConnectionModule from '../../extension/src/connection.ts';
+import type * as ProtocolModule from '../../extension/src/protocol.ts';
 import { bytes } from '../helpers/assertions.ts';
 import type { TestElement } from '../helpers/elements.ts';
 import { connectedLink } from '../helpers/assertions.ts';
@@ -88,18 +90,20 @@ function harness() {
   vm.runInNewContext(defined(built.outputFiles[0]).text, context);
   return {
     context,
-    api: moduleExports<typeof import('../../extension/src/connection.ts')>(
-      Reflect.get(context, 'api'),
-      ['connectionAction', 'connectionStatus', 'disconnect', 'livePreview'],
-    ),
+    api: moduleExports<typeof ConnectionModule>(Reflect.get(context, 'api'), [
+      'connectionAction',
+      'connectionStatus',
+      'disconnect',
+      'livePreview',
+    ]),
     error: (status: number) =>
-      new (moduleExports<Pick<typeof import('../../extension/src/protocol.ts'), 'ProtocolError'>>(
-        { ProtocolError: Reflect.get(context, 'PE') },
+      new (moduleExports<Pick<typeof ProtocolModule, 'ProtocolError'>>(
+        { ProtocolError: Reflect.get(context, 'PE') as unknown },
         ['ProtocolError'],
       ).ProtocolError)('synthetic unavailable', status),
   };
 }
-test('connection status distinguishes connected, echo-offline and revoked without exposing credentials', async () => {
+void test('connection status distinguishes connected, echo-offline and revoked without exposing credentials', async () => {
   const h = harness();
   h.context.wire = async (
     _endpoint: unknown,
@@ -124,7 +128,7 @@ test('connection status distinguishes connected, echo-offline and revoked withou
   assert.equal(revoked.status, 'revoked');
   assert.equal(JSON.stringify(revoked).includes('synthetic-secret'), false);
 });
-test('waiting, none and revoked links report locally without contacting Echo', async () => {
+void test('waiting, none and revoked links report locally without contacting Echo', async () => {
   const h = harness();
   h.context.wire = async () => {
     throw new Error('no request expected');
@@ -136,7 +140,7 @@ test('waiting, none and revoked links report locally without contacting Echo', a
   h.context.revoked = true;
   assert.equal((await h.api.connectionStatus()).status, 'revoked');
 });
-test('an older or mismatched companion is never reported connected; local capture is untouched', async () => {
+void test('an older or mismatched companion is never reported connected; local capture is untouched', async () => {
   const h = harness();
   h.context.wire = async () => ({ libraryId: library, installationId: id });
   assert.equal((await h.api.connectionStatus()).status, 'echo-offline');
@@ -144,14 +148,14 @@ test('an older or mismatched companion is never reported connected; local captur
   assert.equal((await h.api.connectionStatus()).status, 'echo-offline');
   assert.equal(h.context.records.size, 1);
 });
-test('protected prerelease companions may carry build metadata', async () => {
+void test('protected prerelease companions may carry build metadata', async () => {
   for (const appVersion of ['0.1.0-rc.1+build.7', '0.1.0+build.7', '0.1.0-rc.1']) {
     const h = harness();
     h.context.wire = async () => ({ ...companion, appVersion });
     assert.equal((await h.api.connectionStatus()).status, 'connected', appVersion);
   }
 });
-test('disconnect keeps the connection and audio when Echo cannot confirm revocation', async () => {
+void test('disconnect keeps the connection and audio when Echo cannot confirm revocation', async () => {
   const h = harness();
   h.context.wire = async () => {
     throw h.error(0);
@@ -160,7 +164,7 @@ test('disconnect keeps the connection and audio when Echo cannot confirm revocat
   assert.equal(connectedLink(h.context.link).credential, 'synthetic-secret');
   assert.equal(h.context.records.size, 1);
 });
-test('a confirmed local disconnect forgets an unreachable Echo and keeps local audio', async () => {
+void test('a confirmed local disconnect forgets an unreachable Echo and keeps local audio', async () => {
   const h = harness();
   h.context.wire = async () => {
     throw h.error(0);
@@ -169,7 +173,7 @@ test('a confirmed local disconnect forgets an unreachable Echo and keeps local a
   assert.equal(h.context.link.state, 'none');
   assert.equal(h.context.records.size, 1);
 });
-test('successful or previously revoked disconnect clears the link and preserves local audio', async () => {
+void test('successful or previously revoked disconnect clears the link and preserves local audio', async () => {
   for (const alreadyRevoked of [false, true]) {
     const h = harness();
     h.context.wire = async (_endpoint: unknown, path: unknown, options: { method?: string }) => {
@@ -183,7 +187,7 @@ test('successful or previously revoked disconnect clears the link and preserves 
     assert.equal(h.context.records.size, 1);
   }
 });
-test('a status check that races a disconnect reports the new local state', async () => {
+void test('a status check that races a disconnect reports the new local state', async () => {
   const h = harness();
   h.context.wire = async () => {
     h.context.link = { state: 'none' };
@@ -191,7 +195,7 @@ test('a status check that races a disconnect reports the new local state', async
   };
   assert.equal((await h.api.connectionStatus()).status, 'none');
 });
-test('live preview is scoped, Unicode bounded, and excludes draft/credentials/controls', async () => {
+void test('live preview is scoped, Unicode bounded, and excludes draft/credentials/controls', async () => {
   const h = harness();
   h.context.wire = async (_endpoint: unknown, path: unknown) => {
     assert.equal(path, `/recordings/${id}/live`);
@@ -224,7 +228,7 @@ test('live preview is scoped, Unicode bounded, and excludes draft/credentials/co
   assert.equal((await h.api.livePreview(id)).status, 'unavailable');
   assert.equal((await h.api.livePreview(id)).preview, '');
 });
-test('live preview preserves optional-off behavior and reports offline, pending ingest and revocation', async () => {
+void test('live preview preserves optional-off behavior and reports offline, pending ingest and revocation', async () => {
   const h = harness();
   for (const [code, status] of [
     [0, 'unavailable'],
@@ -244,7 +248,7 @@ test('live preview preserves optional-off behavior and reports offline, pending 
   assert.equal((await h.api.livePreview(id)).status, 'disabled');
   await assert.rejects(h.api.livePreview('../connection'), /Invalid recording/);
 });
-test('connection actions remain serialized across pairing/disconnect and recover from errors', async () => {
+void test('connection actions remain serialized across pairing/disconnect and recover from errors', async () => {
   const h = harness();
   const order: unknown = [];
   await Promise.all([
@@ -279,7 +283,7 @@ function fakeElements(hidden: boolean) {
         disabled: false,
         hidden,
         value: '',
-        listeners: {} as Record<string, () => unknown>,
+        listeners: {},
         append(...children: unknown[]) {
           this.textContent += children.filter((child) => typeof child === 'string').join('');
         },
@@ -305,8 +309,8 @@ function fakeElements(hidden: boolean) {
 async function load(
   entry: string,
   context: number | vm.Context | undefined,
-  fakeUI: string | Uint8Array<ArrayBufferLike>,
-  fakeStorage: string | Uint8Array<ArrayBufferLike>,
+  fakeUI: string | Uint8Array,
+  fakeStorage: string | Uint8Array,
 ) {
   const result = await build({
     entryPoints: [entry],
@@ -338,7 +342,7 @@ const connected: {
   requestId?: string;
   notice?: string;
 } = { phase: 'connected', endpoint, revoked: false };
-test('popup polls bounded live/connection status separately and renders exclusion without stopping capture', async () => {
+void test('popup polls bounded live/connection status separately and renders exclusion without stopping capture', async () => {
   const { element, document } = fakeElements(false);
   const intervals = new Map<number, () => void>();
   const calls: unknown[] = [];
@@ -439,7 +443,7 @@ test('popup polls bounded live/connection status separately and renders exclusio
   assert.match(element('live-status').textContent, /open Echo to create final transcript/);
   assert.equal(element('live-provisional').hidden, true);
 });
-test('popup connect shows waiting, then the not-found message with Retry, never blocking Start', async () => {
+void test('popup connect shows waiting, then the not-found message with Retry, never blocking Start', async () => {
   const { element, document } = fakeElements(false);
   const intervals = new Map<number, () => void>();
   let found = true;
@@ -509,7 +513,7 @@ test('popup connect shows waiting, then the not-found message with Retry, never 
   assert.match(element('connection-detail').textContent, /isn't running on this Mac/);
   assert.equal(element('connect').textContent, 'Retry');
 });
-test('setup disconnect warns about pending audio, honors cancel and keeps the link when Echo is offline', async () => {
+void test('setup disconnect warns about pending audio, honors cancel and keeps the link when Echo is offline', async () => {
   const { element, document } = fakeElements(true);
   let confirm = false;
   let forget = false;
@@ -536,7 +540,7 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
     },
     window: {
       confirm(message: string) {
-        if (/did not respond/.test(message)) return forget;
+        if (message.includes('did not respond')) return forget;
         warning = message;
         return confirm;
       },
@@ -632,7 +636,7 @@ test('setup disconnect warns about pending audio, honors cancel and keeps the li
   assert.match(element('status').textContent, /Disconnected/);
   assert.match(element('connection').textContent, /Not connected/);
 });
-test('AudioWorklet exclusion persists across provider gates and inclusion requires a new positive gate', async () => {
+void test('AudioWorklet exclusion persists across provider gates and inclusion requires a new positive gate', async () => {
   const result = await build({
     entryPoints: ['extension/src/worklet.ts'],
     bundle: true,
@@ -673,8 +677,10 @@ test('AudioWorklet exclusion persists across provider gates and inclusion requir
     exclusionRevision?: number;
     excluded?: unknown;
     requestId?: string;
-  }) => processor.port.onmessage({ data });
-  const gate = (allowed: boolean) =>
+  }) => {
+    processor.port.onmessage({ data });
+  };
+  const gate = (allowed: boolean) => {
     message({
       type: 'gate',
       recordingId: id,
@@ -683,13 +689,15 @@ test('AudioWorklet exclusion persists across provider gates and inclusion requir
       ttlMs: 2000,
       expiresAt: 3000,
     });
-  const exclude = (excluded: boolean) =>
+  };
+  const exclude = (excluded: boolean) => {
     message({
       type: 'exclude-mic',
       recordingId: id,
       exclusionRevision: ++exclusionRevision,
       excluded,
     });
+  };
   const pcm = () => {
     processor.process(
       [[new Float32Array(128)], [new Float32Array(128).fill(1)]],
@@ -723,7 +731,7 @@ test('AudioWorklet exclusion persists across provider gates and inclusion requir
   gate(true);
   assert.ok(pcm().some((value) => value > 0));
 });
-test('a local deletion winning a pending transfer status update does not abort other recordings; storage failures still propagate', async () => {
+void test('a local deletion winning a pending transfer status update does not abort other recordings; storage failures still propagate', async () => {
   const fakeStorage =
     'export async function allRecordings(){return [...records.values()]};export async function recording(id){return records.get(id)};export async function updateRecording(id,patch){if(deleteOnUpdate===id){records.delete(id);deleteOnUpdate=null}if(storageFailure)throw new Error("disk write failed");const row=records.get(id);if(!row)throw new Error("Recording not found");const next={...row,...patch};records.set(id,next);return next};export async function getChunk(){return {frames:1,pcm:new ArrayBuffer(2),sha256:"a".repeat(64)}};export async function retainReceiptAndRemovePCM(id,receipt){records.set(id,{...records.get(id),receipt})}';
   const result = await build({
@@ -808,10 +816,9 @@ test('a local deletion winning a pending transfer status update does not abort o
     },
   };
   vm.runInNewContext(defined(result.outputFiles[0]).text, context);
-  await moduleExports<typeof import('../../extension/src/protocol.ts')>(
-    Reflect.get(context, 'api'),
-    ['transferPending'],
-  ).transferPending(
+  await moduleExports<typeof ProtocolModule>(Reflect.get(context, 'api'), [
+    'transferPending',
+  ]).transferPending(
     async () => {},
     () => {},
   );
@@ -820,7 +827,7 @@ test('a local deletion winning a pending transfer status update does not abort o
   context.records.set(newer.recordingId, newer);
   context.storageFailure = true;
   await assert.rejects(
-    moduleExports<typeof import('../../extension/src/protocol.ts')>(Reflect.get(context, 'api'), [
+    moduleExports<typeof ProtocolModule>(Reflect.get(context, 'api'), [
       'transferPending',
     ]).transferPending(
       async () => {},

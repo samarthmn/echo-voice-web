@@ -1,3 +1,5 @@
+import type * as DomainModule from './types/domain.ts';
+import type * as WorkerModule from './types/worker.ts';
 import type { Tensor } from '@huggingface/transformers';
 import type { PyAnnoteProcessor, WhisperForConditionalGeneration } from '@huggingface/transformers';
 import type { InferenceSession } from 'onnxruntime-web';
@@ -453,7 +455,7 @@ function isTensor(value: unknown): value is Tensor {
   return Array.isArray(v['dims']) && ArrayBuffer.isView(v['data']) && typeof v['type'] === 'string';
 }
 export function draftFields(value: unknown): Omit<
-  import('./types/domain.ts').LiveDraft,
+  DomainModule.LiveDraft,
   'language' | 'modelRevision'
 > & {
   language?: string;
@@ -479,12 +481,12 @@ export function draftFields(value: unknown): Omit<
     })
   )
     throw new Error('Saved live word timestamps are invalid.');
-  return value as Omit<import('./types/domain.ts').LiveDraft, 'language' | 'modelRevision'> & {
+  return value as Omit<DomainModule.LiveDraft, 'language' | 'modelRevision'> & {
     language?: string;
     modelRevision?: string;
   };
 }
-export function transcriptResult(value: unknown): import('./types/worker.ts').TranscriptResult {
+export function transcriptResult(value: unknown): WorkerModule.TranscriptResult {
   const v = record(value);
   if (
     !Array.isArray(v['passages']) ||
@@ -495,13 +497,13 @@ export function transcriptResult(value: unknown): import('./types/worker.ts').Tr
     !optionalFields(v, ['model'])
   )
     throw new Error('The speech model returned no word timestamps.');
-  return value as import('./types/worker.ts').TranscriptResult;
+  return value as WorkerModule.TranscriptResult;
 }
-export function extensionReply(value: unknown): import('./types/domain.ts').ExtensionReply {
+export function extensionReply(value: unknown): DomainModule.ExtensionReply {
   if (
     !isRecord(value) ||
     !optionalFields(value, ['version', 'status', 'endpoint', 'libraryId'], [], ['installed', 'ok'])
   )
     throw new Error('Extension is not installed');
-  return value as import('./types/domain.ts').ExtensionReply;
+  return value;
 }

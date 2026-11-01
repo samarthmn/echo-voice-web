@@ -37,13 +37,13 @@ type Stored = Summary & {
   keyWrap?: Ciphertext;
   metadata?: Ciphertext;
 };
-type StoredChunk = {
+interface StoredChunk {
   recordingId: string;
   sequence: number;
   frames: number;
   version: 2;
   encrypted: Ciphertext;
-};
+}
 const keys = new Map<string, CryptoKey>();
 const summaryKeys = [
   'recordingId',
@@ -67,7 +67,7 @@ function summary(row: Recording): Summary {
   };
 }
 /** List and badge view: plaintext summary fields only; never opens keys or metadata. */
-function listed(row: Stored): Recording {
+function listed(row: Pick<Stored, 'recordingId'> & Partial<Stored>): Recording {
   return {
     title: '',
     meetingUrl: '',
@@ -92,11 +92,17 @@ function listed(row: Stored): Recording {
 }
 async function rawRecording(id: string): Promise<Stored | undefined> {
   const db = await database();
-  return result(db.transaction('recordings').objectStore('recordings').get(id));
+  return result(
+    db.transaction('recordings').objectStore('recordings').get(id) as IDBRequest<
+      Stored | undefined
+    >,
+  );
 }
 async function rows(): Promise<Stored[]> {
   const db = await database();
-  return result(db.transaction('recordings').objectStore('recordings').getAll());
+  return result(
+    db.transaction('recordings').objectStore('recordings').getAll() as IDBRequest<Stored[]>,
+  );
 }
 async function putRow(row: Stored): Promise<void> {
   const db = await database();
@@ -107,7 +113,11 @@ async function putRow(row: Stored): Promise<void> {
 }
 async function rawChunk(id: string, sequence: number): Promise<StoredChunk | undefined> {
   const db = await database();
-  return result(db.transaction('chunks').objectStore('chunks').get([id, sequence]));
+  return result(
+    db.transaction('chunks').objectStore('chunks').get([id, sequence]) as IDBRequest<
+      StoredChunk | undefined
+    >,
+  );
 }
 async function rowKey(row: Stored): Promise<CryptoKey> {
   let key = keys.get(row.recordingId);
@@ -219,8 +229,7 @@ export async function appendChunk(id: string, sequence: number, pcm: ArrayBuffer
     throw new Error('Invalid audio chunk.');
   return storageLock(id, async () => {
     const current = await rawRecording(id);
-    if (!current || !current.keyWrap || current.receipt)
-      throw new Error('Recording protection is not ready.');
+    if (!current?.keyWrap || current.receipt) throw new Error('Recording protection is not ready.');
     const key = await rowKey(current);
     const next = await encode(
       {
@@ -248,18 +257,19 @@ export async function appendChunk(id: string, sequence: number, pcm: ArrayBuffer
     const store = tx.objectStore('recordings');
     const meta = tx.objectStore('meta');
     const [latest, pending] = await Promise.all([
-      result<Stored>(store.get(id)),
-      result<{ value: number } | undefined>(meta.get('pendingBytes')),
+      result(store.get(id) as IDBRequest<Stored | undefined>),
+      result(meta.get('pendingBytes') as IDBRequest<{ value: number } | undefined>),
     ]);
     if (
-      !latest ||
-      latest.chunkCount !== sequence ||
+      latest?.chunkCount !== sequence ||
       latest.captureState !== 'recording' ||
       latest.totalFrames + frames > MAX_FRAMES ||
       (pending?.value ?? 0) + pcm.byteLength > MAX_PENDING_BYTES
     ) {
       tx.abort();
-      await done.catch(() => {});
+      await done.catch(() => {
+        /* The transaction was aborted; retain the original validation error. */
+      });
       throw new Error(
         'Recording limit reached or local journal is out of sequence. Your saved audio is retained.',
       );
@@ -285,16 +295,16 @@ export async function getChunk(id: string, sequence: number): Promise<Chunk | un
   ]);
   if (bytes.byteLength !== chunk.frames * 2)
     throw new Error('The encrypted audio length is invalid.');
-  const pcm = bytes.buffer as ArrayBuffer;
+  const pcm = bytes.buffer;
   return { recordingId: id, sequence, frames: chunk.frames, sha256: await sha256(pcm), pcm };
 }
 export async function markInterrupted(): Promise<void> {
   for (const row of await rows())
-    if (['recording', 'paused'].includes(row.captureState ?? ''))
+    if (['recording', 'paused'].includes(row.captureState))
       await updateRecording(row.recordingId, {
         captureState: 'interrupted',
         interrupted: true,
-        interruption: interruption('recorder-recovered', row.totalFrames ?? 0),
+        interruption: interruption('recorder-recovered', row.totalFrames),
         transferState: 'saved-local',
         error:
           'Recording was interrupted. Committed audio is retained; recording will not restart automatically.',
@@ -302,7 +312,7 @@ export async function markInterrupted(): Promise<void> {
 }
 function removeChunks(store: IDBObjectStore, id: string) {
   store.index('recording').openCursor(IDBKeyRange.only(id)).onsuccess = (event) => {
-    const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+    const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
     if (cursor) {
       cursor.delete();
       cursor.continue();
@@ -318,19 +328,21 @@ async function removePCM(id: string, receipt?: NonNullable<Recording['receipt']>
   const store = tx.objectStore('recordings');
   const meta = tx.objectStore('meta');
   const [row, pending] = await Promise.all([
-    result<Stored | undefined>(store.get(id)),
-    result<{ value: number } | undefined>(meta.get('pendingBytes')),
+    result(store.get(id) as IDBRequest<Stored | undefined>),
+    result(meta.get('pendingBytes') as IDBRequest<{ value: number } | undefined>),
   ]);
   if (!row) {
     await done;
     return;
   }
   if (
-    !['stopped', 'interrupted'].includes(row.captureState ?? '') ||
+    !['stopped', 'interrupted'].includes(row.captureState) ||
     (receipt && row.libraryId !== receipt.libraryId)
   ) {
     tx.abort();
-    await done.catch(() => {});
+    await done.catch(() => {
+      /* The transaction was aborted; retain the original validation error. */
+    });
     throw new Error(
       receipt
         ? 'Completion receipt does not match the local recording.'
@@ -341,7 +353,7 @@ async function removePCM(id: string, receipt?: NonNullable<Recording['receipt']>
   if (!row.receipt)
     meta.put({
       key: 'pendingBytes',
-      value: Math.max(0, (pending?.value ?? 0) - (row.totalFrames ?? 0) * 2),
+      value: Math.max(0, (pending?.value ?? 0) - row.totalFrames * 2),
     });
   if (receipt)
     store.put({

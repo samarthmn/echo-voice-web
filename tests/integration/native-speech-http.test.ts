@@ -62,7 +62,7 @@ async function fixture(t: test.TestContext, { native = true } = {}) {
     exited: Promise<unknown[]>,
     logs = '';
   t.after(async () => {
-    if (child) await stopTestServer(child);
+    await stopTestServer(child);
     await removeTestDirectory(root);
   });
   for (const folder of ['scripts', 'web', 'public', 'tmp']) await mkdir(path.join(root, folder));
@@ -104,7 +104,7 @@ async function fixture(t: test.TestContext, { native = true } = {}) {
     for (const stream of [process.stdout, process.stderr])
       stream.on('data', (streamValue: unknown) => {
         const bytes = bufferChunk(streamValue);
-        logs = (logs + bytes).slice(-8192);
+        logs = (logs + String(bytes)).slice(-8192);
       });
     return process;
   }
@@ -125,6 +125,7 @@ async function fixture(t: test.TestContext, { native = true } = {}) {
             try {
               resolve({ status: response.statusCode, body: JSON.parse(body) as unknown });
             } catch (error) {
+              // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Preserve the original API/runtime rejection value and its identity for existing error handling.
               reject(error);
             }
           });
@@ -167,7 +168,7 @@ async function fixture(t: test.TestContext, { native = true } = {}) {
   await ready();
   async function waitJob(id: unknown, state: string) {
     return until(async () => {
-      const response = await request('GET', `/api/speech/jobs/${id}`);
+      const response = await request('GET', `/api/speech/jobs/${String(id)}`);
       return (
         object(response)['status'] === 200 &&
         object(object(response)['body'])['state'] === state &&
@@ -251,7 +252,7 @@ async function fixture(t: test.TestContext, { native = true } = {}) {
   };
 }
 
-test('native speech HTTP request and lifecycle boundaries', { timeout: 60000 }, async (t) => {
+void test('native speech HTTP request and lifecycle boundaries', { timeout: 60000 }, async (t) => {
   const server = await fixture(t);
   assert.equal(
     object(object(await server.request('GET', '/api/speech'))['body'])['available'],
@@ -382,7 +383,7 @@ test('native speech HTTP request and lifecycle boundaries', { timeout: 60000 }, 
       }, 'Encrypted upload spool was not written');
       await assert.rejects(access(path.join(orphan, 'request.json')), { code: 'ENOENT' });
       const contender = server.start({ ECHO_BIND: '127.0.0.1:0' }, 5000);
-      const [code] = await once(contender, 'exit');
+      const [code] = (await once(contender, 'exit')) as unknown[];
       assert.notEqual(code, null, 'Competing server must fail the lock before its timeout');
       assert.notEqual(code, 0);
       await access(orphan);
@@ -402,7 +403,7 @@ test('native speech HTTP request and lifecycle boundaries', { timeout: 60000 }, 
   });
 });
 
-test(
+void test(
   'unavailable native runtime gives actionable HTTP errors and releases reservation',
   { timeout: 15000 },
   async (t) => {

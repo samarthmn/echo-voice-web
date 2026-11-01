@@ -1,3 +1,4 @@
+import type * as TestModule from '@playwright/test';
 import { object, numeric } from '../helpers/assertions.ts';
 import { meetingRecord } from '../helpers/assertions.ts';
 import { array } from '../helpers/assertions.ts';
@@ -55,7 +56,7 @@ const wav = (seconds: number) => {
 await mkdir(artifacts, { recursive: true });
 const meetingTitle = `Review verification ${Date.now()}`;
 let meeting: { id: string; activeTranscriptId?: string } | undefined;
-let browser: import('@playwright/test').Browser | undefined;
+let browser: TestModule.Browser | undefined;
 let page: Page | undefined;
 const pageErrors: unknown = [];
 const consoleErrors: unknown = [];
@@ -164,7 +165,7 @@ try {
     const colors: Record<string, string[]> = {};
     for (const passage of passages) {
       const speaker = defined(passage.querySelector('.review-speaker')).textContent.trim();
-      (colors[speaker] ||= []).push(
+      (colors[speaker] ??= []).push(
         getComputedStyle(defined(passage.querySelector('.review-speaker-avatar'))).backgroundColor,
       );
     }

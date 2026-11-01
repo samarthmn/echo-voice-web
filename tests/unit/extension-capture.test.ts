@@ -106,7 +106,7 @@ function reply(value: unknown): Reply | undefined {
     if (v['busy'] !== undefined) assert.equal(typeof v['busy'], 'boolean');
     if (v['error'] !== undefined) text(v['error']);
   }
-  return r as Reply;
+  return r;
 }
 function harness({
   denyMic = false,
@@ -194,7 +194,7 @@ function harness({
   const chrome = {
     runtime: {
       id: 'synthetic',
-      getURL: (path: unknown) => `chrome-extension://synthetic/${path}`,
+      getURL: (path: unknown) => `chrome-extension://synthetic/${String(path)}`,
       onMessage: {
         addListener: (value: typeof listener) => {
           listener = value;
@@ -271,9 +271,9 @@ function harness({
     },
   ) =>
     new Promise<Reply | undefined>((resolve) => {
-      const accepted = listener({ ...data, target: 'offscreen' }, sender, (value) =>
-        resolve(reply(value)),
-      );
+      const accepted = listener({ ...data, target: 'offscreen' }, sender, (value) => {
+        resolve(reply(value));
+      });
       if (!accepted) resolve(undefined);
     });
   const start = (micEnabled = true, recordingId = 'synthetic-recording') =>
@@ -311,7 +311,7 @@ function harness({
 async function settle() {
   for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
 }
-test('offscreen asks the service worker for its connection and captures selected mic without feedback', async () => {
+void test('offscreen asks the service worker for its connection and captures selected mic without feedback', async () => {
   const h = harness();
   assert.equal(defined(await h.start()).ok, true);
   assert.equal(h.journal.recovered, true);
@@ -344,7 +344,7 @@ test('offscreen asks the service worker for its connection and captures selected
   assert.ok(h.streams.every((stream) => defined(stream.getTracks()[0]).stopped));
   assert.equal(defined(h.journal.rows.get('synthetic-recording')).interruption, undefined);
 });
-test('microphone denial requires explicit tab-only retry and never silently downgrades capture', async () => {
+void test('microphone denial requires explicit tab-only retry and never silently downgrades capture', async () => {
   const h = harness({ denyMic: true });
   const denied = await h.start();
   assert.equal(defined(denied).ok, false);
@@ -367,7 +367,7 @@ for (const [micErrorName, expected] of [
   ['AbortError', /startup was interrupted/],
   ['UnexpectedError', /could not be started/],
 ] satisfies [string, RegExp][])
-  test(`microphone ${micErrorName} gives actionable bounded failure without automatic fallback`, async () => {
+  void test(`microphone ${micErrorName} gives actionable bounded failure without automatic fallback`, async () => {
     const h = harness({ denyMic: true, micErrorName });
     const result = await h.start();
     assert.equal(defined(result).ok, false);
@@ -378,7 +378,7 @@ for (const [micErrorName, expected] of [
     assert.equal(h.calls.length, 2);
     assert.equal(defined(defined(h.streams[0]).getTracks()[0]).stopped, true);
   });
-test('microphone disconnection excludes its input while preserving healthy tab capture', async () => {
+void test('microphone disconnection excludes its input while preserving healthy tab capture', async () => {
   const h = harness();
   await h.start();
   defined(defined(defined(h.streams[1]).getTracks()[0]).listeners['ended'])();
@@ -401,7 +401,7 @@ test('microphone disconnection excludes its input while preserving healthy tab c
   assert.equal(defined(defined(h.streams[0]).getTracks()[0]).stopped, false);
   await h.message({ type: 'CONTROL', recordingId: 'synthetic-recording', action: 'stop' });
 });
-test('offscreen rejects old and recording-mismatched gates after a newer mute', async () => {
+void test('offscreen rejects old and recording-mismatched gates after a newer mute', async () => {
   const h = harness();
   await h.start();
   const future = Date.now() + 2000;
@@ -439,7 +439,7 @@ test('offscreen rejects old and recording-mismatched gates after a newer mute', 
   assert.equal(defined(defined(h.worklet()).messages.at(-1)).allowed, false);
   await h.message({ type: 'CONTROL', recordingId: 'synthetic-recording', action: 'stop' });
 });
-test('pause flushes durable PCM before state change, resumes with timeline gap, then stops tracks', async () => {
+void test('pause flushes durable PCM before state change, resumes with timeline gap, then stops tracks', async () => {
   const h = harness();
   await h.start(false);
   const worklet = h.worklet();
@@ -467,7 +467,7 @@ test('pause flushes durable PCM before state change, resumes with timeline gap, 
   assert.equal(defined(h.journal.rows.get('synthetic-recording')).captureState, 'stopped');
   assert.equal(defined(defined(await h.message({ type: 'STATUS' })).value).active, null);
 });
-test('quota failure stops capture and preserves already committed prefix', async () => {
+void test('quota failure stops capture and preserves already committed prefix', async () => {
   const h = harness();
   await h.start(false);
   defined(h.worklet()).emit(new ArrayBuffer(32000));
@@ -485,7 +485,7 @@ test('quota failure stops capture and preserves already committed prefix', async
   assert.equal(defined(row).transferState, 'attention');
   assert.equal(defined(defined(await h.message({ type: 'STATUS' })).value).active, null);
 });
-test('a failed interruption metadata write still reports inactive capture and retained recovery audio', async () => {
+void test('a failed interruption metadata write still reports inactive capture and retained recovery audio', async () => {
   const h = harness();
   await h.start(false);
   defined(h.worklet()).emit(new ArrayBuffer(32000));
@@ -501,7 +501,7 @@ test('a failed interruption metadata write still reports inactive capture and re
   assert.equal(defined(h.journal.rows.get('synthetic-recording')).chunkCount, 1);
   assert.equal(h.journal.chunks.length, 1);
 });
-test('persistence backlog beyond five seconds interrupts and retains only durable prefix', async () => {
+void test('persistence backlog beyond five seconds interrupts and retains only durable prefix', async () => {
   const h = harness();
   await h.start(false);
   let release: (() => void) | undefined;
@@ -521,7 +521,7 @@ test('persistence backlog beyond five seconds interrupts and retains only durabl
   assert.ok(h.streams.every((stream) => defined(stream.getTracks()[0]).stopped));
   assert.equal(defined(defined(row).interruption).reason, 'save-backlog');
 });
-test('captured tab track ending flushes partial audio and records its fixed reason', async () => {
+void test('captured tab track ending flushes partial audio and records its fixed reason', async () => {
   const h = harness();
   await h.start(false);
   defined(h.worklet()).emit(new ArrayBuffer(32000));
@@ -536,7 +536,7 @@ test('captured tab track ending flushes partial audio and records its fixed reas
   assert.equal(defined(defined(row).interruption).atFrame, 17000);
   assert.match(defined(defined(row).interruption).at, /^\d{4}-/);
 });
-test('AudioContext suspension retains a distinct diagnostic without flushing unsafe capture', async () => {
+void test('AudioContext suspension retains a distinct diagnostic without flushing unsafe capture', async () => {
   const h = harness();
   await h.start(false);
   defined(h.worklet()).emit(new ArrayBuffer(32000));
@@ -550,7 +550,7 @@ test('AudioContext suspension retains a distinct diagnostic without flushing uns
   );
   assert.equal(defined(defined(await h.message({ type: 'STATUS' })).value).active, null);
 });
-test('only fixed interruption reasons are accepted from control messages', async () => {
+void test('only fixed interruption reasons are accepted from control messages', async () => {
   const h = harness();
   await h.start(false);
   await h.message({
@@ -565,7 +565,7 @@ test('only fixed interruption reasons are accepted from control messages', async
     'capture-failed',
   );
 });
-test('active microphone exclusion only narrows the provider gate and never adds a missing stream', async () => {
+void test('active microphone exclusion only narrows the provider gate and never adds a missing stream', async () => {
   const h = harness();
   await h.start();
   const id = 'synthetic-recording';
@@ -608,7 +608,7 @@ test('active microphone exclusion only narrows the provider gate and never adds 
   await tabOnly.message({ type: 'CONTROL', recordingId: id, action: 'stop' });
 });
 
-test('tab-ending Stop waits for a held Pause flush and finalizes the same recording', async () => {
+void test('tab-ending Stop waits for a held Pause flush and finalizes the same recording', async () => {
   const h = harness();
   await h.start(false);
   let release: (() => void) | undefined;
@@ -639,7 +639,7 @@ test('tab-ending Stop waits for a held Pause flush and finalizes the same record
   assert.equal(defined(defined(await h.message({ type: 'STATUS' })).value).active, null);
   assert.ok(h.streams.every((stream) => defined(stream.getTracks()[0]).stopped));
 });
-test('Stop during startup waits for capture, and an old queued Stop cannot affect a newer recording', async () => {
+void test('Stop during startup waits for capture, and an old queued Stop cannot affect a newer recording', async () => {
   const h = harness();
   let release: (() => void) | undefined;
   h.journal.resumeHold = new Promise<void>((resolve) => {
@@ -678,7 +678,7 @@ test('Stop during startup waits for capture, and an old queued Stop cannot affec
   await h.message({ type: 'CONTROL', recordingId: 'newer-recording', action: 'stop' });
 });
 for (const partialPause of [false, true])
-  test(`recording frame cap finalizes cleanly with ${partialPause ? 'a partial pause chunk' : 'aligned chunks and post-cap buffered PCM'}`, async () => {
+  void test(`recording frame cap finalizes cleanly with ${partialPause ? 'a partial pause chunk' : 'aligned chunks and post-cap buffered PCM'}`, async () => {
     const h = harness({ frameLimit: 32000 });
     await h.start(false);
     defined(h.worklet()).emit(new ArrayBuffer(32000));
@@ -705,7 +705,7 @@ for (const partialPause of [false, true])
     assert.equal(defined(defined(await h.message({ type: 'STATUS' })).value).active, null);
     assert.ok(h.streams.every((stream) => defined(stream.getTracks()[0]).stopped));
   });
-test('a reported recorder failure clears on the next start, which retries recovery and records', async () => {
+void test('a reported recorder failure clears on the next start, which retries recovery and records', async () => {
   const h = harness();
   await h.start(false);
   defined(h.worklet()).emit(new ArrayBuffer(32000));
@@ -719,7 +719,7 @@ test('a reported recorder failure clears on the next start, which retries recove
       (message) =>
         message.type === 'CAPTURE_STATUS' &&
         typeof message.error === 'string' &&
-        /Storage quota/.test(message.error),
+        message.error.includes('Storage quota'),
     ),
     'the failure reaches the worker for the popup',
   );
@@ -733,7 +733,7 @@ test('a reported recorder failure clears on the next start, which retries recove
   assert.equal(defined(h.journal.rows.get('synthetic-recording')).captureState, 'interrupted');
   await h.message({ type: 'CONTROL', recordingId: 'second-recording', action: 'stop' });
 });
-test('uploads follow committed audio instead of polling, and settle only when not recording', async () => {
+void test('uploads follow committed audio instead of polling, and settle only when not recording', async () => {
   const h = harness();
   const idle = () =>
     h.notifications.some((message) => message.type === 'UPLOADS_SETTLED' && !message.retryAt);

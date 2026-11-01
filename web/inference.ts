@@ -59,6 +59,7 @@ let downloadState: DownloadState & { modelId: string } = {
   modelId: '',
   progress: 0,
 };
+const isAborted = (signal: AbortSignal) => signal.aborted;
 const cancelled = () => new DOMException(TRANSCRIPTION_CANCELLED, 'AbortError');
 
 /** Expose download state independently of the currently mounted workspace page. */
@@ -79,7 +80,9 @@ function serial<T>(operation: () => Promise<T>): Promise<T> {
   publishInferenceState();
   const token = generation;
   const result = queue
-    .catch(() => {})
+    .catch(() => {
+      /* The next queued job must run even if its predecessor fails. */
+    })
     .then(() => {
       if (token !== generation) throw cancelled();
       return operation();
@@ -88,7 +91,9 @@ function serial<T>(operation: () => Promise<T>): Promise<T> {
     normalPending--;
     publishInferenceState();
   });
-  queue = settled.catch(() => {});
+  queue = settled.catch(() => {
+    /* The queue remains usable after a failed or cancelled job. */
+  });
   return settled;
 }
 
@@ -103,7 +108,7 @@ function publishInferenceState() {
   window.dispatchEvent(new CustomEvent('echo-inference-state', { detail: getInferenceState() }));
 }
 export function cancelLiveInference(jobId: string) {
-  if (!liveJob || liveJob.jobId !== jobId) return false;
+  if (liveJob?.jobId !== jobId) return false;
   liveJob.controller.abort();
   liveJob.fail?.(cancelled());
   liveWorker?.terminate();
@@ -149,7 +154,7 @@ export async function transcribeLiveWindow(
   try {
     if (signal?.aborted) abort();
     const model = await getLiveModelStatus();
-    if (job.controller.signal.aborted) throw cancelled();
+    if (isAborted(job.controller.signal)) throw cancelled();
     if (!model.ready)
       throw Object.assign(
         new Error('Download Large V3 Turbo in Models to enable live transcription.'),
@@ -177,6 +182,7 @@ export async function transcribeLiveWindow(
         cleanup();
         currentWorker.terminate();
         if (liveWorker === currentWorker) liveWorker = null;
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Preserve the original API/runtime rejection value and its identity for existing error handling.
         reject(reason);
       };
       const message = (event: MessageEvent<unknown>) => {
@@ -197,10 +203,11 @@ export async function transcribeLiveWindow(
           settled = true;
           cleanup();
           resolve(data.result);
-        } else if (data.type === 'error') fail(new Error(data.error));
+        } else fail(new Error(data.error));
       };
-      const error = (event: ErrorEvent) =>
+      const error = (event: ErrorEvent) => {
         fail(new Error(event.message || 'Live speech processing stopped unexpectedly.'));
+      };
       job.fail = fail;
       currentWorker.addEventListener('message', message);
       currentWorker.addEventListener('error', error);
@@ -219,7 +226,7 @@ export async function transcribeLiveWindow(
         fail(error);
       }
     });
-    if (job.controller.signal.aborted) throw cancelled();
+    if (isAborted(job.controller.signal)) throw cancelled();
     const value = record(result);
     if (value['duration'] !== duration)
       throw new Error('Live speech returned an invalid audio duration.');
@@ -290,6 +297,7 @@ function callWorker(
     };
     const fail = (reason: unknown) => {
       cleanup();
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Preserve the original API/runtime rejection value and its identity for existing error handling.
       reject(reason);
     };
     const message = (event: MessageEvent<unknown>) => {
@@ -301,8 +309,8 @@ function callWorker(
       }
       if (data.id !== id) return;
       if (data.type === 'progress') {
-        if (data.progress?.runtime)
-          console.info('[Echo inference] WASM runtime ' + JSON.stringify(data.progress.runtime));
+        if (data.progress.runtime)
+          console.warn('[Echo inference] WASM runtime ' + JSON.stringify(data.progress.runtime));
         try {
           onProgress?.(data.progress);
         } catch (error) {
@@ -318,7 +326,7 @@ function callWorker(
             fail(error);
           }
         }
-      } else if (data.type === 'error') fail(new Error(data.error));
+      } else fail(new Error(data.error));
     };
     const error = (event: ErrorEvent) => {
       fail(
@@ -382,7 +390,7 @@ export async function getDownloadedModels() {
         data.files.length &&
         (await Promise.all(data.files.map((url) => files.match(url)))).every(Boolean)
       ) {
-        if (model.engine !== 'native' || (native?.available === true && native?.ready === true))
+        if (model.engine !== 'native' || (native?.available === true && native.ready === true))
           downloaded.push(model.id);
       } else await manifests.delete(modelManifestUrl(model.id));
     } catch {
@@ -429,7 +437,9 @@ export function downloadModel(
     });
     if (typeof caches === 'undefined')
       throw new Error('Model storage requires a secure browser context. Open Echo on localhost.');
-    await navigator.storage?.persist?.().catch(() => false);
+    await (navigator as { storage?: Partial<StorageManager> }).storage
+      ?.persist?.()
+      .catch(() => false);
     if (token !== generation) throw cancelled();
     const progress = (progress: Progress) => {
       publishDownload({
@@ -542,6 +552,7 @@ async function decodeAudio(blob: Blob) {
     if (error instanceof Error && error.message.includes('two hours')) throw error;
     throw new Error(
       'This browser could not decode the audio. Try WAV, MP3, or a recording made in this browser.',
+      { cause: error },
     );
   } finally {
     await context.close();
@@ -575,11 +586,10 @@ export function transcribeAudio(
           (word) =>
             typeof word.text !== 'string' ||
             !Array.isArray(word.timestamp) ||
-            word.timestamp.length !== 2 ||
             word.timestamp.some((time) => !Number.isFinite(time)) ||
-            (word.timestamp[0] ?? 0) < 0 ||
-            (word.timestamp[1] ?? 0) < (word.timestamp[0] ?? 0) ||
-            (word.timestamp[1] ?? 0) > duration + 0.1,
+            word.timestamp[0] < 0 ||
+            word.timestamp[1] < word.timestamp[0] ||
+            word.timestamp[1] > duration + 0.1,
         )
       )
         throw new Error(
@@ -607,13 +617,15 @@ function suppressAutomaticTranscription(meetingIds: string[]) {
           undefined,
           { keepalive: true },
         )
-          .catch(() => {})
+          .catch(() => {
+            /* Cancellation is best effort when the page is leaving or Echo is unavailable. */
+          })
           .finally(() => {
             if (cancellationSaves.get(id) === save) cancellationSaves.delete(id);
           });
         cancellationSaves.set(id, save);
       }
-      return cancellationSaves.get(id);
+      return cancellationSaves.get(id) ?? Promise.resolve();
     }),
   );
 }
@@ -622,13 +634,14 @@ function suppressAutomaticTranscription(meetingIds: string[]) {
 window.addEventListener('beforeunload', (event) => {
   if (![...processingMeetings.values()].some((token) => token === generation)) return;
   event.preventDefault();
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- Older Chromium requires returnValue as well as preventDefault for the unsaved-work prompt.
   event.returnValue = '';
 });
 /** Explicit literal aliases only. Conflicting aliases and fuzzy guesses are left unchanged. */
 export function applyVocabulary(text: string, entries: VocabularyEntry[]) {
   const aliases = new Map<string, string | null>();
   for (const entry of entries.filter((entry) => entry.enabled)) {
-    for (const alias of entry.aliases || []) {
+    for (const alias of entry.aliases ?? []) {
       const key = alias.trim().toLocaleLowerCase();
       if (!key) continue;
       if (aliases.has(key) && aliases.get(key) !== entry.term) aliases.set(key, null);
@@ -749,7 +762,7 @@ export async function transcribeMeeting(
         speakers,
         language: settings.language,
       });
-      speakers = result.speakers || speakers;
+      speakers = result.speakers ?? speakers;
       passages.push(
         ...result.passages.map((passage) => ({
           ...passage,
@@ -788,7 +801,9 @@ export async function transcribeMeeting(
         status: meeting.transcripts.length ? 'ready' : 'saved',
         error: errorInfo(error).message,
         ...(errorInfo(error).name === 'AbortError' ? { autoTranscribeSuppressed: true } : {}),
-      }).catch(() => {});
+      }).catch(() => {
+        /* Cancellation is best effort; cleanup continues independently. */
+      });
     }
     report(
       modelId,

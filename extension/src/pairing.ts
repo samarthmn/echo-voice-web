@@ -5,13 +5,17 @@ import { discover, hello } from './discovery.ts';
 import { connectionAction, forgetRemote } from './connection.ts';
 import { jsonRequest, ProtocolError } from './protocol.ts';
 type Waiting = Extract<Link, { state: 'waiting' }>;
-type ApprovalTab = { requestId: string; id: number; url: string };
-export type PairingView = {
+interface ApprovalTab {
+  requestId: string;
+  id: number;
+  url: string;
+}
+export interface PairingView {
   phase: Link['state'];
   endpoint?: string | undefined;
   requestId?: string | undefined;
   notice?: string | undefined;
-};
+}
 const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const EXPIRED = 'The connection request expired. Choose Connect to Echo to try again.';
@@ -25,7 +29,9 @@ function requestSignal(): AbortSignal {
   return AbortSignal.any([inFlight.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
 }
 const expired = (link: Waiting) => Date.now() >= link.expiresAt;
-let onConnected: () => void = () => {};
+let onConnected: () => void = () => {
+  /* No connection hook is registered until the service worker installs it. */
+};
 /** Register the action that runs right after a claim succeeds (upload pending audio). */
 export function whenConnected(callback: () => void): void {
   onConnected = callback;
@@ -53,8 +59,7 @@ async function showApprovalTab(link: Waiting): Promise<void> {
   );
   if (existing?.id !== undefined) {
     await chrome.tabs.update(existing.id, { active: true });
-    if (existing.windowId !== undefined)
-      await chrome.windows.update(existing.windowId, { focused: true });
+    await chrome.windows.update(existing.windowId, { focused: true });
     return;
   }
   const tab = await chrome.tabs.create({ url });
@@ -75,7 +80,7 @@ async function closeApprovalTab(requestId: string): Promise<void> {
 }
 async function reserve(link: Waiting, intent?: string): Promise<Waiting> {
   const { installationId } = await settings();
-  const body = await jsonRequest(link.endpoint, '/pair', {
+  const body = (await jsonRequest(link.endpoint, '/pair', {
     method: 'POST',
     body: JSON.stringify({
       installationId,
@@ -84,7 +89,7 @@ async function reserve(link: Waiting, intent?: string): Promise<Waiting> {
       ...(intent ? { intent } : {}),
     }),
     signal: requestSignal(),
-  });
+  })) as { requestId: string; status: string; expiresAt?: unknown };
   if (!uuid.test(body.requestId) || !['pending', 'approved'].includes(body.status))
     throw new Error('Echo returned an invalid connection request.');
   const next: Waiting = {
@@ -118,7 +123,7 @@ async function claim(link: Waiting): Promise<PairingView> {
   if (expired(link)) return end(EXPIRED);
   try {
     const { installationId } = await settings();
-    const body = await jsonRequest(link.endpoint, '/pair/claim', {
+    const body = (await jsonRequest(link.endpoint, '/pair/claim', {
       method: 'POST',
       body: JSON.stringify({
         requestId: link.requestId,
@@ -126,7 +131,7 @@ async function claim(link: Waiting): Promise<PairingView> {
         claimSecret: link.claimSecret,
       }),
       signal: requestSignal(),
-    });
+    })) as { status?: string; credential?: string; libraryId: string };
     if (body.status === 'pending') return view(link);
     if (
       body.status !== 'approved' ||
@@ -213,7 +218,7 @@ export function beginPairing(
     if (!waiting && intent) {
       link = newRequest(await selectedEndpoint());
       await saveLink(link);
-      waiting = await reserved(link as Waiting);
+      waiting = await reserved(link);
       intent = undefined;
     }
     if (!waiting) return view({ state: 'none' });
@@ -262,15 +267,20 @@ export function cancelPairing(): Promise<PairingView> {
     const cancelled = await end('Connection cancelled.');
     if (link.requestId) {
       await closeApprovalTab(link.requestId);
-      void withdraw(link).catch((error) =>
-        console.warn('Echo: could not cancel the request in Echo.', error),
-      );
+      void withdraw(link).catch((error: unknown) => {
+        console.warn('Echo: could not cancel the request in Echo.', error);
+      });
     }
     return cancelled;
   });
 }
 
-type ConnectRequest = { id: string; endpoint: string; intent: string; receivedAt: number };
+interface ConnectRequest {
+  id: string;
+  endpoint: string;
+  intent: string;
+  receivedAt: number;
+}
 export async function pendingConnect() {
   const pending = (await chrome.storage.session.get('connectRequest'))['connectRequest'] as
     | ConnectRequest

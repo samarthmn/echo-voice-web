@@ -83,7 +83,7 @@ const flush = async () => {
   for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve));
 };
 
-test('controller reuses a warm Turbo ASR worker while routing each result by job ID', async () => {
+void test('controller reuses a warm Turbo ASR worker while routing each result by job ID', async () => {
   const first = inference.transcribeLiveWindow(new Float32Array(20 * 16000), { jobId: 'live-one' });
   await flush();
   const worker = workers.at(-1);
@@ -109,7 +109,7 @@ test('controller reuses a warm Turbo ASR worker while routing each result by job
   assert.equal(defined(worker).terminated, true);
 });
 
-test('live cancellation ignores unrelated IDs and releases only the matching runtime', async () => {
+void test('live cancellation ignores unrelated IDs and releases only the matching runtime', async () => {
   const job = inference.transcribeLiveWindow(new Float32Array(20 * 16000), {
     jobId: 'live-scoped',
   });
@@ -129,7 +129,7 @@ test('live cancellation ignores unrelated IDs and releases only the matching run
   inference.releaseLiveInference();
 });
 
-test('ordinary processing preempts live immediately and cancellation does not reject the unrelated download', async () => {
+void test('ordinary processing preempts live immediately and cancellation does not reject the unrelated download', async () => {
   const live = inference.transcribeLiveWindow(new Float32Array(20 * 16000), { jobId: 'preempted' });
   const rejected = assert.rejects(live, (error) => object(error)['name'] === 'AbortError');
   await flush();
@@ -153,7 +153,7 @@ test('ordinary processing preempts live immediately and cancellation does not re
   assert.equal(inference.getInferenceState().busy, false);
 });
 
-test('aborting live via signal terminates its worker without advancing final cancellation generation', async () => {
+void test('aborting live via signal terminates its worker without advancing final cancellation generation', async () => {
   const controller = new AbortController();
   const job = inference.transcribeLiveWindow(new Float32Array(20 * 16000), {
     jobId: 'signal-job',
@@ -170,7 +170,7 @@ test('aborting live via signal terminates its worker without advancing final can
   await next;
 });
 
-test('invalid live timestamps or revision dispose the warm runtime and preserve a clean retry', async () => {
+void test('invalid live timestamps or revision dispose the warm runtime and preserve a clean retry', async () => {
   for (const result of [
     { words: [{ text: 'bad', timestamp: [2, 1] }], duration: 20, modelRevision: revision },
     { words: [{ text: 'bad', timestamp: [1, 2] }], duration: 20, modelRevision: 'wrong' },
@@ -191,7 +191,7 @@ test('invalid live timestamps or revision dispose the warm runtime and preserve 
   inference.releaseLiveInference();
 });
 
-test('missing offline model refuses live without constructing a worker or triggering download', async () => {
+void test('missing offline model refuses live without constructing a worker or triggering download', async () => {
   const previous = files.values.get(file);
   files.values.delete(file);
   const count = workers.length;

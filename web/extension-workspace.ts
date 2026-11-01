@@ -21,8 +21,12 @@ export function createExtensionImportMonitor<M extends ImportMeeting>({
   request,
   onSaved,
   onChange,
-  onReady = () => {},
-  onProgress = () => {},
+  onReady = () => {
+    /* The caller may omit ready notifications. */
+  },
+  onProgress = () => {
+    /* The caller may omit progress notifications. */
+  },
   interval = 5000,
   timers = {
     setTimeout: (callback: () => void, ms: number) => globalThis.setTimeout(callback, ms),
@@ -36,6 +40,7 @@ export function createExtensionImportMonitor<M extends ImportMeeting>({
     timer: unknown,
     inFlight = false,
     primed = false;
+  const isStopped = () => stopped;
   const announced = new Set<string>();
   const progress = new Map<string, string>();
   async function poll() {
@@ -43,13 +48,13 @@ export function createExtensionImportMonitor<M extends ImportMeeting>({
     inFlight = true;
     try {
       const value = await request('/extensions/recordings');
-      if (stopped) return;
-      for (const recording of ('recordings' in value ? value.recordings : undefined) || []) {
+      if (isStopped()) return;
+      for (const recording of ('recordings' in value ? value.recordings : undefined) ?? []) {
         if (recording.status === 'receiving' && recording.meetingId) {
           const signature = `${recording.meetingId}:${recording.totalFrames}:${recording.captureState || ''}`;
           if (progress.get(recording.recordingId) !== signature) {
             const meeting = await request(`/meetings/${encodeURIComponent(recording.meetingId)}`);
-            if (stopped) return;
+            if (isStopped()) return;
             if (!('id' in meeting)) throw new Error('Invalid meeting response.');
             progress.set(recording.recordingId, signature);
             onProgress(meeting);
@@ -63,7 +68,7 @@ export function createExtensionImportMonitor<M extends ImportMeeting>({
         )
           continue;
         const meeting = await request(`/meetings/${encodeURIComponent(recording.meetingId)}`);
-        if (stopped) return;
+        if (isStopped()) return;
         if (!('id' in meeting)) throw new Error('Invalid meeting response.');
         if (!meeting.tracks?.length) continue;
         announced.add(recording.recordingId);
@@ -78,7 +83,10 @@ export function createExtensionImportMonitor<M extends ImportMeeting>({
       /* Echo downtime is independent from extension recording. */
     } finally {
       inFlight = false;
-      if (!stopped) timer = timers.setTimeout(poll, interval);
+      if (!isStopped())
+        timer = timers.setTimeout(() => {
+          void poll();
+        }, interval);
     }
   }
   return {
@@ -130,5 +138,11 @@ if (typeof window !== 'undefined') {
       ),
   });
   monitor.start();
-  window.addEventListener('pagehide', () => monitor.stop(), { once: true });
+  window.addEventListener(
+    'pagehide',
+    () => {
+      monitor.stop();
+    },
+    { once: true },
+  );
 }

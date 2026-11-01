@@ -17,13 +17,13 @@ Object.defineProperty(globalThis, 'navigator', {
 class MemoryCache {
   values = new Map<string, Response>();
   async put(key: string, value: Response) {
-    this.values.set(String(key), value.clone());
+    this.values.set(key, value.clone());
   }
   async match(key: string) {
-    return this.values.get(String(key))?.clone();
+    return this.values.get(key)?.clone();
   }
   async delete(key: Request | string) {
-    return this.values.delete((typeof key === 'string' ? key : key.url) || String(key));
+    return this.values.delete(typeof key === 'string' ? key : key.url);
   }
   async keys() {
     return [...this.values.keys()].map((url) => new Request(url));
@@ -111,7 +111,7 @@ globalThis.fetch = async (input, options = {}) => {
   assert.fail(`Unexpected native request: ${options.method || 'GET'} ${url}`);
 };
 
-test('partial downloads are never reported as offline ready and missing cached files invalidate readiness', async () => {
+void test('partial downloads are never reported as offline ready and missing cached files invalidate readiness', async () => {
   const files = await caches.open(MODEL_CACHE);
   const manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const path = `https://huggingface.co/${turbo}/resolve/main/encoder.onnx`;
@@ -127,7 +127,7 @@ test('partial downloads are never reported as offline ready and missing cached f
   assert.equal(await manifests.match(modelManifestUrl(turbo)), undefined);
 });
 
-test('older complete downloads require the timestamp-capable checkpoint without deleting cached weights', async () => {
+void test('older complete downloads require the timestamp-capable checkpoint without deleting cached weights', async () => {
   const files = await caches.open(MODEL_CACHE);
   const manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const path = `https://huggingface.co/${turbo}/resolve/main/decoder_model_merged_quantized.onnx`;
@@ -140,7 +140,7 @@ test('older complete downloads require the timestamp-capable checkpoint without 
   await manifests.delete(modelManifestUrl(turbo));
 });
 
-test('old browser Large markers never report native readiness and saved weights are retained', async () => {
+void test('old browser Large markers never report native readiness and saved weights are retained', async () => {
   const files = await caches.open(MODEL_CACHE),
     manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const path = `https://huggingface.co/${speechModelConfig(large).checkpoint}/resolve/main/encoder_model_quantized.onnx`;
@@ -171,7 +171,7 @@ test('old browser Large markers never report native readiness and saved weights 
   await manifests.delete(modelManifestUrl(large));
 });
 
-test('Large readiness combines native qualification and complete speaker cache files', async () => {
+void test('Large readiness combines native qualification and complete speaker cache files', async () => {
   const files = await caches.open(MODEL_CACHE),
     manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const path = 'https://huggingface.co/test/speaker.onnx';
@@ -189,7 +189,7 @@ test('Large readiness combines native qualification and complete speaker cache f
   assert.equal(await manifests.match(modelManifestUrl(large)), undefined);
 });
 
-test('downloads serialize and cancelling rejects active and queued jobs', async () => {
+void test('downloads serialize and cancelling rejects active and queued jobs', async () => {
   workerCalls = [];
   instances = [];
   const first = inference.downloadModel(turbo);
@@ -204,16 +204,16 @@ test('downloads serialize and cancelling rejects active and queued jobs', async 
   assert.equal(workerCalls.length, 1);
   const next = inference.downloadModel(large);
   await turn();
-  defined(instances.at(-1)).finish();
+  void defined(instances.at(-1)).finish();
   await next;
   assert.equal(workerCalls.length, 2);
 });
 
-test('worker runtime metadata reaches the main-thread diagnostic log and preserves progress delivery', async () => {
+void test('worker runtime metadata reaches the main-thread diagnostic log and preserves progress delivery', async () => {
   const messages: unknown = [],
     progress: unknown = [];
-  const originalInfo = console.info;
-  console.info = (...args) => array(messages).push(args);
+  const originalWarn = console.warn;
+  console.warn = (...args) => array(messages).push(args);
   try {
     const job = inference.downloadModel(turbo, (value) => array(progress).push(value));
     await turn();
@@ -232,18 +232,18 @@ test('worker runtime metadata reaches the main-thread diagnostic log and preserv
         },
       }),
     );
-    defined(current).finish();
+    void defined(current).finish();
     await job;
     assert.deepEqual(messages, [
       ['[Echo inference] WASM runtime ' + JSON.stringify(detail.runtime)],
     ]);
     assert.deepEqual(progress, [detail]);
   } finally {
-    console.info = originalInfo;
+    console.warn = originalWarn;
   }
 });
 
-test('download snapshots retain progress without a mounted page and duplicate requests reuse one worker job', async () => {
+void test('download snapshots retain progress without a mounted page and duplicate requests reuse one worker job', async () => {
   const events: unknown[] = [];
   const observe = (event: { detail: unknown }) => events.push(event.detail);
   window.addEventListener('echo-model-download-state', observe);
@@ -274,7 +274,7 @@ test('download snapshots retain progress without a mounted page and duplicate re
     snapshot.progress = 100;
     assert.equal(inference.getModelDownloadState().progress, 57);
     assert.ok(!(await inference.getDownloadedModels()).includes(turbo));
-    defined(active).finish();
+    void defined(active).finish();
     await download;
     assert.equal(inference.getModelDownloadState().status, 'completed');
     assert.equal(events.filter((state) => object(state)['status'] === 'completed').length, 1);
@@ -285,7 +285,7 @@ test('download snapshots retain progress without a mounted page and duplicate re
   }
 });
 
-test('download snapshots distinguish deliberate cancellation from worker failure', async () => {
+void test('download snapshots distinguish deliberate cancellation from worker failure', async () => {
   const cancelledDownload = inference.downloadModel(turbo);
   const rejected = assert.rejects(
     cancelledDownload,
@@ -313,7 +313,7 @@ test('download snapshots distinguish deliberate cancellation from worker failure
   assert.equal(inference.getModelDownloadState().error, 'Network unavailable');
 });
 
-test('failed native processing releases its worker and queued downloads start with a fresh runtime', async () => {
+void test('failed native processing releases its worker and queued downloads start with a fresh runtime', async () => {
   const first = inference.downloadModel(large);
   const rejected = assert.rejects(first, /ONNX runtime exception/);
   const next = inference.downloadModel(turbo);
@@ -334,30 +334,30 @@ test('failed native processing releases its worker and queued downloads start wi
   const freshWorker = instances.at(-1);
   assert.notEqual(freshWorker, failedWorker);
   assert.equal(defined(defined(freshWorker).lastMessage)['modelId'], turbo);
-  defined(freshWorker).finish();
+  void defined(freshWorker).finish();
   await next;
   assert.equal(defined(freshWorker).terminated, true);
   assert.equal(inference.getModelDownloadState().status, 'completed');
   assert.equal(inference.getModelDownloadState().modelId, turbo);
 });
 
-test('completed downloads release their WASM heap before subsequent operations', async () => {
+void test('completed downloads release their WASM heap before subsequent operations', async () => {
   const first = inference.downloadModel(turbo);
   await turn();
   const firstWorker = instances.at(-1);
-  defined(firstWorker).finish();
+  void defined(firstWorker).finish();
   await first;
   assert.equal(defined(firstWorker).terminated, true);
   const next = inference.downloadModel(large);
   await turn();
   const nextWorker = instances.at(-1);
   assert.notEqual(nextWorker, firstWorker);
-  defined(nextWorker).finish();
+  void defined(nextWorker).finish();
   await next;
   assert.equal(defined(nextWorker).terminated, true);
 });
 
-test('synchronous worker dispatch failures clean up the runtime and allow retry', async () => {
+void test('synchronous worker dispatch failures clean up the runtime and allow retry', async () => {
   const originalPost = FakeWorker.prototype.postMessage;
   FakeWorker.prototype.postMessage = () => {
     throw new DOMException('Unable to transfer audio.', 'DataCloneError');
@@ -370,11 +370,11 @@ test('synchronous worker dispatch failures clean up the runtime and allow retry'
   }
   const retry = inference.downloadModel(turbo);
   await turn();
-  defined(instances.at(-1)).finish();
+  void defined(instances.at(-1)).finish();
   await retry;
 });
 
-test('transcription refuses uncached models before decoding or starting a worker', async () => {
+void test('transcription refuses uncached models before decoding or starting a worker', async () => {
   const count = workerCalls.length;
   await assert.rejects(
     inference.transcribeAudio(new Blob(['audio']), turbo),
@@ -383,7 +383,7 @@ test('transcription refuses uncached models before decoding or starting a worker
   assert.equal(workerCalls.length, count);
 });
 
-test('cancelling during storage persistence prevents a worker download and permits a later retry', async () => {
+void test('cancelling during storage persistence prevents a worker download and permits a later retry', async () => {
   const originalPersist = navigator.storage.persist;
   let releasePersistence: ((value: boolean) => void) | undefined;
   navigator.storage.persist = () =>
@@ -400,7 +400,7 @@ test('cancelling during storage persistence prevents a worker download and permi
     defined(releasePersistence)(true);
     await turn();
     // Settle an unexpected worker so the regression fails without hanging the queue.
-    if (workerCalls.length > count) defined(instances.at(-1)).finish();
+    if (workerCalls.length > count) void defined(instances.at(-1)).finish();
     await rejected;
     assert.equal(workerCalls.length, count);
   } finally {
@@ -409,12 +409,12 @@ test('cancelling during storage persistence prevents a worker download and permi
   }
   const retry = inference.downloadModel(large);
   await turn();
-  defined(instances.at(-1)).finish();
+  void defined(instances.at(-1)).finish();
   await retry;
   assert.equal(workerCalls.length, count + 1);
 });
 
-test('removal deletes only selected model files and its complete marker', async () => {
+void test('removal deletes only selected model files and its complete marker', async () => {
   const files = await caches.open(MODEL_CACHE);
   const manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const turboPath = `https://huggingface.co/${turbo}/resolve/main/model.onnx`;
@@ -435,7 +435,7 @@ test('removal deletes only selected model files and its complete marker', async 
   assert.ok(await files.match(largePath));
 });
 
-test('vocabulary corrections use explicit whole aliases without regex interpretation or fuzzy guesses', () => {
+void test('vocabulary corrections use explicit whole aliases without regex interpretation or fuzzy guesses', () => {
   const entries = [
     { term: 'OpenAI', aliases: ['open ai'], enabled: true },
     { term: 'C++', aliases: ['c plus plus'], enabled: true },
@@ -458,7 +458,7 @@ test('vocabulary corrections use explicit whole aliases without regex interpreta
   );
 });
 
-test('reload protection follows pending transcript jobs and releases on success, failure and cancellation', async () => {
+void test('reload protection follows pending transcript jobs and releases on success, failure and cancellation', async () => {
   const originalFetch = globalThis.fetch;
   const originalAudioContext = globalThis.AudioContext;
   const originalOfflineContext = globalThis.OfflineAudioContext;
@@ -557,7 +557,7 @@ test('reload protection follows pending transcript jobs and releases on success,
       assert.equal(defined(defined(current).lastMessage)['type'], 'transcribe');
       assert.equal(warns(), true);
       if (outcome === 'success') {
-        defined(current).finish({
+        void defined(current).finish({
           passages: [{ start: 0, end: 1, text: 'hello', speaker: 'speaker-1' }],
           duration: 1,
           speakers: [],
@@ -587,7 +587,7 @@ test('reload protection follows pending transcript jobs and releases on success,
     const download = inference.downloadModel(turbo);
     await turn();
     assert.equal(warns(), false);
-    defined(instances.at(-1)).finish();
+    void defined(instances.at(-1)).finish();
     await download;
     assert.equal(warns(), false);
   } finally {
@@ -602,15 +602,15 @@ test('reload protection follows pending transcript jobs and releases on success,
   }
 });
 
-test('Large ASR uses the native engine then sends decoded audio and real word timestamps only to diarization', async () => {
+void test('Large ASR uses the native engine then sends decoded audio and real word timestamps only to diarization', async () => {
   const previousFetch = globalThis.fetch,
     previousAudio = globalThis.AudioContext,
     previousOffline = globalThis.OfflineAudioContext;
   const files = await caches.open(MODEL_CACHE),
     manifests = await caches.open(MODEL_MANIFEST_CACHE);
   const fixture = 'https://huggingface.co/test/native-companion.onnx';
-  let nativeId: string | null,
-    nativeRequests: unknown[] = [];
+  let nativeId: string | null;
+  const nativeRequests: unknown[] = [];
   installGlobal(
     'AudioContext',
     class {
@@ -669,7 +669,7 @@ test('Large ASR uses the native engine then sends decoded audio and real word ti
     assert.deepEqual(object(defined(defined(current).lastMessage)['options'])['words'], [
       { text: 'bonjour', timestamp: [0, 0.9] },
     ]);
-    defined(current).finish({
+    void defined(current).finish({
       passages: [{ text: 'bonjour', start: 0, end: 0.9, speaker: 'speaker-1' }],
       duration: 1,
       speakers: [],
@@ -691,7 +691,7 @@ test('Large ASR uses the native engine then sends decoded audio and real word ti
   }
 });
 
-test('successful native migration retires only browser Large ASR weights while failure preserves them', async () => {
+void test('successful native migration retires only browser Large ASR weights while failure preserves them', async () => {
   const files = await caches.open(MODEL_CACHE);
   const retired = [
     'https://huggingface.co/Xenova/whisper-large-v3/resolve/pinned/onnx/encoder_model_quantized.onnx',

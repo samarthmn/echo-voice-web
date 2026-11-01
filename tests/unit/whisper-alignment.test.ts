@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { Tensor, WhisperForConditionalGeneration } from '@huggingface/transformers';
 import { correctWhisperAlignment, validatedWhisperWords } from '../../web/whisper-alignment.ts';
 
-test('Whisper alignment preserves checkpoint heads and crops stride-two audio positions once', () => {
+void test('Whisper alignment preserves checkpoint heads and crops stride-two audio positions once', () => {
   const heads = [
       [2, 4],
       [3, 11],
@@ -23,7 +23,7 @@ test('Whisper alignment preserves checkpoint heads and crops stride-two audio po
   assert.deepEqual(calls, [['actual-attentions', heads, 650, 0.02]]);
 });
 
-test('the cropped extraction runs actual Transformers DTW and returns distinct finite token times', () => {
+void test('the cropped extraction runs actual Transformers DTW and returns distinct finite token times', () => {
   const rows = 8,
     positions = 1500;
   function outputs() {
@@ -53,7 +53,7 @@ test('the cropped extraction runs actual Transformers DTW and returns distinct f
   assert.ok(new Set(normal).size > 3 && normal.every((time: number) => time >= 0 && time < 0.6));
 });
 
-test('browser words reject out-of-audio, collapsed and unordered alignment before attribution', () => {
+void test('browser words reject out-of-audio, collapsed and unordered alignment before attribution', () => {
   const output = (chunks: { text: string; timestamp: (number | null)[] }[]) => ({
     text: 'one two',
     chunks,

@@ -47,11 +47,13 @@ const closedPort = await new Promise((resolve, reject) => {
   socket.once('error', reject);
   socket.listen(0, '127.0.0.1', () => {
     const port = serverPort(socket);
-    socket.close(() => resolve(port));
+    socket.close(() => {
+      resolve(port);
+    });
   });
 });
 const { ollamaUrl } = object((await (await fetch(`${base}/api/settings`)).json()) as unknown);
-await patchSettings({ ollamaUrl: `http://127.0.0.1:${closedPort}` });
+await patchSettings({ ollamaUrl: `http://127.0.0.1:${String(closedPort)}` });
 async function audit(name: string) {
   const overlay = await page.locator('[aria-modal="true"], .sidebar.open').count();
   await page.screenshot({ path: `${screenshots}/${name}.png`, fullPage: !overlay });
@@ -181,7 +183,7 @@ try {
         ['Settings', 'settings'],
       ]) {
         await navigate(name);
-        await audit(slug + '-' + theme + '-' + width);
+        await audit(`${slug}-${theme}-${width}`);
       }
     }
   }

@@ -1,3 +1,8 @@
+import type * as CoreModule from '../../extension/src/core.ts';
+import type * as AdaptersModule from '../../extension/src/adapters.ts';
+import type * as AudioModule from '../../extension/src/audio.ts';
+import type * as UploadSchedulerModule from '../../extension/src/upload-scheduler.ts';
+import type * as ProtocolModule from '../../extension/src/protocol.ts';
 import { text, array } from '../helpers/assertions.ts';
 import { fetchUrl, bytes, numeric, moduleExports } from '../helpers/assertions.ts';
 import { object as moduleObject } from '../helpers/assertions.ts';
@@ -19,12 +24,12 @@ const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.
 const scratch = path.join(project, 'tmp', 'extension-runtime', 'unit');
 await mkdir(scratch, { recursive: true });
 process.env['TMPDIR'] = scratch;
-type Modules = {
-  core: typeof import('../../extension/src/core.ts');
-  adapters: typeof import('../../extension/src/adapters.ts');
-  audio: typeof import('../../extension/src/audio.ts');
-  'upload-scheduler': typeof import('../../extension/src/upload-scheduler.ts');
-};
+interface Modules {
+  core: typeof CoreModule;
+  adapters: typeof AdaptersModule;
+  audio: typeof AudioModule;
+  'upload-scheduler': typeof UploadSchedulerModule;
+}
 async function moduleFor<K extends keyof Modules>(name: K): Promise<Modules[K]> {
   const outfile = path.join(scratch, `${name}.mjs`);
   await build({
@@ -42,7 +47,7 @@ async function moduleFor<K extends keyof Modules>(name: K): Promise<Modules[K]> 
 const core = await moduleFor('core');
 const adapters = await moduleFor('adapters');
 const audio = await moduleFor('audio');
-test('real server Unix-second expiry is validated and converted only at the UI boundary', () => {
+void test('real server Unix-second expiry is validated and converted only at the UI boundary', () => {
   assert.equal(core.unixSecondsToMilliseconds(1791200000), 1791200000000);
   for (const value of [
     '1791200000',
@@ -56,7 +61,7 @@ test('real server Unix-second expiry is validated and converted only at the UI b
   ])
     assert.throws(() => core.unixSecondsToMilliseconds(value), /invalid expiry/);
 });
-test('loopback address is exact and meeting identity cannot escape provider hosts', () => {
+void test('loopback address is exact and meeting identity cannot escape provider hosts', () => {
   assert.equal(core.endpointURL('http://localhost:3000/'), 'http://localhost:3000');
   assert.equal(core.endpointURL('http://[::1]:3000'), 'http://[::1]:3000');
   for (const url of [
@@ -76,9 +81,9 @@ test('loopback address is exact and meeting identity cannot escape provider host
   );
   assert.equal(core.meetingFor('https://meet.google.com.evil/abc-defg-hij'), null);
 });
-test('microphone gate excludes stale, future, unknown and cross-document observations', () => {
+void test('microphone gate excludes stale, future, unknown and cross-document observations', () => {
   const identity = 'https://meet.google.com/abc-defg-hij';
-  const observation: import('../../extension/src/core.ts').Observation = {
+  const observation: CoreModule.Observation = {
     url: identity,
     state: 'unmuted',
     seq: 5,
@@ -95,7 +100,7 @@ test('microphone gate excludes stale, future, unknown and cross-document observa
       false,
     );
 });
-test('provider microphone adapters fail closed on ambiguous/localized/prejoin/ended controls', () => {
+void test('provider microphone adapters fail closed on ambiguous/localized/prejoin/ended controls', () => {
   assert.equal(adapters.stateFromLabels('meet', ['Turn off microphone (⌘ + d)'], []), 'unmuted');
   assert.equal(adapters.stateFromLabels('meet', ['Turn on microphone'], []), 'muted');
   assert.equal(adapters.stateFromLabels('zoom', ['Mute my audio'], []), 'unmuted');
@@ -108,7 +113,7 @@ test('provider microphone adapters fail closed on ambiguous/localized/prejoin/en
     'ended',
   );
 });
-test('streaming 44.1/48 kHz resampling preserves duration across render blocks and headroom', () => {
+void test('streaming 44.1/48 kHz resampling preserves duration across render blocks and headroom', () => {
   for (const sampleRate of [44100, 48000]) {
     const converter = new audio.PCMResampler(sampleRate);
     let count = 0;
@@ -130,7 +135,7 @@ test('streaming 44.1/48 kHz resampling preserves duration across render blocks a
     'an excluded microphone leaves tab audio at unity gain',
   );
 });
-test('AudioWorklet keeps stale microphone out even when delayed gates arrive', async () => {
+void test('AudioWorklet keeps stale microphone out even when delayed gates arrive', async () => {
   const built = await build({
     entryPoints: [path.join(project, 'extension/src/worklet.ts')],
     bundle: true,
@@ -169,7 +174,7 @@ test('AudioWorklet keeps stale microphone out even when delayed gates arrive', a
     expiresAt: number;
     gateRevision?: number;
     recordingId?: string;
-  }) =>
+  }) => {
     processor.port.onmessage({
       data: {
         type: 'gate',
@@ -178,6 +183,7 @@ test('AudioWorklet keeps stale microphone out even when delayed gates arrive', a
         ...data,
       },
     });
+  };
   const block = () =>
     processor.process(
       [[new Float32Array(128)], [new Float32Array(128).fill(1)]],
@@ -277,13 +283,10 @@ async function protocolHarness() {
     ],
   });
   const namespace: unknown = await import(pathToFileURL(outfile).href);
-  return moduleExports<typeof import('../../extension/src/protocol.ts')>(namespace, [
-    'transferPending',
-    'transferOne',
-  ]);
+  return moduleExports<typeof ProtocolModule>(namespace, ['transferPending', 'transferOne']);
 }
 const protocol = await protocolHarness();
-test('paused recording with no pending audio fetches and applies a remote Resume', async () => {
+void test('paused recording with no pending audio fetches and applies a remote Resume', async () => {
   const id = 'paused-control';
   globalThis.pair = {
     endpoint: 'http://localhost:3000',
@@ -344,7 +347,7 @@ test('paused recording with no pending audio fetches and applies a remote Resume
     globalThis.fetch = originalFetch;
   }
 });
-test('lost completion acknowledgement retains PCM, repeat verification then safely purges', async () => {
+void test('lost completion acknowledgement retains PCM, repeat verification then safely purges', async () => {
   const id = 'recording-1';
   const row = {
     recordingId: id,
@@ -431,7 +434,7 @@ test('lost completion acknowledgement retains PCM, repeat verification then safe
     globalThis.fetch = originalFetch;
   }
 });
-test('wrong-library and chunk conflicts preserve the complete local prefix', async () => {
+void test('wrong-library and chunk conflicts preserve the complete local prefix', async () => {
   const row = {
     recordingId: 'recording-2',
     libraryId: 'library-1',
@@ -495,7 +498,7 @@ test('wrong-library and chunk conflicts preserve the complete local prefix', asy
     globalThis.fetch = originalFetch;
   }
 });
-test('bounded transfer turns retain unfinished audio and complete only after the full manifest', async () => {
+void test('bounded transfer turns retain unfinished audio and complete only after the full manifest', async () => {
   const id = 'batch-recording';
   const row = {
     recordingId: id,
@@ -509,7 +512,7 @@ test('bounded transfer turns retain unfinished audio and complete only after the
   globalThis.records = new Map([[id, row]]);
   globalThis.chunks = new Map(
     Array.from({ length: 65 }, (_, sequence) => [
-      id + ':' + sequence,
+      `${id}:${sequence}`,
       { pcm: new ArrayBuffer(2), frames: 1, sha256: 'c'.repeat(64) },
     ]),
   );
@@ -553,7 +556,7 @@ test('bounded transfer turns retain unfinished audio and complete only after the
     globalThis.fetch = originalFetch;
   }
 });
-test('unassigned and other-library recordings upload to the connected library; offline Echo stops the pass', async () => {
+void test('unassigned and other-library recordings upload to the connected library; offline Echo stops the pass', async () => {
   const base = { chunkCount: 1, totalFrames: 1, captureState: 'stopped', gaps: [] };
   const unassigned = {
     ...base,
@@ -647,7 +650,7 @@ test('unassigned and other-library recordings upload to the connected library; o
     globalThis.fetch = originalFetch;
   }
 });
-test('older companion cannot receive metadata or PCM without protected-storage capabilities', async () => {
+void test('older companion cannot receive metadata or PCM without protected-storage capabilities', async () => {
   const id = 'old-companion-recording';
   const row = {
     recordingId: id,
@@ -684,7 +687,7 @@ test('older companion cannot receive metadata or PCM without protected-storage c
     globalThis.fetch = previous;
   }
 });
-test('manifest uses scoped MV3 permissions, a stable identity and no content credential bridge', async () => {
+void test('manifest uses scoped MV3 permissions, a stable identity and no content credential bridge', async () => {
   const manifest = JSON.parse(
     await readFile(path.join(project, 'extension/manifest.json'), 'utf8'),
   ) as unknown;
@@ -714,7 +717,7 @@ test('manifest uses scoped MV3 permissions, a stable identity and no content cre
   assert.ok(!background.includes('offscreen.hasDocument'));
   assert.ok(background.includes('chrome.runtime.getContexts'));
 });
-test('release ZIP only includes production assets; private stale output stays excluded', async () => {
+void test('release ZIP only includes production assets; private stale output stays excluded', async () => {
   const outdir = path.join(scratch, 'package-build');
   const archive = path.join(scratch, 'release.zip');
   await mkdir(outdir, { recursive: true });
