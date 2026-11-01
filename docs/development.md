@@ -13,22 +13,30 @@ There is no hot reload. After changing Rust UI or `web/` code, rerun `./scripts/
 ## Checks and tests
 
 ```bash
-./scripts/check.sh          # fast: formatting, clippy, cargo test, prettier, typecheck, unit tests
-./scripts/check.sh --all    # also release build, integration tests, e2e
-./scripts/check.sh --rust   # only the Rust half: rustfmt, clippy, cargo test
-./scripts/check.sh --app    # only the rest: prettier, typecheck, unit tests, builds, integration, e2e
+./scripts/check.sh          # Rust, lint and unit tests
+./scripts/check.sh --all    # every check, including builds, integration and e2e
+./scripts/check.sh --rust   # rustfmt, RSX formatting, clippy, wasm clippy, Rust tests
+./scripts/check.sh --lint   # formatting, linters, both TypeScript compilers, knip
+./scripts/check.sh --app    # unit tests, release/debug builds, integration, e2e
 ```
 
-| Command                           | What it runs                                                                                                                                                                                                                                                                                                                   |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `cargo test --locked --workspace` | Rust unit and server tests                                                                                                                                                                                                                                                                                                     |
-| `pnpm knip`                       | Unused JS/TS files, exports and dependencies; configured entry points include browser bundles, extension bundles, scripts and tests |
-| `pnpm test`                       | Node unit tests discovered from `tests/unit/**/*.test.ts`                                                                                                                                                                                                                                                                  |
-| `pnpm test:integration`           | Server and extension integration tests (`tests/integration/rest.test.ts`, `server-lifecycle`, `extension-browser`, ...). Needs a debug server at `target/debug/echo-server` (`cargo build -p echo-server`, or `ECHO_TEST_BINARY`) and Playwright Chromium (`pnpm exec playwright install chromium`; `CHROMIUM_PATH` is set by `check.sh`) |
-| `pnpm test:e2e`                   | Browser end to end tests via `scripts/test-browser.ts` (needs the debug server binary, the built assets from `setup.sh`, and Chromium)                                                                                                                                                                                        |
-| `pnpm test:speakers`              | Loads the real PyAnnote and WavLM models and runs speaker grouping on sample audio; downloads models, needs internet                                                                                                                                                                                                           |
+| Command                                    | What it runs                                                                                                                                                                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm format:check`                        | Prettier checks for TypeScript, JSON, HTML and public CSS                                                                                                                                                                                                |
+| `pnpm lint`                                | Typed ESLint for browser, extension, scripts, tests and its config                                                                                                                                                                                       |
+| `pnpm lint:css`                            | Stylelint for `public/*.css` and `extension/*.css`, with no warnings                                                                                                                                                                                     |
+| `pnpm lint:md`                             | Markdownlint for root Markdown files and `docs/**/*.md`                                                                                                                                                                                                  |
+| `shellcheck scripts/*.sh`                  | Shell scripts at default severity, including style findings                                                                                                                                                                                              |
+| `actionlint .github/workflows/*.yml`       | GitHub Actions workflows and ShellCheck for shell steps                                                                                                                                                                                                  |
+| `pnpm typecheck` / `pnpm typecheck:compat` | Native TypeScript and compatibility solution builds                                                                                                                                                                                                      |
+| `pnpm knip`                                | Unused JS/TS files, exports and dependencies; browser bundles, extension bundles, scripts and tests are entry points                                                                                                                                     |
+| `cargo test --locked --workspace`          | Rust unit and server tests                                                                                                                                                                                                                               |
+| `pnpm test`                                | Node unit tests discovered from `tests/unit/**/*.test.ts`                                                                                                                                                                                                |
+| `pnpm test:integration`                    | Server and extension integration tests. Needs a debug server at `target/debug/echo-server` (`cargo build -p echo-server`, or `ECHO_TEST_BINARY`) and Playwright Chromium (`pnpm exec playwright install chromium`; `CHROMIUM_PATH` is set by `check.sh`) |
+| `pnpm test:e2e`                            | Browser end to end tests via `scripts/test-browser.ts`; needs the debug server, assets from `setup.sh` and Chromium                                                                                                                                      |
+| `pnpm test:speakers`                       | Loads real PyAnnote and WavLM models and runs speaker grouping on sample audio; downloads models and needs internet                                                                                                                                      |
 
-`check.sh` also runs `cargo clippy` (native workspace/all targets and `echo-app` for `wasm32-unknown-unknown`, warnings denied). Run `pnpm knip` separately; it is not part of `check.sh`.
+`check.sh` also runs `cargo clippy` (native workspace/all targets and `echo-app` for `wasm32-unknown-unknown`, warnings denied). No argument runs Rust, lint and unit tests; `--all` adds release and debug builds, integration tests and e2e tests. The three explicit modes partition `--all` for CI.
 
 Native speech HTTP lifecycle tests live in `tests/integration/native-speech-http.test.ts` and run with `pnpm test:integration`. They use sparse model fixtures, without downloading or running speech models.
 
@@ -42,13 +50,29 @@ dx fmt                      # RSX; install: cargo install dioxus-cli --version ^
 pnpm format                 # prettier --write (pnpm format:check to verify)
 pnpm lint                   # typed ESLint; errors and warnings both fail
 pnpm lint:fix               # apply ESLint fixes
+pnpm lint:css               # Stylelint; errors and warnings both fail
+pnpm lint:md                # Markdownlint
+shellcheck scripts/*.sh     # install: brew install shellcheck actionlint
+actionlint .github/workflows/*.yml
 pnpm typecheck              # TypeScript Native 7.0.2 solution build
 pnpm typecheck:compat       # TypeScript 6.0.3 compatibility build
 ```
 
-`check.sh` skips the RSX check if `dx` is not installed.
+`check.sh` skips the RSX check if `dx` is not installed. Missing `shellcheck` or `actionlint` prints a skip with `brew install shellcheck actionlint` locally; when `CI` is set, either missing tool fails the check. ShellCheck follows the existing `source=scripts/lib.sh` annotations without a `.shellcheckrc`; no ShellCheck rules are disabled.
 
-ESLint uses `eslint.config.ts` with the recommended JavaScript rules, strict and stylistic type-checked TypeScript rules, and Prettier compatibility. It lints browser, extension, script and test TypeScript plus the config itself, using each project’s TypeScript types. Run `pnpm lint` separately; it is not yet wired into `check.sh` or CI.
+ESLint uses `eslint.config.ts` with the recommended JavaScript rules, strict and stylistic type-checked TypeScript rules, and Prettier compatibility. It lints browser, extension, script and test TypeScript plus the config itself, using each project’s TypeScript types. It runs in `check.sh --lint` and CI.
+
+Stylelint extends `stylelint-config-standard` in `.stylelintrc.json`. Raw hex colors are banned except in `public/design-tokens.css`; `public/theme.css` consumes tokens and has no exception. Fixed colors use fixed-value tokens so extracting them preserves both themes. Pixel units remain allowed until the Phase 3 spacing work. Exceptions are documented here because JSON has no comments:
+
+- `// rule-empty-line-before: null` keeps the existing compact spacing between CSS rules; Prettier owns public CSS formatting.
+- `// declaration-block-single-line-max-declarations: null` preserves the extension's compact CSS blocks.
+- `// no-descending-specificity: null` preserves the existing ordered component, theme and responsive overrides.
+- `// no-duplicate-selectors: null` preserves repeated selectors that layer later overrides without moving declarations in the cascade.
+- `// color-no-hex: null` applies only to `public/design-tokens.css`, the shared color definitions.
+
+Three local Stylelint exceptions retain existing behavior, each with a reason beside the declaration: `property-no-deprecated` for the screen-reader-only `clip` fallback in `public/review.css`, `property-no-vendor-prefix` for the WebKit `appearance` fallback, and `declaration-property-value-keyword-no-deprecated` for emergency `word-break: break-word` wrapping in `public/theme.css`.
+
+Markdownlint uses `.markdownlint-cli2.jsonc` for root `*.md` and `docs/**/*.md`, excluding `design-system/`, `node_modules/`, `tmp/` and `target/`. Only `MD013` (line length) is disabled, so prose can keep its existing long lines. No inline HTML elements are allowlisted; the existing documents use code spans for HTML examples.
 
 Use Node.js 22.18 or newer, which runs `.ts` files through built-in type stripping. Browser, extension, script, and test projects extend `tsconfig.base.json`; relative TypeScript imports include `.ts`. TypeScript 6.0.3 provides the JavaScript API for editors and tooling, while `typescript-native` pins 7.0.2 for `pnpm typecheck`; `pnpm typecheck:compat` checks compiler drift. Both scripts use explicit compiler paths because both packages publish a `tsc` binary. Both compilers require declarations for cross-project references, so solution builds emit declarations and build metadata under `node_modules/.cache/tsbuild/`; esbuild owns JavaScript assets.
 
@@ -65,12 +89,13 @@ Packaging rebuilds, refuses symlinks and unexpected executables, and zips only t
 
 ## CI
 
-`.github/workflows/verify.yml` runs on pushes to `main` and on pull requests as two parallel `macos-14` jobs that together cover `./scripts/check.sh --all`:
+`.github/workflows/verify.yml` runs on pushes to `main` and on pull requests as three parallel jobs that together cover `./scripts/check.sh --all`:
 
-- **Rust lint and tests**: stable Rust with the wasm target, then `./scripts/check.sh --rust`.
-- **App build and browser tests**: Node 22.18+, pnpm, stable Rust, a prebuilt `wasm-bindgen` matching `Cargo.lock`, `./scripts/setup.sh`, Playwright Chromium, then `./scripts/check.sh --app`.
+- **Rust lint and tests** (`macos-14`): stable Rust with the wasm target, then `./scripts/check.sh --rust`.
+- **App build and browser tests** (`macos-14`): Node 22.18+, pnpm, stable Rust, a prebuilt `wasm-bindgen` matching `Cargo.lock`, `./scripts/setup.sh`, Playwright Chromium, then `./scripts/check.sh --app`.
+- **Lint and types** (`ubuntu-latest`, 15-minute timeout): Node 22.18+, pnpm with its dependency cache, a frozen lockfile install, prebuilt actionlint 1.7.12 and a version check for preinstalled ShellCheck, then `./scripts/check.sh --lint`. No Rust toolchain is needed.
 
-Both jobs keep their Rust build cache even when a run fails (`cache-on-failure`), so a red run still makes the next one fast. The cache is keyed on the Rust version, so the first run after a new stable Rust release rebuilds from scratch.
+The two macOS jobs keep their Rust build cache even when a run fails (`cache-on-failure`), so a red run still makes the next one fast. The cache is keyed on the Rust version, so the first run after a new stable Rust release rebuilds from scratch.
 
 ## Conventions
 

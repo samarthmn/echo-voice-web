@@ -17,7 +17,7 @@ env:
   # Line tables keep panic locations while compiling and caching far less debug info.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
-# The two jobs run in parallel; together they cover ./scripts/check.sh --all.
+# The three jobs run in parallel; together they cover ./scripts/check.sh --all.
 jobs:
   rust:
     name: Rust lint and tests
@@ -72,3 +72,26 @@ jobs:
       - run: ./scripts/setup.sh
       - run: pnpm exec playwright install chromium
       - run: ./scripts/check.sh --app
+
+  lint:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep temporary files in the checkout
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tmp"
+          printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint@1.7.12
+      - name: Verify preinstalled ShellCheck
+        run: shellcheck --version
+      - run: ./scripts/check.sh --lint

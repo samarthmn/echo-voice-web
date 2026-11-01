@@ -57,10 +57,10 @@
 .settings-tabs button.is-active {
   color: var(--accent, var(--accent-text));
 }
-.settings-tabs button.is-active:after {
+.settings-tabs button.is-active::after {
   content: '';
   height: 2px;
-  background: var(--accent, #6858d9);
+  background: var(--accent, var(--accent-fallback));
   position: absolute;
   bottom: 0;
   left: 0;
@@ -89,7 +89,7 @@
   background: var(--surface);
   padding: 25px 27px;
   margin-bottom: 20px;
-  box-shadow: 0 2px 5px #24263802;
+  box-shadow: 0 2px 5px var(--shadow-settings-tab);
 }
 .settings-card-heading {
   display: flex;
@@ -212,11 +212,11 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  box-shadow: 0 1px 3px #0002;
+  box-shadow: 0 1px 3px var(--shadow-toggle);
   transition: transform 0.2s;
 }
 .settings-switch[aria-checked='true'] {
-  background: var(--accent, #6858d9);
+  background: var(--accent, var(--accent-fallback));
 }
 .settings-switch[aria-checked='true'] span {
   transform: translateX(14px);
@@ -302,13 +302,13 @@
     transform 0.15s;
 }
 .settings-page .button-primary {
-  background: var(--accent, #6858d9);
+  background: var(--accent, var(--accent-fallback));
   border: 1px solid var(--accent, var(--accent));
   color: white;
-  box-shadow: 0 2px 3px #6858d917;
+  box-shadow: 0 2px 3px var(--shadow-settings-primary);
 }
 .settings-page .button-primary:hover:not(:disabled) {
-  background: #594ac7;
+  background: var(--settings-primary-hover);
   transform: translateY(-1px);
 }
 .settings-page .button-secondary {
@@ -587,7 +587,7 @@
   min-width: 5px;
   height: 100%;
   border-radius: 6px;
-  background: linear-gradient(90deg, #8d75d8, var(--purple-soft));
+  background: linear-gradient(90deg, var(--settings-banner-start), var(--purple-soft));
 }
 .settings-storage-legend {
   display: flex;
@@ -715,12 +715,14 @@
     transform: translateY(0);
   }
 }
-@media (min-width: 1400px) {
+
+@media (width >= 1400px) {
   .settings-page {
     padding-top: 50px;
   }
 }
-@media (max-width: 1050px) {
+
+@media (width <= 1050px) {
   .settings-page {
     padding: 32px 28px;
   }
@@ -737,7 +739,8 @@
     gap: 15px;
   }
 }
-@media (max-width: 650px) {
+
+@media (width <= 650px) {
   .settings-page {
     padding: 24px 18px;
   }
@@ -874,6 +877,7 @@
     font-size: 9px;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .settings-content {
     animation: none;
@@ -882,6 +886,7 @@
     transition: none !important;
   }
 }
+
 /* Keep supporting text legible on the quiet surfaces. */
 .settings-section-top p,
 .settings-card-heading p,
@@ -891,11 +896,13 @@
 .settings-backup-grid .settings-card > p {
   color: var(--muted);
 }
-@media (max-width: 650px) {
+
+@media (width <= 650px) {
   .settings-tabs {
     gap: 15px;
   }
 }
+
 /* Consistent secondary text and comfortable controls on small screens. */
 .settings-section-top p,
 .settings-card-heading p,
@@ -1019,7 +1026,8 @@
   align-items: flex-start;
   gap: 15px;
 }
-@media (max-width: 700px) {
+
+@media (width <= 700px) {
   .settings-page .button {
     font-size: 12px;
     min-height: 44px;
@@ -1034,6 +1042,7 @@
   }
   .settings-page .settings-tabs {
     gap: 15px;
+
     /* Four tabs exceed a phone's width; scroll the strip, not the page. */
     overflow-x: auto;
     scrollbar-width: none;
@@ -1100,7 +1109,8 @@
   max-width: calc(50% - 12px);
   margin-top: 23px;
 }
-@media (max-width: 650px) {
+
+@media (width <= 650px) {
   .settings-local-notes-field {
     max-width: none;
   }
@@ -1115,7 +1125,7 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 4px 20px #30204412;
+  box-shadow: 0 4px 20px var(--shadow-settings-save);
 }
 .settings-save-actions {
   display: flex;
@@ -1126,7 +1136,8 @@
 .settings-form {
   overflow: visible;
 }
-@media (max-width: 700px) {
+
+@media (width <= 700px) {
   .settings-save-row {
     bottom: 12px;
     gap: 8px;

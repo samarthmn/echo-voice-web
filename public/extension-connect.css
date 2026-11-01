@@ -75,7 +75,8 @@
 [hidden] {
   display: none !important;
 }
-@media (max-width: 420px) {
+
+@media (width <= 420px) {
   .extension-connection {
     padding: 24px 16px;
   }

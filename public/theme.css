@@ -92,6 +92,7 @@ select {
 :root[data-theme='dark'] .brand > span > span {
   color: var(--muted);
 }
+
 /* One control scale and a neutral hierarchy throughout the workspace. */
 .button {
   min-height: 40px;
@@ -280,9 +281,13 @@ select {
 .settings-field small {
   color: var(--muted);
 }
+
 /* Chevron path matches the existing shared Icon("chevron-down") source. */
 select {
   appearance: none;
+
+  /* Retain the appearance fallback for WebKit form controls. */
+  /* stylelint-disable-next-line property-no-vendor-prefix */
   -webkit-appearance: none;
   padding-right: 40px !important;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236e6879' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -303,13 +308,15 @@ select {
   min-width: 70px;
   max-width: none;
 }
+
 @media (forced-colors: active) {
   select {
     appearance: auto;
     background-image: none !important;
   }
 }
-@media (max-width: 900px) {
+
+@media (width <= 900px) {
   .topbar {
     padding: 0 20px;
   }
@@ -318,7 +325,8 @@ select {
     display: none;
   }
 }
-@media (max-width: 700px) {
+
+@media (width <= 700px) {
   .topbar {
     padding: 0 16px;
     min-height: 64px;
@@ -433,7 +441,8 @@ select {
     padding: 28px 20px;
   }
 }
-@media (max-width: 420px) {
+
+@media (width <= 420px) {
   .topbar-left {
     min-width: 0;
   }
@@ -442,6 +451,7 @@ select {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
   /* Icon-only on phones; the label stays available to assistive technology. */
   .topbar-right .button {
     width: 44px;
@@ -457,7 +467,8 @@ select {
     white-space: nowrap;
   }
 }
-@media (max-width: 380px) {
+
+@media (width <= 380px) {
   .stats-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 0;
@@ -524,7 +535,8 @@ select {
 .settings-content > .extension-panel {
   margin-top: 24px;
 }
-@media (max-width: 600px) {
+
+@media (width <= 600px) {
   .extension-connection-row {
     align-items: flex-start;
     flex-direction: column;
@@ -610,6 +622,9 @@ select {
 }
 .extension-folder code {
   overflow-wrap: anywhere;
+
+  /* Preserve the existing emergency wrapping and intrinsic sizing. */
+  /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated */
   word-break: break-word;
 }
 .extension-install-steps small {
@@ -618,7 +633,8 @@ select {
 .settings-form.has-unsaved {
   padding-bottom: 120px;
 }
-@media (max-width: 700px) {
+
+@media (width <= 700px) {
   .page-content {
     padding-bottom: 72px;
   }

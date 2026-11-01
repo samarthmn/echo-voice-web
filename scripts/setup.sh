@@ -10,7 +10,10 @@ export TMPDIR="$ROOT/tmp"
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || { echo 'Echo requires Apple Silicon macOS.' >&2; exit 1; }
 xcode-select -p >/dev/null 2>&1 || { echo 'Install Xcode command line tools: xcode-select --install' >&2; exit 1; }
 command -v rustup >/dev/null || { echo 'Install Rust with rustup: https://rustup.rs' >&2; exit 1; }
-command -v node >/dev/null && node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 18) ? 0 : 1)' || { echo 'Install Node.js 22.18 or newer.' >&2; exit 1; }
+if ! command -v node >/dev/null || ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 18) ? 0 : 1)'; then
+  echo 'Install Node.js 22.18 or newer.' >&2
+  exit 1
+fi
 command -v pnpm >/dev/null || { echo 'Install pnpm: corepack enable or brew install pnpm' >&2; exit 1; }
 if [[ ${1:-} != --build-only ]]; then
   rustup target add wasm32-unknown-unknown || { echo 'Could not install Rust wasm target; check rustup.' >&2; exit 1; }

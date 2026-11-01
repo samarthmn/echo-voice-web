@@ -4,18 +4,18 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p "$ROOT/tmp"
 export TMPDIR="$ROOT/tmp"
-# --all runs every check. CI splits the same checks across two parallel jobs:
-# --rust (Rust lint and tests) and --app (web checks, builds and browser tests).
+# --all runs every check. CI splits them across --rust, --lint and --app.
+# No argument runs Rust, lint and unit tests without builds or browser tests.
 mode="${1:-}"
 case "$#:$mode" in
-  0: | 1:--all | 1:--rust | 1:--app) ;;
-  *) echo 'Usage: ./scripts/check.sh [--all|--rust|--app]' >&2; exit 1 ;;
+  0: | 1:--all | 1:--rust | 1:--lint | 1:--app) ;;
+  *) echo 'Usage: ./scripts/check.sh [--all|--rust|--lint|--app]' >&2; exit 1 ;;
 esac
 passed=()
 summary() { printf '\nPassed checks:'; printf ' %s' "${passed[@]}"; printf '\n'; }
 trap summary EXIT
 run() { local name="$1"; shift; printf '\n==> %s\n' "$name"; "$@"; passed+=("$name"); }
-if [[ $mode != --app ]]; then
+if [[ -z $mode || $mode == --all || $mode == --rust ]]; then
   run rust-format cargo fmt --all -- --check
   if command -v dx >/dev/null; then
     run rsx-format dx fmt --check
@@ -26,9 +26,29 @@ if [[ $mode != --app ]]; then
   run wasm-clippy cargo clippy --locked -p echo-app --target wasm32-unknown-unknown -- -D warnings
   run rust-tests cargo test --locked --workspace
 fi
-if [[ $mode != --rust ]]; then
+if [[ -z $mode || $mode == --all || $mode == --lint ]]; then
   run formatting pnpm format:check
+  run eslint pnpm lint
+  run stylelint pnpm lint:css
+  run markdownlint pnpm lint:md
+  for tool in shellcheck actionlint; do
+    if command -v "$tool" >/dev/null; then
+      case "$tool" in
+        shellcheck) run shellcheck shellcheck scripts/*.sh ;;
+        actionlint) run actionlint actionlint .github/workflows/*.yml ;;
+      esac
+    elif [[ -n ${CI+x} ]]; then
+      printf '\n==> %s missing (install with: brew install shellcheck actionlint)\n' "$tool" >&2
+      exit 1
+    else
+      printf '\n==> %s skipped (install with: brew install shellcheck actionlint)\n' "$tool"
+    fi
+  done
   run typecheck pnpm typecheck
+  run typecheck-compat pnpm typecheck:compat
+  run knip pnpm knip
+fi
+if [[ -z $mode || $mode == --all || $mode == --app ]]; then
   run unit-tests pnpm test
 fi
 if [[ $mode == --all || $mode == --app ]]; then

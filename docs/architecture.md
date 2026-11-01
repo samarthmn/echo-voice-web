@@ -31,20 +31,20 @@ The server (`server/src/main.rs`) serves the static `public/` folder and two rou
 
 ## Server modules (`server/src/`)
 
-| Module                                       | Role                                                                                                                                                                                              |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `main.rs`                                    | Startup, router, `--recover-library` and `--check-library`, graceful shutdown                                                                                                                     |
-| `config.rs`, `paths.rs`                      | `echo.config.json`, env overrides, resource root, data and runtime dirs                                                                                                                           |
-| `security.rs`                                | Local-access and browser-isolation middleware, `ApiError`                                                                                                                                         |
-| `protected_storage.rs`                       | Keychain-held library key, authenticated files                                                                                                                                                    |
-| `store/`                                     | `mod.rs` (database open, lock, migrations), `meetings.rs`, `audio.rs`, `settings.rs`, `vocabulary.rs`, `library_io.rs` (export/import), `validation.rs`                                           |
-| `library_schema.rs`, `library_validation.rs` | Format fence and offline library check                                                                                                                                                            |
-| `recovery.rs`                                | Recovery phrase, encrypted backups, `--recover-library`                                                                                                                                           |
-| `extensions/`                                | `mod.rs` (routes, auth, connections), `pairing.rs` (v2 pairing, intents), `recordings.rs` (chunk ingest), `live.rs` (live text), `workspace.rs` (`/api/extensions/*`)                             |
-| `speech.rs`, `speech_spool.rs`               | Native Large V3 jobs and encrypted PCM spool                                                                                                                                                      |
-| `notes.rs`                                   | Local Ollama notes generation                                                                                                                                                               |
-| `integrations.rs`, `google_oauth.rs`         | Google Calendar and its OAuth flow                                                                                                                                                                |
-| `api.rs`                                     | Meetings, settings, storage and other workspace routes                                                                                                                                            |
+| Module                                       | Role                                                                                                                                                                  |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.rs`                                    | Startup, router, `--recover-library` and `--check-library`, graceful shutdown                                                                                         |
+| `config.rs`, `paths.rs`                      | `echo.config.json`, env overrides, resource root, data and runtime dirs                                                                                               |
+| `security.rs`                                | Local-access and browser-isolation middleware, `ApiError`                                                                                                             |
+| `protected_storage.rs`                       | Keychain-held library key, authenticated files                                                                                                                        |
+| `store/`                                     | `mod.rs` (database open, lock, migrations), `meetings.rs`, `audio.rs`, `settings.rs`, `vocabulary.rs`, `library_io.rs` (export/import), `validation.rs`               |
+| `library_schema.rs`, `library_validation.rs` | Format fence and offline library check                                                                                                                                |
+| `recovery.rs`                                | Recovery phrase, encrypted backups, `--recover-library`                                                                                                               |
+| `extensions/`                                | `mod.rs` (routes, auth, connections), `pairing.rs` (v2 pairing, intents), `recordings.rs` (chunk ingest), `live.rs` (live text), `workspace.rs` (`/api/extensions/*`) |
+| `speech.rs`, `speech_spool.rs`               | Native Large V3 jobs and encrypted PCM spool                                                                                                                          |
+| `notes.rs`                                   | Local Ollama notes generation                                                                                                                                         |
+| `integrations.rs`, `google_oauth.rs`         | Google Calendar and its OAuth flow                                                                                                                                    |
+| `api.rs`                                     | Meetings, settings, storage and other workspace routes                                                                                                                |
 
 ## Other code
 

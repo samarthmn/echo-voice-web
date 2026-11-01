@@ -1,0 +1,20 @@
+{
+  "extends": "stylelint-config-standard",
+  "rules": {
+    "color-no-hex": true,
+    "rule-empty-line-before": null,
+    "declaration-block-single-line-max-declarations": null,
+    "no-descending-specificity": null,
+    "no-duplicate-selectors": null
+  },
+  "overrides": [
+    {
+      "files": [
+        "public/design-tokens.css"
+      ],
+      "rules": {
+        "color-no-hex": null
+      }
+    }
+  ]
+}

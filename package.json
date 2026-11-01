@@ -17,7 +17,9 @@
     "knip": "knip",
     "typecheck:compat": "node node_modules/typescript/lib/tsc.js -b",
     "lint": "eslint . --max-warnings=0",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "lint:css": "stylelint \"public/*.css\" \"extension/*.css\" --max-warnings=0",
+    "lint:md": "markdownlint-cli2"
   },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",
@@ -37,7 +39,10 @@
     "globals": "17.13.0",
     "jiti": "2.7.0",
     "knip": "6.44.0",
+    "markdownlint-cli2": "0.24.0",
     "prettier": "3.6.2",
+    "stylelint": "17.16.0",
+    "stylelint-config-standard": "40.0.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",
     "typescript-native": "npm:typescript@7.0.2"

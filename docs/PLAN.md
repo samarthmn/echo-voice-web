@@ -14,7 +14,7 @@ Positioning: **"Echo: open-source, local-first AI meeting notes. A private alter
 
 ## 2. Goals, non-goals, anti-goals
 
-**Goals**
+### Goals
 
 1. A Mac developer can go from finding the repo to their first transcribed meeting using only the docs.
 2. The codebase is clean: dead code is gone, all JavaScript becomes strict TypeScript, and lint, type and format gates run in CI for Rust, TS, CSS, shell, Markdown and workflows.
@@ -23,14 +23,14 @@ Positioning: **"Echo: open-source, local-first AI meeting notes. A private alter
 5. It's discoverable. The README, repo metadata, site SEO and comparison content target "Fireflies alternative", "Otter alternative", "local AI meeting notes" and "open-source meeting recorder".
 6. Release hygiene: versioned releases, a changelog, community and security files, supply-chain checks, health and diagnostics, and a Chrome Web Store listing.
 
-**Non-goals (for this release)**
+### Non-goals (for this release)
 
 - Linux or Windows support, Intel Macs, prebuilt server binaries, a signed `.app` or an installer. The audience is Mac developers who build from source.
 - Any hosted component beyond the static site.
 - ChatGPT or any cloud notes provider. It's being removed, not hidden.
 - New recording or transcription features.
 
-**Anti-goals (failure even if it technically "works")**
+### Anti-goals (failure even if it technically "works")
 
 - Any copy, metadata or UI that implies a service ("sign up", "plans", "our servers", "we store").
 - The local app making third-party network requests it doesn't make today (for example Google Fonts). Fonts and icons get self-hosted.

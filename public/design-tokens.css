@@ -8,7 +8,40 @@
   --canvas: #faf9fc;
   --purple-soft: #f0ecfb;
   --green: #4b8d73;
+  --accent-fallback: #6858d9;
+  --shadow-settings-tab: #24263802;
+  --shadow-toggle: #0002;
+  --shadow-settings-primary: #6858d917;
+  --settings-primary-hover: #594ac7;
+  --settings-banner-start: #8d75d8;
+  --shadow-settings-save: #30204412;
+  --shadow-brand-mark: #6754c515;
+  --shadow-primary-button: #5747bc10;
+  --shadow-secondary-button: #1b142005;
+  --shadow-quick-action: #55337205;
+  --shadow-model-download: #61527808;
+  --dialog-backdrop: #25202d55;
+  --shadow-dialog: #33244020;
+  --shadow-toast: #3b204521;
+  --shadow-recorder: #56416208;
+  --record-dot: #ce807f;
+  --recorder-level-lit: #a389c4;
+  --shadow-recorder-error: #28204010;
+  --recorder-select-ring: #e4d9f7;
+  --privacy-status-dot: #92b39b;
+  --mobile-menu-backdrop: #29203055;
+  --supporting-text: #6e6879;
+  --shadow-toast-error: #28204016;
+  --shadow-review-notes: #30275014;
+  --shadow-review-tab: #30234301;
+  --review-recording-dot: #ce7575;
+  --review-recording-ring: #e7cece66;
+  --shadow-review-empty: #6b57a405;
+  --shadow-review-processing: #45305e09;
+  --shadow-review-dialog: #22132e24;
+  --review-dialog-backdrop: #25163766;
   --sidebar: 245px;
+
   color-scheme: light;
   font-family:
     Inter,
@@ -22,9 +55,9 @@
   font-synthesis: none;
 }
 :root {
-  --surface: #ffffff;
+  --surface: #fff;
   --surface-alt: #f2f1f5;
-  --on-accent: #ffffff;
+  --on-accent: #fff;
   --info: #3667a5;
   --info-soft: #eaf1fa;
   --focus: #6652c5;
@@ -39,6 +72,7 @@
 }
 :root[data-theme='dark'] {
   color-scheme: dark;
+
   --ink: #edeaf4;
   --muted: #b9b3c6;
   --canvas: #15131b;
@@ -60,9 +94,11 @@
   --info: #a3caff;
   --info-soft: #233952;
 }
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
+
     --ink: #edeaf4;
     --muted: #b9b3c6;
     --canvas: #15131b;
