@@ -55,6 +55,8 @@
   --radius-sm: 8px;
   --radius-md: 16px;
   --radius-lg: 28px;
+  --radius-card: calc(var(--radius-lg) * 1.15);  /* cards and dialogs */
+  --radius-pill: 999px;                          /* buttons, inputs, tags */
 
   /* Elevation — derived from the ground: soft ink-tinted shadows on a
      light theme, a hairline edge + ambient darkness on a dark one. */

@@ -534,13 +534,14 @@ fn App() -> Element {
                         page.set("overview".into());
                         mobile_nav.set(false);
                     },
-                    div { class: "brand-mark",
-                        span {}
-                        span {}
-                        span {}
-                        span {}
+                    img {
+                        class: "brand-mark",
+                        src: "/favicon.svg",
+                        alt: "",
+                        width: "36",
+                        height: "36",
                     }
-                    span { "echo" }
+                    span { "Echo" }
                 }
                 nav { class: "main-nav", "aria-label": "Main navigation",
                     for (id, icon, label) in nav {

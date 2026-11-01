@@ -13,9 +13,9 @@
 }
 .connection-card {
   padding: 32px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
 }
 .connection-card p {
   margin: 18px 0;
@@ -35,7 +35,7 @@
   padding: 12px 24px;
 }
 .connection-card details {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--color-divider);
   padding-top: 20px;
   margin-top: 24px;
   font-size: 13px;
@@ -44,11 +44,11 @@
   cursor: pointer;
 }
 .connection-card summary:focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 3px solid var(--color-focus);
   outline-offset: 4px;
 }
 .connection-card dt {
-  color: var(--muted);
+  color: var(--color-text-muted);
   margin-top: 16px;
 }
 .connection-card dd {
@@ -56,14 +56,14 @@
   overflow-wrap: anywhere;
 }
 .connection-card #error {
-  color: var(--danger);
-  background: var(--danger-soft);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
   padding: 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   line-height: 1.6;
 }
 .connection-card #status {
-  color: var(--ink);
+  color: var(--color-text);
 }
 .connection-card li {
   margin: 16px 0;
@@ -100,7 +100,7 @@
 .connection-back {
   display: inline-block;
   margin-top: 20px;
-  color: var(--accent-text);
+  color: var(--color-accent-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }

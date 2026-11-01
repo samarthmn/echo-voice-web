@@ -198,7 +198,7 @@ try {
     assert.ok(
       await page.locator('#passage-review-p65').evaluate((passage) => {
         const probe = document.createElement('div');
-        probe.style.background = 'var(--surface)';
+        probe.style.background = 'var(--color-surface)';
         passage.append(probe);
         const distinct =
           getComputedStyle(passage).backgroundColor !== getComputedStyle(probe).backgroundColor;
@@ -217,7 +217,7 @@ try {
       await button.evaluate((element) => {
         const style = getComputedStyle(element);
         const probe = document.createElement('div');
-        probe.style.color = 'var(--focus)';
+        probe.style.color = 'var(--color-focus)';
         element.append(probe);
         const visible =
           style.outlineStyle === 'solid' &&

@@ -1,14 +1,14 @@
 body {
-  background: var(--canvas);
-  color: var(--ink);
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 input,
 textarea,
 select {
-  color: var(--ink);
+  color: var(--color-text);
 }
 ::placeholder {
-  color: var(--muted);
+  color: var(--color-text-muted);
   opacity: 1;
 }
 .sidebar {
@@ -27,12 +27,12 @@ select {
   gap: 12px;
 }
 .topbar-left strong {
-  color: var(--ink);
+  color: var(--color-text);
 }
 .topbar .theme-toggle {
   width: 44px;
   height: 44px;
-  color: var(--ink);
+  color: var(--color-text);
 }
 .overview-columns {
   display: block;
@@ -48,56 +48,50 @@ select {
   white-space: normal;
 }
 .page-heading h1 {
-  color: var(--ink);
+  color: var(--color-text);
 }
 .button-secondary,
 .input {
-  color: var(--ink);
-  background-color: var(--surface);
-  border-color: var(--line);
+  color: var(--color-text);
+  background-color: var(--color-surface);
+  border-color: var(--color-divider);
 }
 .review-transcript-footer {
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 .model-selected {
-  border-color: var(--accent);
+  border-color: var(--color-accent);
 }
 .review-speaker-color-0 {
-  background: var(--purple-soft);
-  color: var(--accent-text);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
 }
 .review-speaker-color-1 {
-  background: var(--success-soft);
-  color: var(--success);
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 .review-speaker-color-2 {
-  background: var(--warning-soft);
-  color: var(--warning);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 .review-speaker-color-3 {
-  background: var(--info-soft);
-  color: var(--info);
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 .model-card h3 {
   font-size: 23px;
   overflow-wrap: anywhere;
 }
-:root[data-theme='dark'] .button-primary {
-  color: var(--on-accent);
-}
 :root[data-theme='dark'] .review-player {
-  background: var(--surface);
-  color: var(--ink);
-}
-:root[data-theme='dark'] .brand > span > span {
-  color: var(--muted);
+  background: var(--color-surface);
+  color: var(--color-text);
 }
 
 /* One control scale and a neutral hierarchy throughout the workspace. */
 .button {
   min-height: 40px;
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 10px 18px;
+  border-radius: var(--radius-pill);
   font-size: 13px;
   font-weight: 550;
 }
@@ -113,7 +107,7 @@ select {
 .icon-button {
   width: 36px;
   height: 36px;
-  border-radius: 8px;
+  border-radius: 50%;
 }
 .icon-button svg {
   width: 18px;
@@ -121,7 +115,7 @@ select {
 }
 .button-secondary,
 .button-ghost {
-  color: var(--ink);
+  color: var(--color-text);
 }
 .page-heading {
   margin-bottom: 24px;
@@ -132,7 +126,7 @@ select {
 }
 .section-heading h2,
 .review-section-heading h2 {
-  color: var(--ink);
+  color: var(--color-text);
   font-size: 17px;
   line-height: 1.4;
 }
@@ -146,7 +140,7 @@ select {
 .review-version strong,
 .review-track-list strong,
 .review-player-source strong {
-  color: var(--ink);
+  color: var(--color-text);
 }
 .quick-action small,
 .stat-item span:not(.stat-icon),
@@ -166,7 +160,7 @@ select {
 .review-track-list small,
 .review-no-evidence,
 .review-note-count {
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 .stat-item strong,
 .empty-library h3,
@@ -175,7 +169,7 @@ select {
 .mic-setup > div,
 .review-processing-card label,
 .review-processing-card .input {
-  color: var(--ink);
+  color: var(--color-text);
 }
 .stat-item strong {
   font-size: 24px;
@@ -183,21 +177,21 @@ select {
 }
 .privacy-stat strong,
 .badge-green {
-  color: var(--success);
+  color: var(--color-success);
 }
 .badge {
   font-size: 11px;
   padding: 4px 8px;
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 .badge-green {
-  color: var(--success);
+  color: var(--color-success);
 }
 .badge-purple {
-  color: var(--accent-text);
+  color: var(--color-accent-text);
 }
 .badge-amber {
-  color: var(--warning);
+  color: var(--color-warning);
 }
 .empty-library {
   min-height: 220px;
@@ -206,7 +200,7 @@ select {
 .empty-library-icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   transform: none;
   margin-bottom: 12px;
 }
@@ -222,7 +216,7 @@ select {
   gap: 8px;
 }
 .calendar-empty h2 {
-  color: var(--ink);
+  color: var(--color-text);
   font-size: 17px;
   line-height: 1.4;
   letter-spacing: -0.2px;
@@ -235,7 +229,7 @@ select {
   font-size: 12px;
   letter-spacing: 0;
   font-weight: 500;
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 .review-note-card header h3 {
   margin: 0;
@@ -249,7 +243,7 @@ select {
 }
 .privacy-note {
   padding: 12px;
-  background: var(--surface-alt);
+  background: var(--color-surface-alt);
 }
 .privacy-note p {
   font-size: 12px;
@@ -276,10 +270,10 @@ select {
   margin-bottom: 24px;
 }
 .settings-field > span {
-  color: var(--ink);
+  color: var(--color-text);
 }
 .settings-field small {
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 
 /* Chevron path matches the existing shared Icon("chevron-down") source. */
@@ -302,7 +296,7 @@ select {
   padding-right: 24px !important;
   background-position: right 5px center;
   background-size: 12px;
-  color: var(--ink);
+  color: var(--color-text);
 }
 .review-player-right select {
   min-width: 70px;
@@ -505,14 +499,14 @@ select {
   margin: 0;
 }
 .extension-connection-row small {
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 .extension-connection-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--color-divider);
   padding-top: 16px;
 }
 .extension-connection-row > span {
@@ -583,7 +577,7 @@ select {
 .calendar-extension-link button,
 .first-transcript-checklist button,
 .extension-copy {
-  color: var(--accent-text);
+  color: var(--color-accent-text);
   text-decoration: underline;
   text-underline-offset: 3px;
   padding: 4px;
@@ -702,7 +696,7 @@ select {
 .check-hint {
   display: block;
   margin-top: 2px;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 .calendar-extension-link + * {
