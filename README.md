@@ -23,7 +23,7 @@ Prerequisite details: [docs/install.md](docs/install.md). Extension setup: [docs
 
 ## Daily use
 
-1. Run `./scripts/start.sh` (or install the launchd agent, see [install](docs/install.md#auto-start-at-login)) and open <http://localhost:3000>.
+1. Run `./scripts/start.sh` (or install the launchd agent, see [start at login](docs/auto-start.md)) and open <http://localhost:3000>.
 2. Before important recordings, save the library recovery phrase in **Settings → Storage → Protect your library**.
 3. Meetings: join normally, open the Echo extension popup, confirm consent, **Start recording**. In person: **New meeting → In person**. Existing audio: **Upload a recording**.
 4. Download a speech model under **Models**, then open the meeting and choose **Create transcript**.
@@ -32,11 +32,12 @@ Prerequisite details: [docs/install.md](docs/install.md). Extension setup: [docs
 
 ## Documentation
 
-| Doc                                                          | Contents                                                                                                   |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| [docs/install.md](docs/install.md)                           | Prerequisites, setup and start scripts, configuration, auto-start, updating, uninstalling, troubleshooting |
-| [docs/extension.md](docs/extension.md)                       | Installing and using the browser extension, offline behaviour, wire protocol, security                     |
-| [docs/integrations.md](docs/integrations.md)                 | Speech models, speaker grouping, Ollama notes, Google Calendar                                             |
-| [docs/storage-and-recovery.md](docs/storage-and-recovery.md) | Where data lives, encryption, recovery phrase, backups, library recovery                                   |
-| [docs/architecture.md](docs/architecture.md)                 | Components, request flow, module maps, recording data flow                                                 |
-| [docs/development.md](docs/development.md)                   | Dev loop, checks and tests, formatting, packaging, CI, conventions                                         |
+The full documentation is in [`docs/`](docs/index.md) and on [echo-web.samarthmn.com/docs](https://echo-web.samarthmn.com/docs/).
+
+| Start here | |
+| --- | --- |
+| [Requirements](docs/requirements.md) and [install](docs/install.md) | From a fresh Mac to a running Echo |
+| [Browser extension](docs/extension.md) and [recording](docs/recording.md) | Recording meetings |
+| [Configuration](docs/configuration.md), [backups and recovery](docs/backups-and-recovery.md) | Running it day to day |
+| [Security model](docs/security-model.md) and [privacy](docs/privacy.md) | What stays on your Mac, and why |
+| [Development](docs/development.md) | Building, testing and contributing |

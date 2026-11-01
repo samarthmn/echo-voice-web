@@ -56,16 +56,13 @@ export default defineConfig(
     },
   },
   {
+    // This file belongs to no TypeScript project (the root tsconfig is a solution of references),
+    // and typescript-eslint's default-project fallback for it proved flaky, so lint it untyped.
     files: ['eslint.config.ts'],
+    extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: globals.node,
-      // The solution config contains references only; this single root file needs a default project.
-      parserOptions: {
-        projectService: {
-          allowDefaultProject: ['eslint.config.ts'],
-          defaultProject: 'scripts/tsconfig.json',
-        },
-      },
+      parserOptions: { projectService: false },
     },
   },
   {

@@ -1,0 +1,52 @@
+---
+import Base from '../../layouts/Base.astro';
+import { CHECKED, COMPETITORS, GITHUB_URL, type Competitor } from '../../data/site';
+
+export function getStaticPaths() {
+  return COMPETITORS.map((competitor) => ({ params: { slug: competitor.slug }, props: { competitor } }));
+}
+interface Props {
+  competitor: Competitor;
+}
+const { competitor: c } = Astro.props;
+const title = `An open-source, local alternative to ${c.name} | Echo`;
+const description = `Echo is a free, open-source alternative to ${c.name} that records, transcribes and summarises meetings on your own Mac, with no bot in the call and no cloud account.`;
+---
+
+<Base title={title} description={description}>
+  <article class="prose">
+    <span class="kicker">Alternatives</span>
+    <h1>An open-source alternative to {c.name}</h1>
+    <p>
+      {c.name} is a cloud meeting assistant: your meetings are recorded and processed on its servers,
+      under an account. Echo does the same core job (recording, transcription, speaker labels and
+      notes) entirely on your own Mac.
+    </p>
+
+    <h2>How they differ</h2>
+    <ul>
+      <li><strong>Where it runs.</strong> {c.name} is a cloud service. Echo runs on your Mac and listens only on its loopback address.</li>
+      <li><strong>In the call.</strong> {c.name}: {c.bot.charAt(0).toLowerCase() + c.bot.slice(1)}. Echo never joins as a participant; its extension records your own meeting tab.</li>
+      <li><strong>Your data.</strong> {c.name} stores meetings in {c.storage}. Echo keeps them in an encrypted library on your disk, with the key in the macOS Keychain.</li>
+      <li><strong>Price.</strong> {c.name}: {c.price.charAt(0).toLowerCase() + c.price.slice(1)}. Echo is free and open source under the MIT licence.</li>
+    </ul>
+
+    <h2>When {c.name} is the better fit</h2>
+    <p>
+      If you need team workspaces, sharing, mobile apps, CRM integrations, or don’t want to run
+      software yourself, a hosted service like {c.name} is the simpler choice. Echo is for one person
+      on an Apple Silicon Mac who wants their meetings to stay on that Mac.
+    </p>
+
+    <h2>Try Echo</h2>
+    <p>
+      Follow the <a href="/docs/install/">install guide</a> (about ten minutes from a fresh Mac), or
+      read the <a href="/#compare">full comparison</a>. The source is on <a href={GITHUB_URL}>GitHub</a>.
+    </p>
+    <p class="muted">
+      Details about {c.name} come from {c.sources.map((s) => <a href={s.url}>{s.label}</a>)}, checked
+      on {CHECKED}. Plans change; check {c.name} for current details. {c.name} is a trademark of its
+      owner; Echo is not affiliated with it.
+    </p>
+  </article>
+</Base>

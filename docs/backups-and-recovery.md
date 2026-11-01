@@ -1,4 +1,7 @@
-# Storage and recovery
+---
+title: Backups and recovery
+description: Where Echo keeps your data, how it is encrypted, and how to back up, restore and recover your library.
+---
 
 ## Where data lives
 
@@ -16,7 +19,7 @@ Everything is under the data folder: `.echo-data` by default, resolved relative 
 
 Only one server may use a library at a time.
 
-Older libraries may contain a `chatgpt/` folder and `chatgpt-runtime.sparseimage` from the retired notes provider. Echo ignores these files and never creates, migrates, protects or deletes them. They do not block opening, checking or recovering the library. To reclaim their space, stop Echo, ensure any old helper volume is unmounted, and remove only these legacy items by hand. Saved notes remain in the database and display as "ChatGPT (legacy)".
+Older libraries may also contain a `chatgpt/` folder and `chatgpt-runtime.sparseimage` from a notes provider Echo no longer has. Echo ignores them; once Echo is stopped you can delete them by hand. Notes made with it still show, labelled "ChatGPT (legacy)".
 
 ## Encryption
 

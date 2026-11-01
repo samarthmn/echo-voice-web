@@ -1,4 +1,7 @@
-# Architecture
+---
+title: Architecture
+description: "How Echo is put together: the Rust server, the Dioxus web app, the browser extension and the recording data flow."
+---
 
 ## Components
 

@@ -162,7 +162,7 @@ Phases run in order. Inside a phase, tasks marked ∥ can run as parallel worker
   - Landing at `/`, adapted from `design-system/templates/landing/`.
   - Starlight serves `/docs/**`. Its content collection uses a `glob` loader with base `../docs`, so `docs/` stays the one source and renders on GitHub as-is.
   - `PLAN.md` and `superpowers/` are excluded.
-  - A small remark plugin rewrites repo-relative `.md` links (`./install.md#x`) to site routes. `starlight-links-validator` fails the build on broken links.
+  - A small remark plugin rewrites repo-relative `.md` links (`./install.md#x`) to site routes, and fails the build on a missing doc, heading or repository file. (Done this way instead of `starlight-links-validator`, which can't resolve docs loaded from outside `src/content/docs`.)
 - **5.2 Starlight theme** ∥ (after 3.2): map the Organic tokens onto `--sl-color-*` and `--sl-font*`, light and dark, with the logo in the header. Search is Pagefind (built in, no third party).
 - **5.3 Landing page** ∥. Sections:
   1. Hero: "Open-source AI meeting notes that never leave your laptop", with a CTA to "Self-host in 10 minutes" (docs) and the GitHub link.

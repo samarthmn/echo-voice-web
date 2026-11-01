@@ -1,4 +1,7 @@
-# Development
+---
+title: Development
+description: "Build, test and lint Echo from source: the dev loop, checks, formatting, design tokens, packaging and CI."
+---
 
 ## Dev loop
 
@@ -60,7 +63,7 @@ pnpm typecheck:compat       # TypeScript 6.0.3 compatibility build
 
 `check.sh` skips the RSX check if `dx` is not installed. Missing `shellcheck` or `actionlint` prints a skip with `brew install shellcheck actionlint` locally; when `CI` is set, either missing tool fails the check. ShellCheck follows the existing `source=scripts/lib.sh` annotations without a `.shellcheckrc`; no ShellCheck rules are disabled.
 
-ESLint uses `eslint.config.ts` with the recommended JavaScript rules, strict and stylistic type-checked TypeScript rules, and Prettier compatibility. It lints browser, extension, script and test TypeScript plus the config itself, using each project’s TypeScript types. It runs in `check.sh --lint` and CI.
+ESLint uses `eslint.config.ts` with the recommended JavaScript rules, strict and stylistic type-checked TypeScript rules, and Prettier compatibility. It lints browser, extension, script, test and website TypeScript with each project’s types; the config file itself is linted without type information because it belongs to no TypeScript project. It runs in `check.sh --lint` and CI.
 
 Stylelint extends `stylelint-config-standard` in `.stylelintrc.json`. Raw hex colors are banned in app and extension CSS: colours come from the design tokens. The generated `public/tokens.css` is ignored. Pixel units remain allowed until the Phase 4 restyle. Exceptions are documented here because JSON has no comments:
 
@@ -107,7 +110,7 @@ Packaging rebuilds, refuses symlinks and unexpected executables, and zips only t
 
 - **Rust lint and tests** (`macos-14`): stable Rust with the wasm target, then `./scripts/check.sh --rust`.
 - **App build and browser tests** (`macos-14`): Node 22.18+, pnpm, stable Rust, a prebuilt `wasm-bindgen` matching `Cargo.lock`, `./scripts/setup.sh`, Playwright Chromium, then `./scripts/check.sh --app`.
-- **Lint and types** (`ubuntu-latest`, 15-minute timeout): Node 22.18+, pnpm with its dependency cache, a frozen lockfile install, prebuilt actionlint 1.7.12 and a version check for preinstalled ShellCheck, then `./scripts/check.sh --lint`. No Rust toolchain is needed.
+- **Lint and types** (`ubuntu-latest`, 15-minute timeout): Node 22.18+, pnpm with its dependency cache, a frozen lockfile install, prebuilt actionlint 1.7.12 and a version check for preinstalled ShellCheck, then `./scripts/check.sh --lint`, which also builds the website (`site/`). No Rust toolchain is needed.
 
 The two macOS jobs keep their Rust build cache even when a run fails (`cache-on-failure`), so a red run still makes the next one fast. The cache is keyed on the Rust version, so the first run after a new stable Rust release rebuilds from scratch.
 

@@ -48,6 +48,7 @@ if [[ -z $mode || $mode == --all || $mode == --lint ]]; then
   run typecheck-compat pnpm typecheck:compat
   run knip pnpm knip
   run icons-fresh node scripts/build-icons.ts --check
+  run site-build pnpm --filter echo-site build
 fi
 if [[ -z $mode || $mode == --all || $mode == --app ]]; then
   run unit-tests pnpm test

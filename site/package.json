@@ -1,0 +1,23 @@
+{
+  "name": "echo-site",
+  "private": true,
+  "type": "module",
+  "description": "echo-web.samarthmn.com: the Echo landing page and documentation (Astro + Starlight).",
+  "scripts": {
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro check && ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview"
+  },
+  "dependencies": {
+    "@astrojs/markdown-remark": "7.3.5",
+    "@astrojs/sitemap": "3.7.4",
+    "@astrojs/starlight": "0.42.8",
+    "astro": "7.4.4",
+    "github-slugger": "2.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "typescript": "6.0.3",
+    "wrangler": "4.156.0"
+  }
+}

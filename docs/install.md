@@ -1,105 +1,85 @@
-# Install and run
+---
+title: Install
+description: Install Echo on a fresh Apple Silicon Mac, step by step, and start it for the first time.
+---
 
-Echo runs from a source checkout. There is no packaged installer.
+This page takes a fresh Mac to a running Echo in about ten minutes, plus download time. Every command runs in Terminal.
 
-## Prerequisites
+## 1. Install the developer tools
 
-| Tool                     | Notes                                                                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Apple Silicon Mac        | `setup.sh` refuses to run elsewhere                                                                                                         |
-| Xcode command line tools | `xcode-select --install`                                                                                                                    |
-| Rust via rustup          | <https://rustup.rs>. `setup.sh` adds the `wasm32-unknown-unknown` target and installs the `wasm-bindgen-cli` version pinned in `Cargo.lock` |
-| Node.js 22.18 or newer   | Also needed at runtime for Whisper Large V3                                                                                                 |
-| pnpm                     | `corepack enable` or `brew install pnpm`                                                                                                    |
-| Ollama (optional)        | Local notes. See [integrations](integrations.md#local-notes-ollama)                                                                         |
+```bash
+xcode-select --install
+```
 
-## setup.sh
+Follow the dialog, then confirm it worked with `xcode-select -p`.
+
+## 2. Install Rust
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Accept the defaults, then open a new Terminal window (or run `source "$HOME/.cargo/env"`) and check `cargo --version`.
+
+## 3. Install Node.js and pnpm
+
+Echo needs Node.js 22.18 or newer. With [Homebrew](https://brew.sh):
+
+```bash
+brew install node pnpm
+node --version   # v22.18.0 or newer
+```
+
+Any other Node installer works too (nvm, fnm, the nodejs.org package). For pnpm, `corepack enable` is an alternative to Homebrew.
+
+## 4. Get the code
+
+```bash
+git clone https://github.com/samarthmn/echo-voice-web.git
+cd echo-voice-web
+```
+
+## 5. Build everything
 
 ```bash
 ./scripts/setup.sh
-./scripts/setup.sh --build-only   # skip tool installs; rebuild outputs only
 ```
 
-It checks the prerequisites, then:
+`setup.sh` checks the prerequisites, then:
 
-1. adds the wasm Rust target, runs `pnpm install --frozen-lockfile`, and installs `wasm-bindgen-cli` if the version does not match (skipped with `--build-only`);
-2. builds browser assets (`pnpm build:assets`) and the extension (`pnpm build:extension`, output `extension/dist`);
-3. builds the Dioxus app to wasm and runs `wasm-bindgen` into `public/assets`;
-4. generates the asset manifest and builds the release server (`target/release/echo-server`).
+1. adds the `wasm32-unknown-unknown` Rust target, runs `pnpm install --frozen-lockfile`, and installs the `wasm-bindgen-cli` version pinned in `Cargo.lock`;
+2. builds the browser assets and the extension (output in `extension/dist`);
+3. builds the Dioxus web app to WebAssembly;
+4. builds the release server, `target/release/echo-server`.
 
-It prints the URL to open when it finishes. It never downloads speech or Ollama models.
+The first run takes a few minutes. It never downloads speech or Ollama models. To rebuild after a change without reinstalling tools, run `./scripts/setup.sh --build-only`.
 
-## start.sh
+## 6. Start Echo
 
 ```bash
 ./scripts/start.sh
 ```
 
-Verifies the build outputs exist, checks that the port is free, and runs `target/release/echo-server` in the foreground. Press Ctrl+C to stop. The server only binds loopback addresses.
+It checks the build outputs and that the port is free, then runs the server in the foreground. Open <http://localhost:3000>. Press Ctrl+C in Terminal to stop it.
 
-## Configuration
+The first time Echo opens its library, macOS asks to let `echo-server` use the Keychain. Choose **Always Allow**: the library key lives there.
 
-`echo.config.json` in the repo root:
+To start Echo automatically at login instead, see [auto-start](auto-start.md).
 
-| Key                 | Default          | Meaning                                                                                                |
-| ------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `bind`              | `127.0.0.1:3000` | Listen address. Must be a loopback IP and port                                                         |
-| `dataDir`           | `.echo-data`     | Library folder. Relative paths resolve against the repo (resource root)                                |
-| `googleRedirectUri` | derived          | Optional. Overrides the Google OAuth redirect URI, see [integrations](integrations.md#google-calendar) |
+## 7. Install the browser extension
 
-Unknown keys log a warning and are ignored. Edit the file and restart.
+1. Open `brave://extensions` (or `chrome://extensions`) and turn on **Developer mode**.
+2. Choose **Load unpacked** and select the `extension/dist` folder inside your checkout. Echo shows the exact path under **Settings → Browser extension**.
+3. Pin the extension and choose **Connect to Echo** in its popup. Approve the request in the Echo tab that opens.
 
-Environment overrides:
+Details are on the [extension](extension.md) page.
 
-| Variable             | Effect                                                                                   |
-| -------------------- | ---------------------------------------------------------------------------------------- |
-| `ECHO_BIND`          | Overrides `bind` (also read by the scripts)                                              |
-| `ECHO_DATA_DIR`      | Overrides `dataDir`                                                                      |
-| `ECHO_RESOURCE_ROOT` | Folder that contains `public/`. Normally found automatically from the binary or the repo |
-| `ECHO_CONFIG_FILE`   | Use another config file instead of `echo.config.json`                                    |
+## 8. Protect your library
 
-`.env` in the repo root is loaded at start and only holds the optional Google OAuth client (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). Copy `.env.example` to start.
+Before recording anything important, open **Settings → Storage → Protect your library** and save the 24-word recovery phrase. It is the only way back in if the Keychain key is lost. See [backups and recovery](backups-and-recovery.md).
 
-If you change the port, the extension finds Echo automatically only on ports 3000 to 3005; otherwise open Echo in the browser once (it announces itself to the extension) or set the address under **Advanced** in the extension Setup page.
+## Next
 
-## Auto-start at login
-
-```bash
-./scripts/install-service.sh            # install and start the launchd agent
-./scripts/install-service.sh --dry-run  # print the plist only
-./scripts/uninstall-service.sh
-```
-
-The agent is `dev.echo-voice.server` (`~/Library/LaunchAgents/dev.echo-voice.server.plist`). It runs `target/release/echo-server` from the repo, restarts it if it exits with an error, and logs to `~/Library/Logs/Echo Voice/server.log`. Run `setup.sh` first. After a rebuild, macOS may ask again to allow Keychain access for the new binary; allow it, or the library stays locked. Restart the agent after rebuilding:
-
-```bash
-launchctl kickstart -k "gui/$(id -u)/dev.echo-voice.server"
-```
-
-## Updating
-
-1. Finish recordings and let the extension upload pending audio.
-2. Export a backup (**Settings → Storage → Export library**, see [storage](storage-and-recovery.md)).
-3. Stop the server (Ctrl+C, or `uninstall-service.sh` / `launchctl bootout` if running as a service).
-4. `git pull && ./scripts/setup.sh`
-5. Start it again. If the extension changed, rebuild is already done by `setup.sh`; reload it at `brave://extensions` or `chrome://extensions`.
-
-The server refuses to open a library written by a newer version and does not downgrade a migrated library.
-
-## Uninstalling
-
-1. Export a backup if you want to keep the recordings. The default `.echo-data` folder is inside the checkout.
-2. `./scripts/uninstall-service.sh` if you installed the agent.
-3. Remove the extension in the browser. This deletes recordings it has not yet uploaded.
-4. Delete the checkout. The library key stays in Keychain; remove it with Keychain Access if you want it gone.
-
-## Troubleshooting
-
-| Symptom                          | Fix                                                                                                                                                                                                 |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Port N is in use"               | `lsof -nP -iTCP:<port> -sTCP:LISTEN` to find the process, or set `ECHO_BIND=127.0.0.1:<other>`                                                                                                      |
-| "Build outputs missing"          | Run `./scripts/setup.sh`                                                                                                                                                                            |
-| Library locked / key unavailable | Unlock the login keychain and allow Echo's Keychain prompt, then restart. If the key is gone, [recover with the phrase](storage-and-recovery.md#recovering-a-library)                               |
-| Speech model not ready           | Download it under **Models → Speech models**. Needs internet once                                                                                                                                   |
-| Large V3 unavailable             | Needs Node.js 22.18+ on the server's `PATH` and the dependencies from `pnpm install`. Under launchd, `install-service.sh` records Node's folder in the agent's `PATH`; rerun it after changing Node |
-| Extension will not connect       | Make sure the server is running, then use **Connect to Echo**. See [extension troubleshooting](extension.md#troubleshooting)                                                                        |
+- [Your first recording](first-recording.md)
+- Optional: [local notes with Ollama](notes-ollama.md) and [Google Calendar](calendar.md)
+- If something fails: [troubleshooting](troubleshooting.md)

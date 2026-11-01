@@ -1,19 +1,28 @@
 {
   "$schema": "https://unpkg.com/knip/schema.json",
-  "entry": [
-    "web/{bridge,inference-worker,extension-connect}.ts",
-    "extension/src/{background,popup,setup,offscreen,content,worklet}.ts",
-    "scripts/*.ts",
-    "tests/**/*.ts"
-  ],
-  "project": [
-    "web/**/*.ts",
-    "extension/src/**/*.ts",
-    "scripts/*.ts",
-    "tests/**/*.ts"
-  ],
   "includeEntryExports": true,
   "tags": [
     "-dynamicImport"
-  ]
+  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "web/{bridge,inference-worker,extension-connect}.ts",
+        "extension/src/{background,popup,setup,offscreen,content,worklet}.ts",
+        "scripts/*.ts",
+        "tests/**/*.ts"
+      ],
+      "project": [
+        "web/**/*.ts",
+        "extension/src/**/*.ts",
+        "scripts/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
+    "site": {
+      "ignoreDependencies": [
+        "wrangler"
+      ]
+    }
+  }
 }

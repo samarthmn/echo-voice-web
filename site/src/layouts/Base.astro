@@ -1,0 +1,93 @@
+---
+import '../styles/tokens.generated.css';
+import '../styles/site.css';
+import { CLOUDFLARE_ANALYTICS_TOKEN } from '../analytics';
+import { GITHUB_URL, SITE_URL } from '../data/site';
+
+interface Props {
+  title: string;
+  description: string;
+  jsonLd?: object[];
+}
+const { title, description, jsonLd = [] } = Astro.props;
+const canonical = new URL(Astro.url.pathname, SITE_URL).href;
+const ogImage = new URL('/og-image.png', SITE_URL).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    <meta name="theme-color" content="#f5ead8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#2e2b25" media="(prefers-color-scheme: dark)" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Echo" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Echo: meeting notes that never leave your Mac" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    {jsonLd.map((data) => <script type="application/ld+json" set:html={JSON.stringify(data)} />)}
+    {
+      CLOUDFLARE_ANALYTICS_TOKEN && (
+        <script
+          defer
+          src="https://static.cloudflareinsights.com/beacon.min.js"
+          data-cf-beacon={JSON.stringify({ token: CLOUDFLARE_ANALYTICS_TOKEN })}
+        />
+      )
+    }
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <nav class="nav" aria-label="Site">
+      <a class="nav-brand" href="/"><img src="/favicon.svg" alt="" width="32" height="32" />Echo</a>
+      <div class="nav-links">
+        <a href="/#how">How it works</a>
+        <a href="/#compare">Compare</a>
+        <a href="/docs/">Docs</a>
+        <a href={GITHUB_URL}>GitHub</a>
+      </div>
+    </nav>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="footer">
+      <div class="wrap footer-grid">
+        <div>
+          <a class="nav-brand" href="/"><img src="/favicon.svg" alt="" width="28" height="28" />Echo</a>
+          <p>
+            Echo is free, open-source software you run on your own Mac. It is not a service: nobody
+            hosts your recordings, and this website never sees them.
+          </p>
+        </div>
+        <ul>
+          <li><a href="/docs/">Documentation</a></li>
+          <li><a href="/docs/install/">Install</a></li>
+          <li><a href="/docs/privacy/">App privacy</a></li>
+          <li><a href="/privacy/">Website privacy</a></li>
+        </ul>
+        <ul>
+          <li><a href={GITHUB_URL}>GitHub</a></li>
+          <li><a href={`${GITHUB_URL}/blob/main/LICENSE`}>MIT licence</a></li>
+          <li><a href={`${GITHUB_URL}/issues`}>Issues</a></li>
+          <li><a href={`${GITHUB_URL}/blob/main/SECURITY.md`}>Security</a></li>
+        </ul>
+      </div>
+    </footer>
+  </body>
+</html>
