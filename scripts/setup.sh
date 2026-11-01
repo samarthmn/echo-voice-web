@@ -10,7 +10,7 @@ export TMPDIR="$ROOT/tmp"
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || { echo 'Echo requires Apple Silicon macOS.' >&2; exit 1; }
 xcode-select -p >/dev/null 2>&1 || { echo 'Install Xcode command line tools: xcode-select --install' >&2; exit 1; }
 command -v rustup >/dev/null || { echo 'Install Rust with rustup: https://rustup.rs' >&2; exit 1; }
-command -v node >/dev/null && node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' || { echo 'Install Node.js 22 or newer.' >&2; exit 1; }
+command -v node >/dev/null && node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 18) ? 0 : 1)' || { echo 'Install Node.js 22.18 or newer.' >&2; exit 1; }
 command -v pnpm >/dev/null || { echo 'Install pnpm: corepack enable or brew install pnpm' >&2; exit 1; }
 if [[ ${1:-} != --build-only ]]; then
   rustup target add wasm32-unknown-unknown || { echo 'Could not install Rust wasm target; check rustup.' >&2; exit 1; }
@@ -24,7 +24,7 @@ pnpm build:assets || { echo 'Asset build failed; run pnpm install and retry.' >&
 pnpm build:extension || { echo 'Extension build failed; run pnpm install and retry.' >&2; exit 1; }
 cargo build --locked --release -p echo-app --target wasm32-unknown-unknown || { echo 'Web app build failed; check the Rust wasm target.' >&2; exit 1; }
 wasm-bindgen --target web --out-dir public/assets --out-name echo_app target/wasm32-unknown-unknown/release/echo-app.wasm || { echo 'wasm-bindgen failed; rerun setup without --build-only.' >&2; exit 1; }
-node scripts/asset-manifest.mjs || { echo 'Asset manifest generation failed.' >&2; exit 1; }
+node scripts/asset-manifest.ts || { echo 'Asset manifest generation failed.' >&2; exit 1; }
 cargo build --locked --release -p echo-server || { echo 'Server build failed; check Rust and Xcode tools.' >&2; exit 1; }
 url="$(echo_url)"
 printf '\nEcho is ready. Run ./scripts/start.sh and open %s\nLoad the unpacked browser extension from extension/dist.\n' "$url"

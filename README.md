@@ -5,7 +5,7 @@ Echo is a single-user meeting recorder and transcriber that runs entirely on you
 ## Requirements
 
 - Apple Silicon Mac (macOS 14+)
-- Xcode command line tools, Rust (rustup), Node.js 22+, pnpm
+- Xcode command line tools, Rust (rustup), Node.js 22.18+, pnpm
 - Brave or Chrome
 - Optional: [Ollama](https://ollama.com/download) for local notes
 

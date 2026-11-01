@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(&disk[..8], b"ECHOPCM1");
         assert_eq!(disk.len(), bytes.len() + 8 + 2 * 20);
         assert!(!disk.windows(32).any(|part| part == &bytes[..32]));
-        let mut child = tokio::process::Command::new("node").args(["--input-type=module", "-e", "import {readEncryptedPCM} from './scripts/native-speech.mjs';let s='';for await(const b of process.stdin)s+=b;const a=await readEncryptedPCM(JSON.parse(s));if(a.length!==20000||a.some(x=>x!==0.25))process.exit(2);"])
+        let mut child = tokio::process::Command::new("node").args(["--input-type=module", "-e", "import {readEncryptedPCM} from './scripts/native-speech.ts';let s='';for await(const b of process.stdin)s+=b;const a=await readEncryptedPCM(JSON.parse(s));if(a.length!==20000||a.some(x=>x!==0.25))process.exit(2);"])
             .current_dir(root).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
         let payload = Zeroizing::new(serde_json::to_vec(&json!({"operation":"transcribe","cacheDir":directory.path(),"audioPath":path,"audioBytes":length,"audioKey":STANDARD.encode(key.as_ref())})).unwrap());
         child

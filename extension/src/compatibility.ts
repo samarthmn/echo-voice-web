@@ -4,11 +4,11 @@ export function protectedCompanion(body: unknown): boolean {
   const value = body as Record<string, unknown> | null;
   return (
     !!value &&
-    typeof value.appVersion === 'string' &&
-    value.appVersion.length <= 128 &&
-    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.appVersion) &&
-    value.storageProtectionVersion === 1 &&
-    value.recordingReceiptVersion === 1
+    typeof value['appVersion'] === 'string' &&
+    value['appVersion'].length <= 128 &&
+    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value['appVersion']) &&
+    value['storageProtectionVersion'] === 1 &&
+    value['recordingReceiptVersion'] === 1
   );
 }
 export const UPDATE_ECHO_MESSAGE =

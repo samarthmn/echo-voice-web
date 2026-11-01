@@ -9,7 +9,7 @@ Echo runs from a source checkout. There is no packaged installer.
 | Apple Silicon Mac        | `setup.sh` refuses to run elsewhere                                                                                                         |
 | Xcode command line tools | `xcode-select --install`                                                                                                                    |
 | Rust via rustup          | <https://rustup.rs>. `setup.sh` adds the `wasm32-unknown-unknown` target and installs the `wasm-bindgen-cli` version pinned in `Cargo.lock` |
-| Node.js 22 or newer      | Also needed at runtime for Whisper Large V3                                                                                                 |
+| Node.js 22.18 or newer      | Also needed at runtime for Whisper Large V3                                                                                                 |
 | pnpm                     | `corepack enable` or `brew install pnpm`                                                                                                    |
 | Ollama (optional)        | Local notes. See [integrations](integrations.md#local-notes-ollama)                                                                         |
 
@@ -101,5 +101,5 @@ The server refuses to open a library written by a newer version and does not dow
 | "Build outputs missing"          | Run `./scripts/setup.sh`                                                                                                                                                                         |
 | Library locked / key unavailable | Unlock the login keychain and allow Echo's Keychain prompt, then restart. If the key is gone, [recover with the phrase](storage-and-recovery.md#recovering-a-library)                            |
 | Speech model not ready           | Download it under **Models → Speech models**. Needs internet once                                                                                                                                |
-| Large V3 unavailable             | Needs Node.js 22+ on the server's `PATH` and the dependencies from `pnpm install`. Under launchd, `install-service.sh` records Node's folder in the agent's `PATH`; rerun it after changing Node |
+| Large V3 unavailable             | Needs Node.js 22.18+ on the server's `PATH` and the dependencies from `pnpm install`. Under launchd, `install-service.sh` records Node's folder in the agent's `PATH`; rerun it after changing Node |
 | Extension will not connect       | Make sure the server is running, then use **Connect to Echo**. See [extension troubleshooting](extension.md#troubleshooting)                                                                     |

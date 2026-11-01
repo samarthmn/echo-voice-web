@@ -171,7 +171,7 @@ importers:
     dependencies:
       '@huggingface/transformers':
         specifier: 3.8.1
-        version: 3.8.1(@types/node@26.6.5)
+        version: 3.8.1(@types/node@22.18.0)
       '@scure/bip39':
         specifier: 2.2.0
         version: 2.2.0
@@ -191,6 +191,9 @@ importers:
       '@types/chrome':
         specifier: 0.3.7
         version: 0.3.7
+      '@types/node':
+        specifier: 22.18.0
+        version: 22.18.0
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
@@ -201,8 +204,11 @@ importers:
         specifier: 3.6.2
         version: 3.6.2
       typescript:
-        specifier: 7.0.2
-        version: 7.0.2
+        specifier: 6.0.3
+        version: 6.0.3
+      typescript-native:
+        specifier: npm:typescript@7.0.2
+        version: typescript@7.0.2
 
 packages:
 
@@ -839,6 +845,9 @@ packages:
   '@types/har-format@1.2.16':
     resolution: {integrity: sha512-fluxdy7ryD3MV6h8pTfTYpy/xQzCFC7m89nOH9y94cNqJ1mDIDPut7MnRHI3F6qRmh/cT2fUjG1MLdCNb4hE9A==}
 
+  '@types/node@22.18.0':
+    resolution: {integrity: sha512-m5ObIqwsUp6BZzyiy4RdZpzWGub9bqLJMvZDD0QMXhxjqMHMENlj+SqF5QxoUwaQNFe+8kz8XM8ZQhqkQPTgMQ==}
+
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
@@ -1184,6 +1193,11 @@ packages:
     resolution: {integrity: sha512-34R7HTnG0XIJcBSn5XhDd7nNFPRcXYRZrBB2O2jdKqYODldSzBAqzsWoZYYvduky73toYS/ESqxPvkDf/F0XMg==}
     engines: {node: '>=10'}
 
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
@@ -1192,6 +1206,9 @@ packages:
   unbash@6.0.1:
     resolution: {integrity: sha512-0db9eS5iqybux41zLkX69nk90KTci7F7eZ+gXzEG/Q7E0tAqEBhRh5fkZvk1N7jT7QkGWqq34i8SFGPFEe1V8A==}
     engines: {node: '>=14'}
+
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
@@ -1320,12 +1337,12 @@ snapshots:
 
   '@huggingface/jinja@0.5.11': {}
 
-  '@huggingface/transformers@3.8.1(@types/node@26.6.5)':
+  '@huggingface/transformers@3.8.1(@types/node@22.18.0)':
     dependencies:
       '@huggingface/jinja': 0.5.11
       onnxruntime-node: 1.21.0
       onnxruntime-web: 1.22.0-dev.20250409-89f8206ba4
-      sharp: 0.35.5(@types/node@26.6.5)
+      sharp: 0.35.5(@types/node@22.18.0)
     transitivePeerDependencies:
       - '@types/node'
 
@@ -1609,6 +1626,10 @@ snapshots:
       '@types/har-format': 1.2.16
 
   '@types/har-format@1.2.16': {}
+
+  '@types/node@22.18.0':
+    dependencies:
+      undici-types: 6.21.0
 
   '@types/node@26.6.5':
     dependencies:
@@ -1919,7 +1940,7 @@ snapshots:
     dependencies:
       type-fest: 0.13.1
 
-  sharp@0.35.5(@types/node@26.6.5):
+  sharp@0.35.5(@types/node@22.18.0):
     dependencies:
       '@img/colour': 1.1.0
       detect-libc: 2.1.2
@@ -1950,7 +1971,7 @@ snapshots:
       '@img/sharp-win32-arm64': 0.35.5
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
-      '@types/node': 26.6.5
+      '@types/node': 22.18.0
 
   smol-toml@1.9.1: {}
 
@@ -1976,6 +1997,8 @@ snapshots:
 
   type-fest@0.13.1: {}
 
+  typescript@6.0.3: {}
+
   typescript@7.0.2:
     optionalDependencies:
       '@typescript/typescript-aix-ppc64': 7.0.2
@@ -2000,6 +2023,8 @@ snapshots:
       '@typescript/typescript-win32-x64': 7.0.2
 
   unbash@6.0.1: {}
+
+  undici-types@6.21.0: {}
 
   undici-types@8.9.0: {}
 

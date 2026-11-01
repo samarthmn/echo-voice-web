@@ -1,5 +1,5 @@
-import { BUILD_ID } from './build';
-import { Provider, Recording, INTERRUPTION_DESCRIPTIONS } from './core';
+import { BUILD_ID } from './build.ts';
+import { type Provider, type Recording, INTERRUPTION_DESCRIPTIONS } from './core.ts';
 const PROVIDER_NAMES: Record<Provider, string> = {
   meet: 'Google Meet',
   zoom: 'Zoom Web',

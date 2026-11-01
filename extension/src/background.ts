@@ -1,15 +1,15 @@
-import { BUILD_ID } from './build';
-import { externalMessage } from './external-messages';
+import { BUILD_ID } from './build.ts';
+import { externalMessage } from './external-messages.ts';
 import {
   meetingFor,
   meetingIdentity,
   microphoneAllowed,
-  Observation,
-  Provider,
+  type Observation,
+  type Provider,
   validObservation,
-  InterruptionReason,
-} from './core';
-import { allRecordings, pruneReceipts } from './storage';
+  type InterruptionReason,
+} from './core.ts';
+import { allRecordings, pruneReceipts } from './storage.ts';
 import {
   settings,
   saveSettings,
@@ -17,12 +17,12 @@ import {
   revokeCredential,
   connectedPair,
   wasRevoked,
-} from './settings';
-import type { ActiveStatus } from './offscreen';
-import type { ConnectionView } from './status-labels';
-import type { Settled } from './upload-scheduler';
-import { openEcho, deleteLocalRecording } from './library-actions';
-import { connectionStatus, disconnect, livePreview } from './connection';
+} from './settings.ts';
+import type { ActiveStatus } from './offscreen.ts';
+import type { ConnectionView } from './status-labels.ts';
+import type { Settled } from './upload-scheduler.ts';
+import { openEcho, deleteLocalRecording } from './library-actions.ts';
+import { connectionStatus, disconnect, livePreview } from './connection.ts';
 import {
   beginPairing,
   resumePairing,
@@ -30,16 +30,16 @@ import {
   showPairingApproval,
   pairingView,
   whenConnected,
-  PairingView,
+  type PairingView,
   pendingConnect,
   confirmConnect,
-} from './pairing';
-import { captureChanged, renderBadge } from './badge';
+} from './pairing.ts';
+import { captureChanged, renderBadge } from './badge.ts';
 type Owner = {
   tabId: number;
   identity: string;
   recordingId: string;
-  documentId?: string;
+  documentId?: string | undefined;
   gateRevision: number;
   departing?: boolean;
 };
@@ -377,7 +377,7 @@ async function requestUploads(reset: boolean): Promise<void> {
   }
   const failures = reset
     ? 0
-    : Number((await chrome.storage.session.get('uploadFailures')).uploadFailures) || 0;
+    : Number((await chrome.storage.session.get('uploadFailures'))['uploadFailures']) || 0;
   await send({ type: 'SYNC', failures });
 }
 /** Prune old receipts, then upload pending audio. Recording itself never waits for this. */
@@ -440,7 +440,7 @@ async function state() {
   const status = await offscreenStatus();
   const recoveryError =
     status?.error ??
-    ((await chrome.storage.session.get('recorderError')).recorderError as string | undefined);
+    ((await chrome.storage.session.get('recorderError'))['recorderError'] as string | undefined);
   return {
     build: BUILD_ID,
     connection: {
@@ -616,7 +616,7 @@ async function pageAction(message: any) {
 }
 chrome.runtime.onMessage.addListener((message: any, sender, respond) => {
   if (sender.id !== chrome.runtime.id) return false;
-  const documentURL = typeof sender.url === 'string' ? sender.url.split(/[?#]/)[0] : '';
+  const documentURL = typeof sender.url === 'string' ? (sender.url.split(/[?#]/)[0] ?? '') : '';
   const trustedPage = [
     chrome.runtime.getURL('popup.html'),
     chrome.runtime.getURL('setup.html'),
@@ -647,6 +647,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void restoreOwner()
     .then(() => {
       if (owner?.tabId === tabId) return stopOwner('tab-closed');
+      return undefined;
     })
     .catch(logFailure('stopping the recording'));
   observations.delete(tabId);

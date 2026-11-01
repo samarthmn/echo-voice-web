@@ -8,3 +8,5 @@ dist
 tmp
 pnpm-lock.yaml
 .echo-data*
+
+design-system/

@@ -1,5 +1,5 @@
-import type { ConnectionStatus } from './connection';
-import type { PairingView } from './pairing';
+import type { ConnectionStatus } from './connection.ts';
+import type { PairingView } from './pairing.ts';
 export type ConnectionView = PairingView & { revoked: boolean };
 /** The contract's UI status: link state plus whether a connected Echo answers. */
 export function connectionStatusOf(view: ConnectionView, online: boolean): ConnectionStatus {

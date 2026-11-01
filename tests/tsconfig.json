@@ -1,0 +1,27 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "../node_modules/.cache/tsbuild/tests.tsbuildinfo",
+    "types": ["node", "chrome"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../node_modules/.cache/tsbuild/tests/types"
+  },
+  "references": [
+    {
+      "path": "../web"
+    },
+    {
+      "path": "../scripts"
+    },
+    {
+      "path": "../extension"
+    },
+    {
+      "path": "./helpers"
+    }
+  ],
+  "include": ["**/*.ts", "../web/types/globals.d.ts"],
+  "exclude": ["helpers"]
+}

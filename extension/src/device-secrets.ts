@@ -1,5 +1,5 @@
-import { readMeta, writeMeta, storageLock } from './vault-db';
-import { Ciphertext, encryptPayload, decryptPayload } from './encryption';
+import { readMeta, writeMeta, storageLock } from './vault-db.ts';
+import { type Ciphertext, encryptPayload, decryptPayload } from './encryption.ts';
 let deviceKey: Promise<CryptoKey> | undefined;
 async function key(): Promise<CryptoKey> {
   return (deviceKey ??= storageLock('device-key', async () => {

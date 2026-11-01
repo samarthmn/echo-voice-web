@@ -1,21 +1,20 @@
-import { protectedCompanion, UPDATE_ECHO_MESSAGE } from './compatibility';
-import { endpointURL, Pair, Recording } from './core';
+import { protectedCompanion, UPDATE_ECHO_MESSAGE } from './compatibility.ts';
+import { endpointURL, type Pair, type Recording } from './core.ts';
 import {
   allRecordings,
   getChunk,
   recording,
   retainReceiptAndRemovePCM,
   updateRecording,
-} from './storage';
-import { connectedPair, revokeCredential } from './settings';
-import { withRecordingLock } from './recording-lock';
-import type { PassOutcome } from './upload-scheduler';
+} from './storage.ts';
+import { connectedPair, revokeCredential } from './settings.ts';
+import { withRecordingLock } from './recording-lock.ts';
+import type { PassOutcome } from './upload-scheduler.ts';
 export class ProtocolError extends Error {
-  constructor(
-    message: string,
-    public status = 0,
-  ) {
+  public status: number;
+  constructor(message: string, status = 0) {
     super(message);
+    this.status = status;
   }
 }
 export async function jsonRequest(
@@ -86,7 +85,7 @@ function checkStatus(status: any, row: Recording, pair: Pair): void {
  * @dynamicImport Used by filename-bundled extension tests.
  */
 export async function transferOne(
-  row: Recording,
+  row: Pick<Recording, 'recordingId'>,
   pair: Pair,
   onControl: (id: string, action: string) => Promise<void>,
 ): Promise<boolean> {

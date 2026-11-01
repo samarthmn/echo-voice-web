@@ -1,23 +1,23 @@
 // Messages from Echo pages (manifest externally_connectable: localhost and 127.0.0.1).
-import { endpointURL } from './core';
-import { probe } from './discovery';
-import { resumePairing } from './pairing';
-import { connectionStatus } from './connection';
+import { endpointURL } from './core.ts';
+import { probe } from './discovery.ts';
+import { resumePairing } from './pairing.ts';
+import { connectionStatus } from './connection.ts';
 type EchoMessage =
   | { type: 'ECHO_PRESENT' }
   | { type: 'ECHO_APPROVED'; requestId: string }
   | { type: 'ECHO_CONNECT'; intent: string };
 function parse(message: unknown): EchoMessage {
   const value = (message ?? {}) as Record<string, unknown>;
-  if (value.type === 'ECHO_PRESENT') return { type: 'ECHO_PRESENT' };
-  if (value.type === 'ECHO_APPROVED' && typeof value.requestId === 'string')
-    return { type: 'ECHO_APPROVED', requestId: value.requestId };
+  if (value['type'] === 'ECHO_PRESENT') return { type: 'ECHO_PRESENT' };
+  if (value['type'] === 'ECHO_APPROVED' && typeof value['requestId'] === 'string')
+    return { type: 'ECHO_APPROVED', requestId: value['requestId'] };
   if (
-    value.type === 'ECHO_CONNECT' &&
-    typeof value.intent === 'string' &&
-    /^[0-9a-f]{64}$/.test(value.intent)
+    value['type'] === 'ECHO_CONNECT' &&
+    typeof value['intent'] === 'string' &&
+    /^[0-9a-f]{64}$/.test(value['intent'])
   )
-    return { type: 'ECHO_CONNECT', intent: value.intent };
+    return { type: 'ECHO_CONNECT', intent: value['intent'] };
   throw new Error('Unsupported Echo message.');
 }
 /** Trust only a loopback web page whose origin itself answers as Echo. */

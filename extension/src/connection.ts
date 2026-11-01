@@ -1,8 +1,8 @@
-import { protectedCompanion } from './compatibility';
-import { Pair } from './core';
-import { readLink, connectedPair, saveLink, wasRevoked, Link } from './settings';
-import { recording } from './storage';
-import { jsonRequest, ProtocolError } from './protocol';
+import { protectedCompanion } from './compatibility.ts';
+import { type Pair } from './core.ts';
+import { readLink, connectedPair, saveLink, wasRevoked, type Link } from './settings.ts';
+import { recording } from './storage.ts';
+import { jsonRequest, ProtocolError } from './protocol.ts';
 export type ConnectionStatus = 'connected' | 'echo-offline' | 'revoked' | 'waiting' | 'none';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const liveStates = new Set([

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../../node_modules/.cache/tsbuild/test-helpers/types",
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuild/test-helpers.tsbuildinfo",
+    "types": ["node", "chrome"]
+  },
+  "references": [
+    {
+      "path": "../../web"
+    },
+    {
+      "path": "../../extension"
+    }
+  ],
+  "include": ["**/*.ts"]
+}

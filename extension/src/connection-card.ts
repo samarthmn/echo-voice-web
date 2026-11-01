@@ -1,8 +1,13 @@
 // The connection card and status line shared by the popup and Setup (same element ids).
-import type { ConnectionStatus } from './connection';
-import type { PairingView } from './pairing';
-import { element, request, showError } from './ui';
-import { ConnectionView, connectionStatusOf, connectionSummary, STATUS_DOT } from './status-labels';
+import type { ConnectionStatus } from './connection.ts';
+import type { PairingView } from './pairing.ts';
+import { element, request, showError } from './ui.ts';
+import {
+  type ConnectionView,
+  connectionStatusOf,
+  connectionSummary,
+  STATUS_DOT,
+} from './status-labels.ts';
 const COPY: Record<'none' | 'waiting' | 'revoked', { title: string; detail: string }> = {
   none: {
     title: 'Connect to Echo',
@@ -48,7 +53,10 @@ export function connectionCard(onChange: () => Promise<void>) {
     element<HTMLButtonElement>('show-echo').disabled = !view.requestId;
     element('cancel-connect').hidden = current !== 'waiting';
   }
-  async function pairing(message: { type: string; endpoint?: string }, button: HTMLButtonElement) {
+  async function pairing(
+    message: { type: string; endpoint?: string | undefined },
+    button: HTMLButtonElement,
+  ) {
     button.disabled = true;
     try {
       const next: PairingView = await request(message);

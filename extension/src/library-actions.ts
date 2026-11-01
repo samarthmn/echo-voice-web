@@ -1,11 +1,16 @@
-import { pageOrigin, Pair, Recording } from './core';
-import { connectedPair } from './settings';
-import { deleteRecording, recording } from './storage';
-import { withRecordingLock } from './recording-lock';
+import { pageOrigin, type Pair, type Recording } from './core.ts';
+import { connectedPair } from './settings.ts';
+import { deleteRecording, recording } from './storage.ts';
+import { withRecordingLock } from './recording-lock.ts';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** @dynamicImport Used by filename-bundled extension tests. */
-export function echoURL(pair: Pair | undefined, row?: Recording): string {
+export function echoURL(
+  pair: Pick<Pair, 'libraryId' | 'endpoint'> | undefined,
+  row?: Pick<Recording, 'libraryId'> & {
+    receipt?: Pick<NonNullable<Recording['receipt']>, 'libraryId' | 'meetingId'> | undefined;
+  },
+): string {
   const libraryId = row?.receipt?.libraryId ?? row?.libraryId ?? pair?.libraryId;
   if (!libraryId || !uuid.test(libraryId))
     throw new Error('Connect this recording’s Echo library in Setup before opening it.');

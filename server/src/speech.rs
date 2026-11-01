@@ -99,6 +99,9 @@ pub(crate) fn routes() -> Router {
         .route("/speech/model", delete(remove_model))
 }
 
+// Node 22.18 enables type stripping by default for the native TypeScript helper.
+const NODE_VERSION_CHECK: &str = "const [major,minor]=process.versions.node.split('.').map(Number);if(major<22||(major===22&&minor<18))process.exit(1)";
+
 async fn runtime_available(owner: &Manager) -> (bool, String) {
     let mut cached = owner.runtime.lock().await;
     if let Some((at, available, detail)) = &*cached {
@@ -109,7 +112,7 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
     let available = async {
         let root = root().ok()?;
         for file in [
-            "scripts/native-speech.mjs",
+            "scripts/native-speech.ts",
             "node_modules/@huggingface/transformers/package.json",
             "node_modules/onnxruntime-node/package.json",
         ] {
@@ -119,13 +122,13 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
         }
         let output = timeout(Duration::from_secs(3), Command::new("node")
             .arg("--input-type=module").arg("-e")
-            .arg("if(Number(process.versions.node.split('.')[0])<22)process.exit(1);await import('onnxruntime-node');await import('./scripts/native-speech.mjs');process.stdout.write('echo-native-ready')")
+            .arg(format!("{NODE_VERSION_CHECK};await import('onnxruntime-node');await import('./scripts/native-speech.ts');process.stdout.write('echo-native-ready')"))
             .current_dir(root).kill_on_drop(true).output()).await.ok()?.ok()?;
         (output.status.success() && output.stdout == b"echo-native-ready").then_some(())
     }
     .await
     .is_some();
-    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run pnpm install in the Echo Voice folder, then retry." }.to_owned();
+    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22.18 or newer and the native speech dependencies. Run pnpm install in the Echo Voice folder, then retry." }.to_owned();
     *cached = Some((Instant::now(), available, detail.clone()));
     (available, detail)
 }
@@ -666,7 +669,7 @@ async fn run(
     let project = root()?;
     let mut command = Command::new("node");
     command
-        .arg(project.join("scripts/native-speech.mjs"))
+        .arg(project.join("scripts/native-speech.ts"))
         .arg("--stdin-request")
         .current_dir(&project)
         .env("TMPDIR", crate::paths::get()?.runtime_dir);
@@ -879,6 +882,25 @@ pub(crate) async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_helper_requires_node_type_stripping() {
+        for (version, supported) in [
+            ("21.99.0", false),
+            ("22.17.9", false),
+            ("22.18.0", true),
+            ("22.19.0", true),
+            ("23.0.0", true),
+        ] {
+            let check =
+                NODE_VERSION_CHECK.replace("process.versions.node", &format!("'{version}'"));
+            let status = std::process::Command::new("node")
+                .args(["--input-type=module", "-e", &check])
+                .status()
+                .unwrap();
+            assert_eq!(status.success(), supported, "Node {version}");
+        }
+    }
+
     fn fixture() -> tempfile::TempDir {
         let root = FsPath::new(env!("CARGO_MANIFEST_DIR"))
             .parent()

@@ -1,18 +1,18 @@
 import {
-  Chunk,
-  Recording,
+  type Chunk,
+  type Recording,
   MAX_FRAMES,
   MAX_PENDING_BYTES,
   PART_FRAMES,
   sha256,
   wavHeader,
   interruption,
-} from './core';
-import { database, result, committed, storageLock } from './vault-db';
-import { Ciphertext, encryptPayload, decryptPayload } from './encryption';
-import { wrapRecordingKey, unwrapRecordingKey } from './device-secrets';
+} from './core.ts';
+import { database, result, committed, storageLock } from './vault-db.ts';
+import { type Ciphertext, encryptPayload, decryptPayload } from './encryption.ts';
+import { wrapRecordingKey, unwrapRecordingKey } from './device-secrets.ts';
 /** @dynamicImport Used by journal test APIs inside Playwright page.evaluate. */
-export { database } from './vault-db';
+export { database } from './vault-db.ts';
 // Storage v3 row: plaintext summary for lists and badges, a per-recording AES key wrapped by
 // the device key (AAD ["recording-key", id]), and encrypted metadata. Chunks use
 // AAD ["pcm", keyContext, id, sequence, frames]. Preserve each row's keyContext on reads.

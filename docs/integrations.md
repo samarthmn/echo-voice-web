@@ -12,7 +12,7 @@ Pick models under **Models → Speech models**. The default for new meetings is 
 Downloads need internet once; after that everything is local.
 
 - **Turbo** is cached in the browser (Cache Storage) per origin, so changing the port or hostname re-downloads it. Keep an Echo tab open while it transcribes.
-- **Large V3** needs Node.js 22+ and the packages from `pnpm install` (`setup.sh` installs them). **Check engine** on the model card verifies this. The download is the pinned q8 export `Xenova/whisper-large-v3` (the saved model id stays `onnx-community/whisper-large-v3`). Files and a readiness marker live under `<dataDir>/models/native-large-v3/`. They are not part of library backups. Removing the model in **Models** deletes that folder.
+- **Large V3** needs Node.js 22.18+ and the packages from `pnpm install` (`setup.sh` installs them). **Check engine** on the model card verifies this. The download is the pinned q8 export `Xenova/whisper-large-v3` (the saved model id stays `onnx-community/whisper-large-v3`). Files and a readiness marker live under `<dataDir>/models/native-large-v3/`. They are not part of library backups. Removing the model in **Models** deletes that folder.
 - Only one native job runs at a time. The browser decodes audio to 16 kHz mono and uploads it; the server keeps it in an encrypted per-job spool under the repo's `tmp/` with the key passed to the helper over stdin, and removes it when the job ends. Abandoned jobs are cleaned up at the next start.
 
 Review transcripts yourself: you can edit passages, rename speakers, and return to earlier versions.

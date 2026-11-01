@@ -1,5 +1,15 @@
-import { Provider } from './core';
+import { type Provider } from './core.ts';
 export type MeetingState = 'unmuted' | 'muted' | 'prejoin' | 'ended' | 'unknown';
+interface ObservedElement {
+  id: string;
+  textContent: string | null;
+  getAttribute(name: string): string | null;
+  getBoundingClientRect(): { width: number; height: number };
+  querySelectorAll(selector: string): Iterable<ObservedElement>;
+}
+interface ObservedDocument {
+  querySelectorAll(selector: string): Iterable<ObservedElement>;
+}
 type MicState = 'unmuted' | 'muted';
 /** One candidate microphone control: its label and any language-independent state attribute. */
 type MicControl = { label: string; toggle?: MicState | null };
@@ -25,21 +35,21 @@ const PREJOIN =
 // Meet marks its microphone and camera toggles with data-is-muted. Only the microphone's
 // label ends with its keyboard shortcut, "(⌘ + d)" or "(Ctrl + D)", in every interface language.
 const MEET_MIC_SHORTCUT = /\+\s*d\s*\)\s*$/i;
-function meetToggle(element: Element): MicState | null {
+function meetToggle(element: ObservedElement): MicState | null {
   const muted = element.getAttribute('data-is-muted');
   const label = element.getAttribute('aria-label') || element.getAttribute('data-tooltip') || '';
   if (!MEET_MIC_SHORTCUT.test(label)) return null;
   return muted === 'true' ? 'muted' : muted === 'false' ? 'unmuted' : null;
 }
 // Teams names its microphone button by id or data-tid and its state by data-state.
-function teamsToggle(element: Element): MicState | null {
+function teamsToggle(element: ObservedElement): MicState | null {
   const named = [element.id, element.getAttribute('data-tid')].includes('microphone-button');
   const state = named ? element.getAttribute('data-state') : null;
   return state === 'mic-off' ? 'muted' : state === 'mic' || state === 'mic-on' ? 'unmuted' : null;
 }
 // aria-pressed is not read: whether "pressed" means muted or live differs between toolbars,
 // and a wrong guess would record a muted participant. Zoom exposes only its English labels.
-const toggles: Record<Provider, (element: Element) => MicState | null> = {
+const toggles: Record<Provider, (element: ObservedElement) => MicState | null> = {
   meet: meetToggle,
   zoom: () => null,
   teams: teamsToggle,
@@ -76,7 +86,7 @@ function stateFromControls(
     .map((control) => controlState(provider, control))
     .filter((state) => state !== null);
   // Multiple or conflicting controls are ambiguous. Never infer from a page's default state.
-  return states.length === 1 && states[0] !== 'conflict' ? states[0] : 'unknown';
+  return states.length === 1 && states[0] !== 'conflict' ? (states[0] ?? 'unknown') : 'unknown';
 }
 /** @dynamicImport Used by filename-bundled extension tests. */
 export function stateFromLabels(
@@ -95,21 +105,21 @@ export function stateFromLabels(
 // Layout reads are the expensive part of a scan. Only candidate controls are measured, and a
 // measurement is reused for a short while: a stale entry can only add an ambiguous control.
 const LAYOUT_TTL_MS = 1000;
-const layout = new WeakMap<Element, { at: number; visible: boolean }>();
-function visible(element: Element, now: number): boolean {
+const layout = new WeakMap<ObservedElement, { at: number; visible: boolean }>();
+function visible(element: ObservedElement, now: number): boolean {
   const cached = layout.get(element);
   if (cached && now - cached.at < LAYOUT_TTL_MS) return cached.visible;
   const box = element.getBoundingClientRect();
-  const style = getComputedStyle(element);
+  const style = getComputedStyle(element as Element);
   const shown =
     box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
   layout.set(element, { at: now, visible: shown });
   return shown;
 }
-function micControls(provider: Provider, doc: Document, now: number): MicControl[] {
+function micControls(provider: Provider, doc: ObservedDocument, now: number): MicControl[] {
   const toolbars = [...doc.querySelectorAll(TOOLBARS[provider])];
-  const roots: ParentNode[] = toolbars.length ? toolbars : [doc];
-  const seen = new Set<Element>();
+  const roots: ObservedDocument[] = toolbars.length ? toolbars : [doc];
+  const seen = new Set<ObservedElement>();
   const controls: MicControl[] = [];
   for (const root of roots)
     for (const element of root.querySelectorAll('button,[role="button"]')) {
@@ -127,7 +137,7 @@ function micControls(provider: Provider, doc: Document, now: number): MicControl
     }
   return controls;
 }
-function statusTexts(doc: Document, now: number): string[] {
+function statusTexts(doc: ObservedDocument, now: number): string[] {
   const texts: string[] = [];
   for (const element of doc.querySelectorAll('[role="alert"],h1,h2,button,[role="button"]')) {
     const text = (element.textContent ?? '').trim();
@@ -135,6 +145,10 @@ function statusTexts(doc: Document, now: number): string[] {
   }
   return texts;
 }
-export function observeDocument(provider: Provider, doc: Document, now = Date.now()): MeetingState {
+export function observeDocument(
+  provider: Provider,
+  doc: ObservedDocument,
+  now = Date.now(),
+): MeetingState {
   return stateFromControls(provider, micControls(provider, doc, now), statusTexts(doc, now));
 }

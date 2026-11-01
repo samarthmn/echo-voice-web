@@ -1,0 +1,21 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "../node_modules/.cache/tsbuild/scripts.tsbuildinfo",
+    "types": ["node"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../node_modules/.cache/tsbuild/scripts/types"
+  },
+  "references": [
+    {
+      "path": "../web"
+    },
+    {
+      "path": "../tests/helpers"
+    }
+  ],
+  "include": ["**/*.ts"],
+  "exclude": []
+}

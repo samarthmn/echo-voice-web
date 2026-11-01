@@ -1,8 +1,8 @@
-import { meetingFor, MEETING_SITES, Recording, MAX_FRAMES } from './core';
-import type { ExtensionState } from './background';
-import { action, duration, element, renderRecordings, request, showError } from './ui';
-import { liveLabel } from './status-labels';
-import { connectionCard } from './connection-card';
+import { meetingFor, MEETING_SITES, type Recording, MAX_FRAMES } from './core.ts';
+import type { ExtensionState } from './background.ts';
+import { action, duration, element, renderRecordings, request, showError } from './ui.ts';
+import { liveLabel } from './status-labels.ts';
+import { connectionCard } from './connection-card.ts';
 let tab: chrome.tabs.Tab | undefined;
 let active: ExtensionState['active'];
 let prefs: ExtensionState['settings'] | undefined;

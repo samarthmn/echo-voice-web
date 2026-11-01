@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../node_modules/.cache/tsbuild/web/types",
+    "tsBuildInfoFile": "../node_modules/.cache/tsbuild/web.tsbuildinfo",
+    "types": ["chrome"],
+    // This pinned ONNX package omits types from exports; use its own declarations.
+    "paths": { "onnxruntime-web": ["../node_modules/onnxruntime-web/types.d.ts"] }
+  },
+  "include": ["**/*.ts"]
+}

@@ -1,6 +1,6 @@
-import { Settings, Pair, endpointURL } from './core';
-import { sealSecret, openSecret } from './device-secrets';
-import type { Ciphertext } from './encryption';
+import { type Settings, type Pair, endpointURL } from './core.ts';
+import { sealSecret, openSecret } from './device-secrets.ts';
+import type { Ciphertext } from './encryption.ts';
 export type Link =
   | { state: 'none' }
   | {
@@ -76,7 +76,7 @@ async function legacyLink(old: StoredSettings): Promise<Link> {
 async function readSettings(): Promise<Settings> {
   await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
   const saved = await chrome.storage.local.get(['settings', 'link']);
-  const old = (saved.settings ?? {}) as StoredSettings;
+  const old = (saved['settings'] ?? {}) as StoredSettings;
   const prefs: Settings = {
     installationId: old.installationId ?? crypto.randomUUID(),
     enabledProviders: old.enabledProviders ?? [],
@@ -86,12 +86,12 @@ async function readSettings(): Promise<Settings> {
     liveTranscription: old.liveTranscription ?? false,
   };
   if (
-    saved.link &&
+    saved['link'] &&
     old.installationId &&
     Object.keys(old).every((key) => SETTINGS_KEYS.includes(key))
   )
     return prefs;
-  if (!saved.link)
+  if (!saved['link'])
     await chrome.storage.local.set({ link: await sealSecret(await legacyLink(old), 'link') });
   // Rewrite, rather than spread, so pairing v1 credentials and journals vanish.
   await chrome.storage.local.set({ settings: prefs });
@@ -131,7 +131,7 @@ export function readLink(): Promise<Link> {
       serialized(async () => {
         await readSettings();
         return openSecret<Link>(
-          (await chrome.storage.local.get('link')).link as Ciphertext,
+          (await chrome.storage.local.get('link'))['link'] as Ciphertext,
           'link',
         );
       }),
@@ -149,7 +149,7 @@ export function revokeCredential(credential: string, endpoint: string): Promise<
   if (!chrome.storage?.local)
     return trusted<void>({ type: 'TRUSTED_REVOKE', credential, endpoint });
   return serialized(async () => {
-    const saved = (await chrome.storage.local.get('link')).link as Ciphertext | undefined;
+    const saved = (await chrome.storage.local.get('link'))['link'] as Ciphertext | undefined;
     if (!saved) return;
     const link = await openSecret<Link>(saved, 'link');
     if (
@@ -166,7 +166,7 @@ export function revokeCredential(credential: string, endpoint: string): Promise<
   });
 }
 export async function wasRevoked(): Promise<boolean> {
-  return (await chrome.storage.local.get('revoked')).revoked === true;
+  return (await chrome.storage.local.get('revoked'))['revoked'] === true;
 }
 export async function connectedPair(): Promise<Pair | undefined> {
   const link = await readLink();

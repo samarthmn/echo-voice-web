@@ -1,12 +1,12 @@
 import {
-  Recording,
+  type Recording,
   MAX_BACKLOG_FRAMES,
   MAX_FRAMES,
   MAX_PENDING_BYTES,
-  InterruptionReason,
+  type InterruptionReason,
   interruption,
   INTERRUPTION_DESCRIPTIONS,
-} from './core';
+} from './core.ts';
 import {
   allRecordings,
   appendChunk,
@@ -14,17 +14,17 @@ import {
   markInterrupted,
   recording,
   updateRecording,
-} from './storage';
-import { transferPending } from './protocol';
-import { Settled, uploadScheduler } from './upload-scheduler';
-import { connectedPair } from './settings';
+} from './storage.ts';
+import { transferPending } from './protocol.ts';
+import { type Settled, uploadScheduler } from './upload-scheduler.ts';
+import { connectedPair } from './settings.ts';
 type Capture = {
   id: string;
   title: string;
   context: AudioContext;
   worklet: AudioWorkletNode;
   tab: MediaStream;
-  mic?: MediaStream;
+  mic?: MediaStream | undefined;
   micDisconnected?: boolean;
   micExcluded: boolean;
   exclusionRevision: number;
@@ -34,7 +34,7 @@ type Capture = {
   persistedFrames: number;
   queue: Promise<void>;
   failed: boolean;
-  pausedAt?: number;
+  pausedAt?: number | undefined;
   waiters: Map<string, () => void>;
   sourceState: string;
 };
@@ -210,7 +210,7 @@ async function start(message: any) {
       try {
         mic = await navigator.mediaDevices.getUserMedia({
           audio: {
-            deviceId: message.micDeviceId ? { exact: message.micDeviceId } : undefined,
+            ...(message.micDeviceId ? { deviceId: { exact: message.micDeviceId } } : {}),
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,

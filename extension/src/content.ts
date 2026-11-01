@@ -1,5 +1,5 @@
-import { meetingProvider } from './core';
-import { observeDocument } from './adapters';
+import { meetingProvider } from './core.ts';
+import { observeDocument } from './adapters.ts';
 // This script is a one-way observer. It never receives endpoint settings, tokens or capture audio.
 const marker = '__echoMuteObserverV2';
 {

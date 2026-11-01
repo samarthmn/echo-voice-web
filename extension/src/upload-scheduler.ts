@@ -5,8 +5,8 @@ export type PassOutcome = 'idle' | 'more' | 'offline' | 'poll';
 export type Settled = { failures: number; retryAt?: number };
 type Clock = {
   now(): number;
-  setTimeout(callback: () => void, ms: number): ReturnType<typeof setTimeout>;
-  clearTimeout(id: ReturnType<typeof setTimeout>): void;
+  setTimeout(callback: () => void, ms: number): number | ReturnType<typeof setTimeout>;
+  clearTimeout(id: number | ReturnType<typeof setTimeout>): void;
 };
 /** Minimum spacing between passes triggered by committed audio while recording.
  * @dynamicImport Used by filename-bundled extension tests.
@@ -33,7 +33,7 @@ export function uploadScheduler(
   let failures = 0;
   let retryAt = 0;
   let lastStart = -Infinity;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: number | ReturnType<typeof setTimeout> | undefined;
   let due = Infinity;
   let running: Promise<void> | undefined;
   let again = false;

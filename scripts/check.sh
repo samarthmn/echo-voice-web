@@ -34,7 +34,7 @@ fi
 if [[ $mode == --all || $mode == --app ]]; then
   run release-build ./scripts/setup.sh --build-only
   run debug-server-build cargo build --locked -p echo-server
-  CHROMIUM_PATH="$(node scripts/browser-path.mjs)" || { echo 'Install Chromium with pnpm exec playwright install chromium.' >&2; exit 1; }
+  CHROMIUM_PATH="$(node scripts/browser-path.ts)" || { echo 'Install Chromium with pnpm exec playwright install chromium.' >&2; exit 1; }
   export CHROMIUM_PATH
   run integration-tests pnpm test:integration
   run e2e-tests pnpm test:e2e

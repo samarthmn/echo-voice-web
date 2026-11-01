@@ -1,15 +1,12 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noEmit": true,
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
-    "types": ["chrome"],
-    "skipLibCheck": true
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../node_modules/.cache/tsbuild/extension/types",
+    "tsBuildInfoFile": "../node_modules/.cache/tsbuild/extension.tsbuildinfo",
+    "types": ["chrome"]
   },
   "include": ["src/**/*.ts"]
 }

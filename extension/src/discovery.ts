@@ -1,6 +1,6 @@
-import { endpointURL } from './core';
-import { readLink } from './settings';
-import { jsonRequest } from './protocol';
+import { endpointURL } from './core.ts';
+import { readLink } from './settings.ts';
+import { jsonRequest } from './protocol.ts';
 // Echo's default bind address first, then nearby ports for a custom bind.
 const DISCOVERY_CANDIDATES = [
   'http://127.0.0.1:3000',
@@ -29,7 +29,7 @@ export async function probe(origin: string): Promise<boolean> {
 /** Find Echo: manual address, saved endpoint, an announced Echo tab, then default ports. */
 export async function discover(manual?: string): Promise<string> {
   const link = await readLink();
-  const announced = (await chrome.storage.local.get('echoOrigin')).echoOrigin;
+  const announced = (await chrome.storage.local.get('echoOrigin'))['echoOrigin'];
   const candidates = [
     ...new Set([
       ...(manual ? [endpointURL(manual)] : []),
@@ -40,6 +40,7 @@ export async function discover(manual?: string): Promise<string> {
   ];
   // Probe together; the earliest candidate that answers wins over faster later ones.
   const probes = candidates.map((origin) => probe(origin));
-  for (let i = 0; i < candidates.length; i++) if (await probes[i]) return candidates[i];
+  // The loop bounds the candidate returned after its matching probe.
+  for (let i = 0; i < candidates.length; i++) if (await probes[i]) return candidates[i]!;
   throw new Error(ECHO_NOT_FOUND);
 }

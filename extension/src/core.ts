@@ -64,9 +64,9 @@ export type Recording = {
   transferState: TransferState;
   gaps: { atFrame: number; pauseMs: number }[];
   interrupted: boolean;
-  error?: string;
-  interruption?: ReturnType<typeof interruption>;
-  receipt?: { libraryId: string; meetingId: string; verifiedAt: string };
+  error?: string | undefined;
+  interruption?: ReturnType<typeof interruption> | undefined;
+  receipt?: { libraryId: string; meetingId: string; verifiedAt: string } | undefined;
 };
 export type Chunk = {
   recordingId: string;

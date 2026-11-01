@@ -1,0 +1,295 @@
+import { bufferChunk } from '../helpers/assertions.ts';
+import { meetingRecord } from '../helpers/assertions.ts';
+import { array } from '../helpers/assertions.ts';
+import { object } from '../helpers/assertions.ts';
+import { defined } from '../helpers/assertions.ts';
+import { serverPort } from '../../scripts/guards.ts';
+import { chromium } from '@playwright/test';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
+import { mkdtemp, mkdir } from 'node:fs/promises';
+import { stopTestServer, removeTestDirectory } from '../helpers/server-cleanup.ts';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const root = process.cwd();
+await mkdir(path.join(root, 'tmp'), { recursive: true });
+const data = await mkdtemp(path.join(root, 'tmp', 'echo-workspace-e2e-'));
+const socket = createServer();
+await new Promise((resolve, reject) => {
+  socket.once('error', reject);
+  socket.listen(0, '127.0.0.1', () => resolve(undefined));
+});
+const port = serverPort(socket);
+await new Promise((resolve) => socket.close(resolve));
+const base = `http://localhost:${port}`;
+const server = spawn(process.env['ECHO_TEST_BINARY'] || 'target/debug/echo-server', [], {
+  cwd: root,
+  env: {
+    ...process.env,
+    TMPDIR: path.join(root, 'tmp'),
+    ECHO_TEST_MODE: '1',
+    ECHO_TEST_STORAGE_KEY: Buffer.alloc(32, 42).toString('base64'),
+    ECHO_DATA_DIR: data,
+    ECHO_BIND: `127.0.0.1:${port}`,
+    GOOGLE_CLIENT_ID: '',
+    GOOGLE_CLIENT_SECRET: '',
+  },
+  stdio: 'pipe',
+});
+let browser: import('@playwright/test').Browser | undefined,
+  serverError: Error,
+  serverExited = false,
+  serverLog = '';
+const errors: string[] = [];
+server.stdout.on('data', (streamValue: unknown) => {
+  const value = bufferChunk(streamValue);
+  serverLog = (serverLog + value).slice(-8000);
+});
+server.stderr.on('data', (streamValue: unknown) => {
+  const value = bufferChunk(streamValue);
+  serverLog = (serverLog + value).slice(-8000);
+});
+server.once('error', (error) => {
+  serverError = error;
+  serverExited = true;
+});
+server.once('exit', () => {
+  serverExited = true;
+});
+function requireServer() {
+  if (serverError)
+    throw new Error(`The isolated workspace test server could not start: ${serverError.message}`);
+  if (serverExited)
+    throw new Error(
+      `The isolated workspace test server exited. Refusing to use another workspace. ${serverLog}`,
+    );
+}
+async function ready() {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    requireServer();
+    let storage: Record<string, unknown> | undefined;
+    try {
+      const health = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1000) });
+      if (health.ok) {
+        const response = await fetch(`${base}/api/storage`, { signal: AbortSignal.timeout(1000) });
+        if (response.ok) storage = object((await response.json()) as unknown);
+      }
+    } catch {}
+    requireServer();
+    if (storage) {
+      if (
+        typeof storage['path'] !== 'string' ||
+        path.resolve(storage['path']) !== path.resolve(data)
+      )
+        throw new Error(
+          'The workspace test port belongs to another data folder. Refusing to run tests against it.',
+        );
+      return;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `The isolated workspace test server did not become ready within 15 seconds. ${serverLog}`,
+  );
+}
+async function shutdown() {
+  try {
+    await stopTestServer(server);
+    await removeTestDirectory(data);
+  } catch (error) {
+    console.error(`Workspace test data was preserved at ${data}.`);
+    throw error;
+  }
+}
+try {
+  await ready();
+  browser = await chromium.launch({
+    executablePath: process.env['CHROMIUM_PATH'] || '/usr/bin/chromium',
+    args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+  });
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1050 },
+    permissions: ['microphone'],
+    reducedMotion: 'reduce',
+  });
+  const page = await context.newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !m.text().includes('Failed to load resource'))
+      errors.push(m.text());
+  });
+  await page.goto(base);
+  await page.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
+  assert.equal(await page.locator('.boot-screen').count(), 0);
+  await page.getByRole('button', { name: 'New meeting', exact: true }).click();
+  await page.getByRole('heading', { name: 'New meeting', exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole('button', { name: 'Start recording', exact: true }).isDisabled(),
+    true,
+  );
+  await page.getByLabel('Meeting name Optional').fill('Browser recording check');
+  await page.getByText('I have permission from everyone being recorded.').click();
+  await page.evaluate(() => {
+    const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    window.__startupOriginalGetUserMedia = original;
+    navigator.mediaDevices.getUserMedia = async (...args) => {
+      await new Promise<void>((resolve) => {
+        window.__releaseStartupMicrophone = resolve;
+      });
+      return original(...args);
+    };
+  });
+  await page.getByRole('button', { name: 'Start recording', exact: true }).click();
+  await page.waitForFunction(() => typeof window.__releaseStartupMicrophone === 'function');
+  assert.equal(
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: /Online meeting/ })
+      .isDisabled(),
+    true,
+    'Cannot switch modes while microphone startup is pending',
+  );
+  assert.equal(
+    await page.getByLabel('I have permission from everyone being recorded.').isDisabled(),
+    true,
+    'Consent cannot be changed after recording startup begins',
+  );
+  await page.evaluate(() => {
+    function defined<T>(value: T): NonNullable<T> {
+      if (value === undefined || value === null)
+        throw new Error('Expected fixture value to be present.');
+      return value;
+    }
+
+    if (!window.__startupOriginalGetUserMedia) throw new Error('Missing original media API');
+    navigator.mediaDevices.getUserMedia = window.__startupOriginalGetUserMedia;
+    defined(window.__releaseStartupMicrophone)();
+    delete window.__startupOriginalGetUserMedia;
+    delete window.__releaseStartupMicrophone;
+  });
+  await page.getByRole('region', { name: 'Active recording controls' }).waitFor();
+  await page.locator('#new-meeting-dialog').waitFor({ state: 'detached' });
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+      false,
+      'Active recording controls must fit a mobile viewport',
+    );
+  }
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.keyboard.press('Control+j');
+  await page.waitForTimeout(150);
+  assert.equal(
+    await page.getByRole('dialog').count(),
+    0,
+    'New-meeting shortcut stays disabled during active recording',
+  );
+  await page.getByRole('button', { name: 'Models', exact: true }).click();
+  await page.getByRole('heading', { name: 'Models', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Pause recording', exact: true }).click();
+  await page.getByText('Recording paused', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Resume recording', exact: true }).click();
+  await page.getByRole('button', { name: 'Mute capture', exact: true }).click();
+  await page.getByRole('button', { name: 'Unmute capture', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Unmute capture', exact: true }).click();
+  await page.waitForTimeout(1400);
+  await page.getByRole('button', { name: 'Stop & save', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.recorder-bar'), { timeout: 15000 });
+  const library = object((await (await fetch(`${base}/api/meetings`)).json()) as unknown);
+  assert.equal(array(library['meetings']).length, 1);
+  const meeting = meetingRecord(array(library['meetings'])[0]);
+  assert.equal(object(meeting)['title'], 'Browser recording check');
+  assert.equal(object(meeting)['status'], 'saved');
+  assert.equal(meeting.tracks.length, 1);
+  assert.ok(defined(defined(meeting.tracks[0]).bytes) > 1000);
+  assert.ok(defined(meeting.duration) > 1);
+  console.log(
+    'PASS: actual UI capture, persistent controls, pause/mute/resume, final saved audio.',
+  );
+  await page.keyboard.press('Control+k');
+  await page.locator('#library-search').waitFor();
+  await page.locator('#library-search').fill('Browser recording');
+  assert.equal(await page.locator('.meeting-card').count(), 1);
+  await page.locator('#library-search').fill('No such conversation');
+  await page.getByRole('heading', { name: 'No meetings found.' }).waitFor();
+  console.log('PASS: keyboard search and empty search state.');
+  await page.getByRole('button', { name: 'New meeting', exact: true }).first().click();
+  await page.getByLabel('Meeting name Optional').fill('Denied microphone test');
+  await page.getByText('I have permission from everyone being recorded.').click();
+  await page.evaluate(() => {
+    window.__originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.getUserMedia = async () => {
+      throw new DOMException('Permission denied', 'NotAllowedError');
+    };
+  });
+  await page.getByRole('button', { name: 'Start recording', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'Microphone permission was denied' }).waitFor();
+  await page.getByRole('button', { name: 'Close new meeting', exact: true }).click();
+  assert.equal(
+    await page.getByRole('button', { name: 'New meeting', exact: true }).first().isEnabled(),
+    true,
+  );
+  assert.equal(await page.locator('.recorder-bar').count(), 0);
+  await page.evaluate(() => (navigator.mediaDevices.getUserMedia = window.__originalGetUserMedia));
+  console.log('PASS: denied microphone shows actionable error and allows a new attempt.');
+
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await page.getByRole('heading', { name: 'Calendar', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Connect calendar', exact: true }).click();
+  await page.getByRole('heading', { name: 'Calendar setup' }).waitFor();
+  await page.getByRole('button', { name: 'Close calendar setup' }).click();
+  console.log('PASS: calendar clearly requires real connection setup.');
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [nav, title] of [
+    ['Overview', 'Overview'],
+    ['Models', 'Models'],
+    ['Calendar', 'Calendar'],
+  ]) {
+    await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+    await page.getByRole('button', { name: defined(nav), exact: true }).click();
+    await page.getByRole('heading', { name: defined(title), exact: true }).waitFor();
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+      false,
+      `${nav} overflow`,
+    );
+  }
+  await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+  await page.locator('.sidebar .brand').click();
+  await page.getByRole('heading', { name: 'Overview', exact: true }).waitFor();
+  assert.equal(
+    await page.locator('.sidebar.open').count(),
+    0,
+    'Brand navigation closes the mobile drawer',
+  );
+  assert.equal(
+    await page.locator('[inert]').count(),
+    0,
+    'Brand navigation releases the underlying workspace',
+  );
+  console.log('PASS: mobile navigation and no horizontal overflow on core screens.');
+  assert.deepEqual(errors, []);
+  console.log('PASS: zero browser page or console errors.');
+} catch (e) {
+  if (browser) {
+    const pages = browser.contexts().flatMap((c) => c.pages());
+    const artifacts =
+      process.env['ECHO_WORKSPACE_TEST_ARTIFACTS'] || path.join(root, 'tmp', 'workspace-test');
+    await mkdir(artifacts, { recursive: true });
+    await pages[0]
+      ?.screenshot({ path: path.join(artifacts, 'failure.png'), fullPage: true, timeout: 5000 })
+      .catch(() => {});
+  }
+  throw e;
+} finally {
+  try {
+    await browser?.close();
+  } finally {
+    await shutdown();
+  }
+}

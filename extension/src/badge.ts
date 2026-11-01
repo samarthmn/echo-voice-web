@@ -1,9 +1,9 @@
 // Toolbar badge: REC / II while recording, ! when a saved recording needs attention, and a
 // quiet dot on an enabled meeting tab that is ready to record.
-import { meetingFor } from './core';
-import { allRecordings } from './storage';
-import { settings } from './settings';
-import type { ActiveStatus } from './offscreen';
+import { meetingFor } from './core.ts';
+import { allRecordings } from './storage.ts';
+import { settings } from './settings.ts';
+import type { ActiveStatus } from './offscreen.ts';
 type Badge = { text: string; color: string; title: string };
 const RECORDING_COLOR = '#6858d9';
 const ATTENTION_COLOR = '#af3543';

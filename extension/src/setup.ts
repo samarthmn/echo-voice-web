@@ -1,8 +1,8 @@
-import { MEETING_SITES, Provider, Recording } from './core';
-import type { ExtensionState } from './background';
-import { exportParts, recording } from './storage';
-import { action, element, renderRecordings, request, showError } from './ui';
-import { connectionCard } from './connection-card';
+import { MEETING_SITES, type Provider, type Recording } from './core.ts';
+import type { ExtensionState } from './background.ts';
+import { exportParts, recording } from './storage.ts';
+import { action, element, renderRecordings, request, showError } from './ui.ts';
+import { connectionCard } from './connection-card.ts';
 type ExportPart = { blob: Blob; part: number; startFrame: number; frames: number };
 const providers = MEETING_SITES;
 let initialized = false;
@@ -71,7 +71,7 @@ async function refreshState() {
   const prefs = state.settings;
   if (state.recoveryError) showError(new Error(state.recoveryError));
   if (!initialized) {
-    const saved = (await chrome.storage.local.get('onboardingChoices')).onboardingChoices as
+    const saved = (await chrome.storage.local.get('onboardingChoices'))['onboardingChoices'] as
       | Partial<typeof choices>
       | undefined;
     choices = { callOnly: saved?.callOnly === true };

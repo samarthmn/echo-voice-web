@@ -1,16 +1,16 @@
 // Pairing v2: one POST /pair, one approval click in Echo, then a deterministic claim.
-import { pageOrigin, unixSecondsToMilliseconds } from './core';
-import { readLink, saveLink, settings, Link } from './settings';
-import { discover, hello } from './discovery';
-import { connectionAction, forgetRemote } from './connection';
-import { jsonRequest, ProtocolError } from './protocol';
+import { pageOrigin, unixSecondsToMilliseconds } from './core.ts';
+import { readLink, saveLink, settings, type Link } from './settings.ts';
+import { discover, hello } from './discovery.ts';
+import { connectionAction, forgetRemote } from './connection.ts';
+import { jsonRequest, ProtocolError } from './protocol.ts';
 type Waiting = Extract<Link, { state: 'waiting' }>;
 type ApprovalTab = { requestId: string; id: number; url: string };
 export type PairingView = {
   phase: Link['state'];
-  endpoint?: string;
-  requestId?: string;
-  notice?: string;
+  endpoint?: string | undefined;
+  requestId?: string | undefined;
+  notice?: string | undefined;
 };
 const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -65,7 +65,7 @@ async function showApprovalTab(link: Waiting): Promise<void> {
     });
 }
 async function closeApprovalTab(requestId: string): Promise<void> {
-  const tab = (await chrome.storage.session.get('approvalTab')).approvalTab as
+  const tab = (await chrome.storage.session.get('approvalTab'))['approvalTab'] as
     | ApprovalTab
     | undefined;
   if (tab?.requestId !== requestId) return;
@@ -272,7 +272,7 @@ export function cancelPairing(): Promise<PairingView> {
 
 type ConnectRequest = { id: string; endpoint: string; intent: string; receivedAt: number };
 export async function pendingConnect() {
-  const pending = (await chrome.storage.session.get('connectRequest')).connectRequest as
+  const pending = (await chrome.storage.session.get('connectRequest'))['connectRequest'] as
     | ConnectRequest
     | undefined;
   if (!pending) return undefined;
@@ -284,7 +284,7 @@ export async function pendingConnect() {
   };
 }
 export async function confirmConnect(id: string, previous?: string) {
-  const pending = (await chrome.storage.session.get('connectRequest')).connectRequest as
+  const pending = (await chrome.storage.session.get('connectRequest'))['connectRequest'] as
     | ConnectRequest
     | undefined;
   const view = await pendingConnect();
