@@ -7,6 +7,7 @@ import { text } from '../helpers/assertions.ts';
 import { object } from '../helpers/assertions.ts';
 import { defined } from '../helpers/assertions.ts';
 import { serverPort } from '../../scripts/guards.ts';
+import { openExtensionPage } from '../helpers/extension-pages.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
@@ -68,7 +69,7 @@ void test('unpacked MV3 runtime and real IndexedDB preserve durable prefix throu
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
+    await openExtensionPage(page, `chrome-extension://${output.extensionId}/setup.html`);
     await page.locator('#connect').waitFor();
     const startup = await page.evaluate(async () => {
       function object(v: unknown): Record<string, unknown> {
@@ -429,7 +430,7 @@ void test('actual Echo server and unpacked extension pair, approve, ingest chunk
       context.serviceWorkers()[0] ??
       (await context.waitForEvent('serviceworker', { timeout: 20000 }));
     let page = await context.newPage();
-    await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
+    await openExtensionPage(page, `chrome-extension://${output.extensionId}/setup.html`);
     await page.locator('#connect').waitFor();
     await page.locator('#advanced summary').click();
     await page.locator('#endpoint').fill(base);
@@ -488,7 +489,7 @@ void test('actual Echo server and unpacked extension pair, approve, ingest chunk
       return object((await chrome.storage.local.get('settings'))['settings'])['installationId'];
     });
     page = await context.newPage();
-    await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
+    await openExtensionPage(page, `chrome-extension://${output.extensionId}/setup.html`);
     await page
       .locator('#connect-summary')
       .getByText('Connected to Echo', { exact: true })
@@ -630,7 +631,7 @@ void test('actual Echo server and unpacked extension pair, approve, ingest chunk
       env: { ...process.env, TMPDIR: path.join(project, 'tmp') },
     });
     page = await context.newPage();
-    await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
+    await openExtensionPage(page, `chrome-extension://${output.extensionId}/setup.html`);
     await page
       .locator('#connect-summary')
       .getByText('Connected to Echo', { exact: true })

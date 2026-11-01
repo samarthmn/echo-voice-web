@@ -5,6 +5,7 @@ import { array } from '../helpers/assertions.ts';
 import { object } from '../helpers/assertions.ts';
 import { text } from '../helpers/assertions.ts';
 import { defined } from '../helpers/assertions.ts';
+import { openExtensionPage } from '../helpers/extension-pages.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium, type BrowserContext } from '@playwright/test';
@@ -267,7 +268,7 @@ void test('device-key journal survives restart, records offline, and never store
     assert.equal(corrupted.error, 'OperationError');
     assert.equal(corrupted.count, 1);
     assert.equal(array(object(await dump(page))['chunks']).length, 2);
-    await page.goto(`chrome-extension://${output.extensionId}/setup.html`);
+    await openExtensionPage(page, `chrome-extension://${output.extensionId}/setup.html`);
     const safe = await page.evaluate(async () => {
       function object(v: unknown): Record<string, unknown> {
         if (v === null || typeof v !== 'object') throw new Error('Expected object');

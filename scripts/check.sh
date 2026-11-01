@@ -36,6 +36,8 @@ if [[ -z $mode || $mode == --all || $mode == --rust ]]; then
 fi
 if [[ -z $mode || $mode == --all || $mode == --lint ]]; then
   run formatting pnpm format:check
+  # Generates site/.astro types (astro:content), which ESLint and the type checks need.
+  run site-types env ASTRO_TELEMETRY_DISABLED=1 pnpm --filter echo-site exec astro sync
   run eslint pnpm lint
   run stylelint pnpm lint:css
   run markdownlint pnpm lint:md
