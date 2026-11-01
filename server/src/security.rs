@@ -8,24 +8,24 @@ use axum::{
 use serde_json::json;
 
 #[derive(Debug)]
-pub struct ApiError {
+pub(crate) struct ApiError {
     pub status: StatusCode,
     pub message: String,
 }
 impl ApiError {
     /// Construct a public API error with a valid HTTP status.
-    pub fn new(status: u16, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: u16, message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             message: message.into(),
         }
     }
     /// Describe invalid user input as HTTP 400.
-    pub fn bad(message: impl Into<String>) -> Self {
+    pub(crate) fn bad(message: impl Into<String>) -> Self {
         Self::new(400, message)
     }
     /// Return the consistent deleted-meeting error without exposing storage details.
-    pub fn not_found() -> Self {
+    pub(crate) fn not_found() -> Self {
         Self::new(404, "This meeting was deleted or could not be found.")
     }
 }
@@ -49,14 +49,14 @@ impl IntoResponse for ApiError {
 impl From<std::io::Error> for ApiError {
     /// Translate internal failures into user-facing errors while preserving diagnostics in the server log.
     fn from(e: std::io::Error) -> Self {
-        eprintln!("[Echo Voice storage] {e}");
+        tracing::error!("[Echo Voice storage] {e}");
         match e.kind() { std::io::ErrorKind::PermissionDenied=>Self::new(500,"Cannot write to the local data folder. Check its permissions and restart Echo Voice."), _ if e.raw_os_error()==Some(28)=>Self::new(507,"Your local disk is full. Free some space and retry; saved recordings remain available."), _=>Self::new(500,"A local file could not be accessed. Check the server terminal and restore missing audio from a backup if needed.") }
     }
 }
 impl From<rusqlite::Error> for ApiError {
     /// Translate internal failures into user-facing errors while preserving diagnostics in the server log.
     fn from(e: rusqlite::Error) -> Self {
-        eprintln!("[Echo Voice database] {e}");
+        tracing::error!("[Echo Voice database] {e}");
         if let rusqlite::Error::SqliteFailure(code, _) = &e {
             if code.code == rusqlite::ErrorCode::DiskFull {
                 return Self::new(507, "Your local disk is full. Free some space and retry; saved recordings remain available.");
@@ -81,9 +81,9 @@ impl From<serde_json::Error> for ApiError {
     }
 }
 
-/// Allow isolated local documents and workers to use SharedArrayBuffer for ONNX CPU threads.
+/// Allow isolated local documents and workers to use `SharedArrayBuffer` for ONNX CPU threads.
 /// Remote model files are fetched using CORS; OAuth uses top-level navigation without an opener.
-pub async fn browser_isolation(request: Request, next: Next) -> Response {
+pub(crate) async fn browser_isolation(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     response.headers_mut().insert(
         "cross-origin-opener-policy",
@@ -96,9 +96,45 @@ pub async fn browser_isolation(request: Request, next: Next) -> Response {
     response
 }
 
+/// Serves workspace pages from one origin. Browsers keep downloaded speech models and
+/// other storage per origin, so 127.0.0.1 and localhost would otherwise split them.
+/// API and extension routes are left alone; only page navigations are redirected.
+pub(crate) async fn canonical_host(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let page = matches!(request.method().as_str(), "GET" | "HEAD")
+        && !path.starts_with("/api/")
+        && !path.starts_with("/extension/");
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let port = ["127.0.0.1", "[::1]"]
+        .iter()
+        .find_map(|loopback| host.strip_prefix(loopback))
+        .filter(|rest| rest.is_empty() || rest.starts_with(':'));
+    match port {
+        Some(port) if page => {
+            let target = request
+                .uri()
+                .path_and_query()
+                .map_or("/", |value| value.as_str());
+            match header::HeaderValue::from_str(&format!("http://localhost{port}{target}")) {
+                Ok(location) => (
+                    StatusCode::PERMANENT_REDIRECT,
+                    [(header::LOCATION, location)],
+                )
+                    .into_response(),
+                Err(_) => next.run(request).await,
+            }
+        }
+        _ => next.run(request).await,
+    }
+}
+
 /// Protects reads from DNS rebinding and changes from hostile browser origins.
 /// The listener is loopback-only; these checks additionally protect browser requests.
-pub async fn local_access(request: Request, next: Next) -> Response {
+pub(crate) async fn local_access(request: Request, next: Next) -> Response {
     let host = request
         .headers()
         .get(header::HOST)
@@ -118,13 +154,12 @@ pub async fn local_access(request: Request, next: Next) -> Response {
         || host.starts_with("127.0.0.1:")
         || host == "[::1]"
         || host.starts_with("[::1]:");
-    let same_origin = origin
-        .map(|o| o == format!("http://{host}") || o == format!("https://{host}"))
-        .unwrap_or(true);
+    let same_origin =
+        origin.is_none_or(|o| o == format!("http://{host}") || o == format!("https://{host}"));
     // Both public OAuth endpoints can be top-level cross-site navigations.
     // The connect route may normalize 127.0.0.1 to localhost for its callback cookie;
     // the callback then enforces its own short-lived PKCE/state check.
-    let oauth_navigation = request.method() == axum::http::Method::GET
+    let oauth_navigation = request.method() == http::Method::GET
         && [
             "/integrations/google/connect",
             "/integrations/google/callback",
@@ -161,6 +196,46 @@ mod tests {
     use super::*;
     use axum::{body::Body, routing::get, Router};
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn loopback_page_requests_redirect_to_localhost_but_api_requests_do_not() {
+        let app = Router::new()
+            .route("/extension-connect.html", get(|| async { "page" }))
+            .route("/api/health", get(|| async { "api" }))
+            .route("/extension/v1/hello", get(|| async { "hello" }))
+            .layer(axum::middleware::from_fn(canonical_host));
+        let send = |host: &'static str, uri: &'static str| {
+            app.clone().oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+        };
+        let page = send("127.0.0.1:3000", "/extension-connect.html?x=1")
+            .await
+            .unwrap();
+        assert_eq!(page.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            page.headers()[header::LOCATION],
+            "http://localhost:3000/extension-connect.html?x=1"
+        );
+        let ipv6 = send("[::1]:3100", "/").await.unwrap();
+        assert_eq!(ipv6.headers()[header::LOCATION], "http://localhost:3100/");
+        for (host, uri) in [
+            ("127.0.0.1:3000", "/api/health"),
+            ("127.0.0.1:3000", "/extension/v1/hello"),
+            ("localhost:3000", "/extension-connect.html"),
+            ("127.0.0.10:3000", "/extension-connect.html"),
+        ] {
+            let response = send(host, uri).await.unwrap();
+            assert_ne!(
+                response.status(),
+                StatusCode::PERMANENT_REDIRECT,
+                "{host}{uri}"
+            );
+        }
+    }
     #[tokio::test]
     async fn documents_workers_and_wasm_receive_isolation_without_changing_content_types() {
         let app = Router::new()

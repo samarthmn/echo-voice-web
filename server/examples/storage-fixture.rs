@@ -1,4 +1,4 @@
-//! Test-only SQLCipher fixture inspection. Never included in an application bundle.
+//! Test-only `SQLCipher` fixture inspection. Never included in an application bundle.
 #[cfg(debug_assertions)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -7,7 +7,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Connection,
     };
     use serde_json::{json, Value};
-    use std::{io::Read, path::PathBuf};
+    use std::{
+        io::{Read, Write},
+        path::PathBuf,
+    };
     if std::env::var("ECHO_TEST_MODE").as_deref() != Ok("1") {
         return Err("Test mode is required.".into());
     }
@@ -16,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request: Value = serde_json::from_str(&input)?;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
+        .ok_or("The server manifest has no parent directory.")?
         .join("tmp")
         .canonicalize()?;
     let path =
@@ -34,7 +37,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "key",
         format!(
             "x'{}'",
-            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            bytes
+                .iter()
+                .flat_map(|byte| [byte >> 4, byte & 0x0f])
+                .map(|nibble| char::from(b"0123456789abcdef"[usize::from(nibble)]))
+                .collect::<String>()
         ),
     )?;
     let values = request["params"]
@@ -44,7 +51,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|value| match value {
             Value::Null => Ok(SqlValue::Null),
             Value::String(v) => Ok(SqlValue::Text(v.clone())),
-            Value::Number(v) if v.is_i64() => Ok(SqlValue::Integer(v.as_i64().unwrap())),
+            Value::Number(v) if v.is_i64() => {
+                Ok(SqlValue::Integer(v.as_i64().ok_or("Invalid integer.")?))
+            }
             Value::Number(v) => Ok(SqlValue::Real(v.as_f64().ok_or("Invalid number.")?)),
             _ => Err("Invalid SQL fixture parameter."),
         })
@@ -66,11 +75,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         output.push(result);
     }
-    println!("{}", serde_json::to_string(&output)?);
+    writeln!(
+        std::io::stdout().lock(),
+        "{}",
+        serde_json::to_string(&output)?
+    )?;
     Ok(())
 }
 #[cfg(not(debug_assertions))]
 fn main() {
-    eprintln!("Storage fixture tooling requires a debug test build.");
+    use std::io::Write;
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "Storage fixture tooling requires a debug test build."
+    );
     std::process::exit(1);
 }

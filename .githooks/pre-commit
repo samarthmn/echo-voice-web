@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Every commit must pass Echo's lint and type checks. Do not bypass this hook
+# (no --no-verify, no disabling hooks); see AGENTS.md. Fix the problem instead.
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+echo 'pre-commit: running lint and type checks (./scripts/check.sh --pre-commit)...'
+if ! "$ROOT/scripts/check.sh" --pre-commit; then
+  echo >&2
+  echo 'pre-commit: checks failed, so the commit was stopped. Fix the problems above and commit again.' >&2
+  exit 1
+fi

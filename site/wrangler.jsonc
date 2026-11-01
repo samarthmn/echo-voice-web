@@ -1,0 +1,10 @@
+{
+  // echo-web.samarthmn.com: static assets on Cloudflare Workers. See docs/releasing.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "echo-web",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+  },
+}

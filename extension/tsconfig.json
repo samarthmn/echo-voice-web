@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../node_modules/.cache/tsbuild/extension/types",
+    "tsBuildInfoFile": "../node_modules/.cache/tsbuild/extension.tsbuildinfo",
+    "types": ["chrome"]
+  },
+  "include": ["src/**/*.ts"]
+}

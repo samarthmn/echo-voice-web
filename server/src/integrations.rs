@@ -120,7 +120,7 @@ pub(crate) fn associated_calendar_event(raw: &str, recorded_at: &str) -> Option<
     let cache = CALENDAR_ASSOCIATIONS.get()?.lock().ok()?;
     cached_calendar_event(
         &cache,
-        &store::data_dir(),
+        &store::data_dir().ok()?,
         &current_account,
         Utc::now().timestamp_millis(),
         raw,
@@ -129,7 +129,7 @@ pub(crate) fn associated_calendar_event(raw: &str, recorded_at: &str) -> Option<
 }
 
 /// Register optional Calendar OAuth and read-only authorization operations.
-pub fn routes() -> Router {
+pub(crate) fn routes() -> Router {
     Router::new()
         .route("/integrations/status", get(status))
         .route("/integrations/calendar", get(calendar))
@@ -155,8 +155,8 @@ struct Tokens {
     reconnect_required: bool,
 }
 /// Locate private Google tokens beneath the active library's credentials folder.
-fn credentials_file() -> PathBuf {
-    store::data_dir().join("credentials/google.json")
+fn credentials_file() -> Result<PathBuf, ApiError> {
+    Ok(store::data_dir()?.join("credentials/google.json"))
 }
 /// Read saved Google tokens while distinguishing disconnected state from corrupt credentials.
 fn read_tokens() -> Result<Option<Tokens>, ApiError> {
@@ -166,28 +166,24 @@ fn read_tokens() -> Result<Option<Tokens>, ApiError> {
             "Google credentials could not be read. Disconnect and reconnect your calendar.",
         )
     };
-    if fs::symlink_metadata(store::data_dir().join("credentials"))
+    if fs::symlink_metadata(store::data_dir()?.join("credentials"))
         .is_ok_and(|metadata| !metadata.is_dir() || metadata.file_type().is_symlink())
     {
         return Err(invalid());
     }
-    match fs::symlink_metadata(credentials_file()) {
+    match fs::symlink_metadata(credentials_file()?) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
         Ok(_) => return Err(invalid()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     }
-    let mut reader = store::protected_reader(&credentials_file()).map_err(|_| invalid())?;
+    let mut reader = store::protected_reader(&credentials_file()?).map_err(|_| invalid())?;
     if reader.len() > 1024 * 1024 {
         return Err(invalid());
     }
     let bytes = zeroize::Zeroizing::new(reader.read_all().map_err(|_| invalid())?);
     let tokens: Tokens = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-    if tokens.access_token.is_empty()
-        || tokens
-            .refresh_token
-            .as_ref()
-            .is_some_and(|token| token.is_empty())
+    if tokens.access_token.is_empty() || tokens.refresh_token.as_ref().is_some_and(String::is_empty)
     {
         return Err(invalid());
     }
@@ -200,7 +196,7 @@ pub(crate) fn validate_saved_credentials() -> Result<(), ApiError> {
 }
 /// Atomically publish Google credentials with private file and directory permissions.
 fn save_tokens(tokens: &Tokens) -> Result<(), ApiError> {
-    store::replace_protected(&credentials_file(), &serde_json::to_vec(tokens)?)
+    store::replace_protected(&credentials_file()?, &serde_json::to_vec(tokens)?)
 }
 /// Create a bounded Google HTTP client that never follows redirects automatically.
 fn client(seconds: u64) -> Result<Client, ApiError> {
@@ -278,7 +274,7 @@ async fn bounded_oauth_error(mut response: reqwest::Response) -> ApiError {
     loop {
         match response.chunk().await {
             Ok(Some(chunk)) if bytes.len() + chunk.len() <= LIMIT => {
-                bytes.extend_from_slice(&chunk)
+                bytes.extend_from_slice(&chunk);
             }
             Ok(None) => return oauth_error(&bytes),
             _ => return oauth_error(&[]),
@@ -389,7 +385,7 @@ async fn disconnect() -> Result<Json<Value>, ApiError> {
         }
     }
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    match fs::remove_file(credentials_file()) {
+    match tokio::fs::remove_file(credentials_file()?).await {
         Ok(()) => (),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
         Err(e) => return Err(e.into()),
@@ -400,7 +396,8 @@ async fn disconnect() -> Result<Json<Value>, ApiError> {
 /// credentials remain usable until refreshed and bound to this Web OAuth client.
 async fn access_token() -> Result<Tokens, ApiError> {
     let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let saved = read_tokens()?
+    let saved = store::blocking(read_tokens)
+        .await?
         .ok_or_else(|| ApiError::new(401, "Connect Google Calendar to see your meetings."))?;
     let config = oauth::config()?;
     refresh_token(saved, &config).await
@@ -414,7 +411,8 @@ async fn refresh_token(mut saved: Tokens, c: &oauth::Config) -> Result<Tokens, A
     }
     let Some(refresh) = saved.refresh_token.as_deref() else {
         saved.reconnect_required = true;
-        save_tokens(&saved)?;
+        let to_save = saved.clone();
+        store::blocking(move || save_tokens(&to_save)).await?;
         return Err(ApiError::new(
             401,
             "Reconnect Google Calendar to renew access.",
@@ -432,9 +430,10 @@ async fn refresh_token(mut saved: Tokens, c: &oauth::Config) -> Result<Tokens, A
     let token = match result {
         Ok(value) => value,
         Err(error) => {
-            if error.status == axum::http::StatusCode::UNAUTHORIZED {
+            if error.status == http::StatusCode::UNAUTHORIZED {
                 saved.reconnect_required = true;
-                save_tokens(&saved)?;
+                let to_save = saved.clone();
+                store::blocking(move || save_tokens(&to_save)).await?;
             }
             return Err(error);
         }
@@ -457,7 +456,8 @@ async fn refresh_token(mut saved: Tokens, c: &oauth::Config) -> Result<Tokens, A
     }
     saved.expires_at = expiry(&token)?;
     saved.client_id = Some(c.id.clone());
-    save_tokens(&saved)?;
+    let to_save = saved.clone();
+    store::blocking(move || save_tokens(&to_save)).await?;
     Ok(saved)
 }
 /// Classify recognized conferencing hosts without implying automatic meeting attendance.
@@ -519,7 +519,7 @@ fn normalize_event(event: &Value) -> Option<Value> {
         .as_str()
         .or_else(|| event["end"]["date"].as_str())?;
     let url = event_url(event);
-    let mut value = json!({"id":id,"title":event["summary"].as_str().unwrap_or("Untitled meeting"),"start":start,"end":end,"provider":url.as_deref().map(meeting_provider).unwrap_or("other"),"attendees":event["attendees"].as_array().map(Vec::len).unwrap_or(0)});
+    let mut value = json!({"id":id,"title":event["summary"].as_str().unwrap_or("Untitled meeting"),"start":start,"end":end,"provider":url.as_deref().map_or("other", meeting_provider),"attendees":event["attendees"].as_array().map_or(0, Vec::len)});
     if let Some(url) = url {
         value["url"] = json!(url);
     }
@@ -539,8 +539,8 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
     let tokens = access_token().await?;
     let start = (Utc::now() - ChronoDuration::hours(1)).to_rfc3339();
     let end = (Utc::now() + ChronoDuration::days(30)).to_rfc3339();
-    let mut url =
-        Url::parse("https://www.googleapis.com/calendar/v3/calendars/primary/events").unwrap();
+    let mut url = Url::parse("https://www.googleapis.com/calendar/v3/calendars/primary/events")
+        .map_err(|_| ApiError::new(500, "Google Calendar is unavailable."))?;
     url.query_pairs_mut().extend_pairs([
         ("timeMin", start.as_str()),
         ("timeMax", end.as_str()),
@@ -560,9 +560,10 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
     let data = match result {
         Ok(value) => value,
         Err(error) => {
-            if error.status == axum::http::StatusCode::UNAUTHORIZED {
+            if error.status == http::StatusCode::UNAUTHORIZED {
                 let _guard = TOKEN_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-                mark_revoked(&tokens.access_token)?;
+                let access = tokens.access_token.clone();
+                store::blocking(move || mark_revoked(&access)).await?;
             }
             return Err(error);
         }
@@ -578,7 +579,7 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
         .lock()
     {
         *cache = CalendarAssociationCache {
-            library: store::data_dir(), fetched_at: Utc::now().timestamp_millis(), account,
+            library: store::data_dir()?, fetched_at: Utc::now().timestamp_millis(), account,
             events: events.iter().map(|event| json!({"id":event["id"],"url":event["url"],"start":event["start"],"end":event["end"]})).collect(),
         };
     }
@@ -587,7 +588,7 @@ async fn calendar() -> Result<Json<Value>, ApiError> {
 
 /// Report Calendar connection without exposing its credentials.
 async fn status() -> Result<Json<Value>, ApiError> {
-    let tokens = read_tokens()?;
+    let tokens = store::blocking(read_tokens).await?;
     let config = oauth::config();
     let reconnect = tokens.as_ref().is_some_and(|tokens| {
         tokens.reconnect_required || config.as_ref().is_ok_and(|c| !client_matches(tokens, c))
@@ -655,7 +656,7 @@ mod tests {
                 let output = output.clone();
                 async move {
                     (
-                        axum::http::StatusCode::BAD_REQUEST,
+                        http::StatusCode::BAD_REQUEST,
                         output.lock().unwrap().clone(),
                     )
                 }
@@ -716,7 +717,7 @@ mod tests {
             reconnect_required: false,
         };
         save_tokens(&tokens).unwrap();
-        let original = fs::read(credentials_file()).unwrap();
+        let original = fs::read(credentials_file().unwrap()).unwrap();
         assert!(original.starts_with(b"ECHOENC1"));
         assert!(!String::from_utf8_lossy(&original).contains("private-oauth"));
         assert_eq!(
@@ -725,17 +726,21 @@ mod tests {
         );
         let mut changed = original.clone();
         changed[70] ^= 1;
-        fs::write(credentials_file(), &changed).unwrap();
+        fs::write(credentials_file().unwrap(), &changed).unwrap();
         assert!(read_tokens().is_err());
-        assert_eq!(fs::read(credentials_file()).unwrap(), changed);
-        fs::write(credentials_file(), serde_json::to_vec(&tokens).unwrap()).unwrap();
+        assert_eq!(fs::read(credentials_file().unwrap()).unwrap(), changed);
+        fs::write(
+            credentials_file().unwrap(),
+            serde_json::to_vec(&tokens).unwrap(),
+        )
+        .unwrap();
         assert!(read_tokens().is_err());
         save_tokens(&tokens).unwrap();
         assert_eq!(
             read_tokens().unwrap().unwrap().refresh_token,
             tokens.refresh_token
         );
-        assert!(fs::read_dir(credentials_file().parent().unwrap())
+        assert!(fs::read_dir(credentials_file().unwrap().parent().unwrap())
             .unwrap()
             .all(|entry| entry.unwrap().file_name() == "google.json"));
         store::reset_for_tests();
@@ -832,7 +837,7 @@ mod tests {
             None
         );
         assert_eq!(
-            cached_calendar_event(&cache, library, "authorized-account", 302000, url, time),
+            cached_calendar_event(&cache, library, "authorized-account", 302_000, url, time),
             None
         );
         assert_eq!(
@@ -873,7 +878,7 @@ mod tests {
             Query(HashMap::from([("code".into(), "untrusted".into())])),
         )
         .await;
-        assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
+        assert_eq!(response.status(), http::StatusCode::SEE_OTHER);
         assert!(response.headers()[header::LOCATION]
             .to_str()
             .unwrap()

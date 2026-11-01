@@ -1,0 +1,7 @@
+# Local builds and CI use the same Rust, so new Clippy lints arrive deliberately.
+# Bump together with rust-version (MSRV) in Cargo.toml and clippy.toml.
+[toolchain]
+channel = "1.96.1"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

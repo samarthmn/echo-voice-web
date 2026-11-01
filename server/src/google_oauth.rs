@@ -20,7 +20,7 @@ use zeroize::Zeroizing;
 
 pub(super) const SCOPE: &str = "openid email https://www.googleapis.com/auth/calendar.readonly";
 const COOKIE: &str = "echo_google_oauth";
-const LIFETIME: Duration = Duration::from_secs(600);
+const LIFETIME: Duration = Duration::from_mins(10);
 static SESSION: OnceLock<Mutex<Option<Arc<Session>>>> = OnceLock::new();
 
 pub(super) struct Config {
@@ -31,14 +31,24 @@ pub(super) struct Config {
     pub endpoints: Option<(String, String)>,
 }
 impl Config {
-    pub fn token_url(&self) -> &str {
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_literal_bound,
+        reason = "Tests override OAuth endpoints with values borrowed from this config."
+    )]
+    pub(super) fn token_url(&self) -> &str {
         #[cfg(test)]
         if let Some((token, _)) = &self.endpoints {
             return token;
         }
         "https://oauth2.googleapis.com/token"
     }
-    pub fn profile_url(&self) -> &str {
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_literal_bound,
+        reason = "Tests override OAuth endpoints with values borrowed from this config."
+    )]
+    pub(super) fn profile_url(&self) -> &str {
         #[cfg(test)]
         if let Some((_, profile)) = &self.endpoints {
             return profile;
@@ -52,7 +62,7 @@ pub(super) fn config() -> Result<Config, ApiError> {
     if id.is_empty() || secret.is_empty() || id.len() > 256 || secret.len() > 4096 {
         return Err(ApiError::new(503, "Google Calendar is not configured for this source build. See the maintainer setup in docs/integrations.md."));
     }
-    let redirect = crate::config::get().google_redirect_uri.clone();
+    let redirect = crate::config::redirect_uri();
     super::loopback_url(&redirect)?;
     Ok(Config {
         id,
@@ -141,9 +151,10 @@ pub(super) fn pending() -> bool {
             .is_some_and(|session| session.expires > Instant::now())
     })
 }
-fn authorization_url(session: &Session) -> String {
+fn authorization_url(session: &Session) -> Result<String, ApiError> {
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(session.verifier.as_bytes()));
-    let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
+    let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
+        .map_err(|_| ApiError::new(500, "Google authorization is unavailable."))?;
     url.query_pairs_mut().extend_pairs([
         ("client_id", session.config.id.as_str()),
         ("redirect_uri", session.config.redirect.as_str()),
@@ -155,10 +166,10 @@ fn authorization_url(session: &Session) -> String {
         ("code_challenge_method", "S256"),
         ("code_challenge", challenge.as_str()),
     ]);
-    url.into()
+    Ok(url.into())
 }
 fn authorization_redirect(session: &Session) -> Result<Response, ApiError> {
-    let mut response = Redirect::to(&authorization_url(session)).into_response();
+    let mut response = Redirect::to(&authorization_url(session)?).into_response();
     response.headers_mut().append(
         header::SET_COOKIE,
         HeaderValue::from_static(
@@ -214,7 +225,7 @@ fn outcome(origin: &str, result: Result<(), ApiError>) -> Response {
         .insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     response
 }
-async fn begin(config: Config, origin: String, lifetime: Duration) -> Result<Response, ApiError> {
+fn begin(config: Config, origin: String, lifetime: Duration) -> Result<Response, ApiError> {
     let (stop, mut stopped) = watch::channel(false);
     let session = Arc::new(Session {
         config,
@@ -234,7 +245,7 @@ async fn begin(config: Config, origin: String, lifetime: Duration) -> Result<Res
         }
     }
     tokio::spawn(async move {
-        tokio::select! { _ = tokio::time::sleep(lifetime) => {}, _ = stopped.changed() => {} }
+        tokio::select! { () = tokio::time::sleep(lifetime) => {}, _ = stopped.changed() => {} }
         clear_matching(&session);
     });
     Ok(response)
@@ -253,7 +264,7 @@ pub(super) async fn connect(headers: HeaderMap) -> Result<Response, ApiError> {
             Redirect::to(&format!("{origin}/api/integrations/google/connect")).into_response(),
         );
     }
-    begin(config, origin, LIFETIME).await
+    begin(config, origin, LIFETIME)
 }
 async fn complete(
     session: Arc<Session>,
@@ -296,17 +307,22 @@ async fn complete(
             .get_or_init(|| tokio::sync::Mutex::new(()))
             .lock()
             .await;
-        // Cancellation and replacement cannot race the final synchronous save.
-        let mut current = sessions().lock().map_err(|_| state_error())?;
-        if session.expires <= Instant::now()
-            || !current
-                .as_ref()
-                .is_some_and(|value| Arc::ptr_eq(value, &session))
-        {
-            return Err(state_error());
-        }
-        super::save_tokens(&tokens)?;
-        *current = None;
+        // Keep the session lock through the save so cancellation cannot race publication.
+        let committing = session.clone();
+        crate::store::blocking(move || {
+            let mut current = sessions().lock().map_err(|_| state_error())?;
+            if committing.expires <= Instant::now()
+                || !current
+                    .as_ref()
+                    .is_some_and(|value| Arc::ptr_eq(value, &committing))
+            {
+                return Err(state_error());
+            }
+            super::save_tokens(&tokens)?;
+            *current = None;
+            Ok(())
+        })
+        .await?;
         Ok(())
     }
     .await;
@@ -438,12 +454,10 @@ mod tests {
             reconnect_required: false,
         })
         .unwrap();
-        fs::read(integrations::credentials_file()).unwrap()
+        fs::read(integrations::credentials_file().unwrap()).unwrap()
     }
-    async fn launch(provider: &Provider, lifetime: Duration) -> Arc<Session> {
-        let response = begin(provider.config(), "http://localhost:3000".into(), lifetime)
-            .await
-            .unwrap();
+    fn launch(provider: &Provider, lifetime: Duration) -> Arc<Session> {
+        let response = begin(provider.config(), "http://localhost:3000".into(), lifetime).unwrap();
         let auth = Url::parse(response.headers()[header::LOCATION].to_str().unwrap()).unwrap();
         assert_eq!(auth.host_str(), Some("accounts.google.com"));
         let fields: HashMap<_, _> = auth.query_pairs().into_owned().collect();
@@ -500,7 +514,7 @@ mod tests {
         let _directory = fixture();
         let original = previous();
         let provider = Provider::start().await;
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         for (state, cookie) in [
             ("wrong".into(), browser(&session)),
             (session.state.to_string(), "echo_google_oauth=wrong".into()),
@@ -526,12 +540,12 @@ mod tests {
             .unwrap()
             .contains("calendar=error"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         assert!(provider.forms.lock().unwrap().is_empty());
         assert!(!pending());
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         *provider.challenge.lock().unwrap() = "wrong-pkce-challenge".into();
         let denied = response(
             session.clone(),
@@ -545,11 +559,11 @@ mod tests {
             .unwrap()
             .contains("calendar=error"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         provider.forms.lock().unwrap().clear();
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         let success = response(
             session.clone(),
             &session.state,
@@ -563,7 +577,7 @@ mod tests {
         );
         let saved = integrations::read_tokens().unwrap().unwrap();
         assert_eq!(saved.client_id.as_deref(), Some(CLIENT));
-        let disk = fs::read(integrations::credentials_file()).unwrap();
+        let disk = fs::read(integrations::credentials_file().unwrap()).unwrap();
         assert!(disk.starts_with(b"ECHOENC1"));
         assert!(!String::from_utf8_lossy(&disk).contains("synthetic-new"));
         assert_eq!(provider.forms.lock().unwrap().len(), 1);
@@ -578,7 +592,7 @@ mod tests {
             .status(),
             StatusCode::BAD_REQUEST
         );
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         assert!(cancel());
         assert_eq!(
             response(
@@ -591,7 +605,7 @@ mod tests {
             .status(),
             StatusCode::BAD_REQUEST
         );
-        let session = launch(&provider, Duration::from_millis(20)).await;
+        let session = launch(&provider, Duration::from_millis(20));
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(!pending());
         assert_eq!(
@@ -605,7 +619,10 @@ mod tests {
             .status(),
             StatusCode::BAD_REQUEST
         );
-        assert_eq!(fs::read(integrations::credentials_file()).unwrap(), disk);
+        assert_eq!(
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
+            disk
+        );
         store::reset_for_tests();
     }
     #[tokio::test]
@@ -615,7 +632,7 @@ mod tests {
         let original = previous();
         let provider = Provider::start().await;
         provider.mode.store(2, Ordering::SeqCst);
-        let session = launch(&provider, Duration::from_secs(10)).await;
+        let session = launch(&provider, Duration::from_secs(10));
         let request = tokio::spawn(async move {
             response(
                 session.clone(),
@@ -636,7 +653,7 @@ mod tests {
             .unwrap()
             .contains("calendar=error"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         store::reset_for_tests();
@@ -656,7 +673,7 @@ mod tests {
         );
         assert!(provider.forms.lock().unwrap().is_empty());
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             original
         );
         saved.client_id = Some(CLIENT.into());
@@ -670,14 +687,14 @@ mod tests {
             "synthetic-web-secret"
         );
         provider.mode.store(4, Ordering::SeqCst);
-        let unchanged = fs::read(integrations::credentials_file()).unwrap();
+        let unchanged = fs::read(integrations::credentials_file().unwrap()).unwrap();
         let diagnostic = integrations::refresh_token(saved.clone(), &provider.config())
             .await
             .unwrap_err();
         assert!(diagnostic.message.contains("invalid_client"));
         assert!(!diagnostic.message.contains("synthetic-private"));
         assert_eq!(
-            fs::read(integrations::credentials_file()).unwrap(),
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
             unchanged
         );
         provider.mode.store(0, Ordering::SeqCst);
@@ -729,11 +746,14 @@ mod tests {
                 .reconnect_required
         );
         provider.mode.store(3, Ordering::SeqCst);
-        let before = fs::read(integrations::credentials_file()).unwrap();
+        let before = fs::read(integrations::credentials_file().unwrap()).unwrap();
         assert!(integrations::refresh_token(saved, &provider.config())
             .await
             .is_err());
-        assert_eq!(fs::read(integrations::credentials_file()).unwrap(), before);
+        assert_eq!(
+            fs::read(integrations::credentials_file().unwrap()).unwrap(),
+            before
+        );
         store::reset_for_tests();
     }
     #[tokio::test]
@@ -747,7 +767,6 @@ mod tests {
             "http://localhost:3000".into(),
             Duration::from_secs(10),
         )
-        .await
         .unwrap();
         let auth = Url::parse(response.headers()[header::LOCATION].to_str().unwrap()).unwrap();
         let fields: HashMap<_, _> = auth.query_pairs().into_owned().collect();

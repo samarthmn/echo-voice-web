@@ -1,0 +1,221 @@
+---
+import { getImage } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import notesDark from '../assets/screens/notes-dark.png';
+import notesLight from '../assets/screens/notes-light.png';
+import { CHECKED, COMPETITORS, DESCRIPTION, FAQ, GITHUB_URL, SITE_URL, TAGLINE } from '../data/site';
+
+const light = await getImage({ src: notesLight, format: 'webp', width: 1280 });
+const dark = await getImage({ src: notesDark, format: 'webp', width: 1280 });
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'SoftwareApplication',
+    name: 'Echo',
+    description: DESCRIPTION,
+    url: SITE_URL,
+    applicationCategory: 'BusinessApplication',
+    operatingSystem: 'macOS 14 or later (Apple Silicon)',
+    license: 'https://opensource.org/licenses/MIT',
+    isAccessibleForFree: true,
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    codeRepository: GITHUB_URL,
+    image: `${SITE_URL}/og-image.png`,
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: FAQ.map(({ q, a }) => ({
+      '@type': 'Question',
+      name: q,
+      acceptedAnswer: { '@type': 'Answer', text: a },
+    })),
+  },
+];
+
+const features = [
+  ['No bot in your call', 'The browser extension records the Google Meet, Zoom or Teams tab you are already in. Nobody sees a “notetaker has joined” tile.'],
+  ['Whisper, on your Mac', 'Transcribe with Whisper Large V3 Turbo in the browser, or Large V3 natively. After the one-time model download, it works offline.'],
+  ['Who said what', 'Speaker grouping runs on your Mac. Rename speakers, fix passages, and every edit is kept as a version you can return to.'],
+  ['Notes you can check', 'Summaries, decisions and action items from a local Ollama model. Every note links back to the moment it came from.'],
+  ['An encrypted library', 'SQLCipher database, encrypted audio, a key in the macOS Keychain, and a 24-word recovery phrase for backups.'],
+  ['Recordings that survive', 'The extension keeps audio encrypted in the browser while Echo is closed and uploads it later. Nothing is lost if the server is down.'],
+  ['Your calendar, read-only', 'Connect Google Calendar with your own OAuth client to see upcoming meetings and open their links.'],
+  ['Bring existing audio', 'Upload recordings you already have, or record an in-person meeting with your microphone.'],
+] as const;
+---
+
+<Base title={`Echo: ${TAGLINE}`} description={DESCRIPTION} jsonLd={jsonLd}>
+  <div class="wrap">
+    <section class="hero">
+      <h1 class="display">
+        <span class="line">Meeting notes</span>
+        <span class="line">that never leave your Mac.</span>
+      </h1>
+      <p class="sub">
+        Echo records, transcribes and summarises your meetings on your own Mac. It is open source
+        and self-hosted: no bot in the call, no account, no cloud. A private alternative to
+        Fireflies, Otter.ai and Fathom.
+      </p>
+      <div class="row">
+        <a class="btn btn-primary" href="/docs/install/">Self-host in 10 minutes</a>
+        <a class="btn btn-secondary" href={GITHUB_URL}>View on GitHub</a>
+      </div>
+      <figure class="hero-shot washed">
+        <picture>
+          <source srcset={dark.src} media="(prefers-color-scheme: dark)" type="image/webp" />
+          <img
+            src={light.src}
+            width="1280"
+            height="800"
+            alt="Echo's meeting view: notes with a summary, key decisions and action items, each linked to timestamps in the recording."
+            fetchpriority="high"
+          />
+        </picture>
+      </figure>
+    </section>
+
+    <section id="how">
+      <span class="kicker">How it works</span>
+      <h2 class="section-title">From your meeting tab to notes, without leaving your Mac</h2>
+      <ol class="steps">
+        <li><h3>Record</h3><p>The extension captures the meeting tab, and your microphone while you are unmuted.</p></li>
+        <li><h3>Store</h3><p>Audio goes to Echo’s server on <code>localhost</code>, into an encrypted library.</p></li>
+        <li><h3>Transcribe</h3><p>Whisper turns speech into text and groups it by speaker, on-device.</p></li>
+        <li><h3>Summarise</h3><p>Ollama writes notes with links back to the source passages.</p></li>
+      </ol>
+    </section>
+
+    <section id="features">
+      <span class="kicker">Features</span>
+      <h2 class="section-title">Everything a notetaker does, kept at home</h2>
+      <div>
+        {
+          features.map(([title, copy]) => (
+            <div class="feature">
+              <h3>{title}</h3>
+              <p>{copy}</p>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <section id="privacy">
+      <span class="kicker">Privacy</span>
+      <h2 class="section-title">Where your meeting goes</h2>
+      <p class="section-lede">
+        Every step runs on your Mac. The only internet traffic is the one-time model download and,
+        if you connect it, read-only Google Calendar.
+      </p>
+      <div class="flow" role="list">
+        <div class="flow-node" role="listitem"><h3>Meeting tab</h3><p>Brave or Chrome extension, audio encrypted in the browser until uploaded.</p></div>
+        <div class="flow-arrow" aria-hidden="true">→</div>
+        <div class="flow-node" role="listitem"><h3>Echo server</h3><p>Listens on loopback only. SQLCipher library, key in the Keychain.</p></div>
+        <div class="flow-arrow" aria-hidden="true">→</div>
+        <div class="flow-node" role="listitem"><h3>Whisper and Ollama</h3><p>Transcripts, speakers and notes, computed on your Mac.</p></div>
+      </div>
+      <p class="mac-boundary">All of this stays inside your Mac.</p>
+      <p class="never">
+        Never involved: an Echo cloud, an Echo account, telemetry, or third-party AI APIs.{' '}
+        <a href="/docs/privacy/">See every request Echo can make</a>.
+      </p>
+    </section>
+
+    <section id="compare">
+      <span class="kicker">Compare</span>
+      <h2 class="section-title">Echo and cloud notetakers</h2>
+      <p class="section-lede">
+        Cloud services are easier to start with and work for teams. Echo trades that for keeping
+        everything on your own computer.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <caption class="muted" style="caption-side: bottom; text-align: left; padding: 12px 18px;">
+            Competitor details checked on {CHECKED}; see sources below.
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Product</th>
+              <th scope="col">Runs on your computer</th>
+              <th scope="col">Bot joins the call</th>
+              <th scope="col">Account needed</th>
+              <th scope="col">Price</th>
+              <th scope="col">Open source</th>
+              <th scope="col">Where data is stored</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="echo-row">
+              <th scope="row">Echo</th>
+              <td class="yes">Yes</td>
+              <td>No</td>
+              <td>No</td>
+              <td>Free (MIT)</td>
+              <td class="yes">Yes</td>
+              <td>Your Mac, encrypted</td>
+            </tr>
+            {
+              COMPETITORS.map((c) => (
+                <tr>
+                  <th scope="row"><a href={`/alternatives/${c.slug}/`}>{c.name}</a></th>
+                  <td>No, cloud service</td>
+                  <td>{c.bot}</td>
+                  <td>Yes</td>
+                  <td>{c.price}</td>
+                  <td>No</td>
+                  <td>{c.storage}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="sources">
+        Sources, checked {CHECKED}:{' '}
+        {COMPETITORS.flatMap((c, i) => [
+          i > 0 ? ', ' : '',
+          ...c.sources.map((s) => <a href={s.url}>{s.label}</a>),
+        ])}. Plans and prices change; check each vendor for current details. Product names are
+        trademarks of their owners.
+      </p>
+    </section>
+
+    <section id="requirements">
+      <span class="kicker">Requirements</span>
+      <h2 class="section-title">What you need</h2>
+      <div class="req">
+        <div><strong>An Apple Silicon Mac</strong><span>M1 or later, macOS 14 or newer, 16 GB of memory recommended.</span></div>
+        <div><strong>Brave or Chrome</strong><span>For the Echo web app and the recording extension.</span></div>
+        <div><strong>Ten minutes in Terminal</strong><span>Echo builds from source with one script. <a href="/docs/requirements/">Full requirements</a>.</span></div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <span class="kicker">FAQ</span>
+      <h2 class="section-title">Questions</h2>
+      <div class="faq">
+        {
+          FAQ.map(({ q, a }) => (
+            <details>
+              <summary>{q}</summary>
+              <p>{a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </section>
+
+    <section>
+      <div class="patch">
+        <h2 class="section-title">Run your own notetaker</h2>
+        <p>Clone the repository, run one setup script, and record your next meeting on your own Mac.</p>
+        <div class="row">
+          <a class="btn btn-primary" href="/docs/install/">Read the install guide</a>
+          <a class="btn btn-secondary" href={GITHUB_URL}>Star on GitHub</a>
+        </div>
+      </div>
+    </section>
+  </div>
+</Base>

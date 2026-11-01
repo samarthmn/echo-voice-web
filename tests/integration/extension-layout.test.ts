@@ -1,0 +1,134 @@
+import type * as TestModule from '@playwright/test';
+import { defined } from '../helpers/assertions.ts';
+import { FONT_FILES, writeTokens } from '../../scripts/build-tokens.ts';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from '@playwright/test';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+void test('popup has an intrinsic width, reachable controls at zoom, and responsive setup', async () => {
+  const scratch = path.join(project, 'tmp', 'extension-popup-layout');
+  await mkdir(scratch, { recursive: true });
+  process.env['TMPDIR'] = scratch;
+  let browser: TestModule.Browser | undefined;
+  try {
+    await mkdir(path.join(scratch, 'fonts'));
+    await mkdir(path.join(scratch, 'icons'));
+    for (const name of ['popup.html', 'setup.html']) {
+      // A local HTML/CSS fixture only: no extension installation, runtime, account or capture controls.
+      const html = (await readFile(path.join(project, 'extension', name), 'utf8')).replace(
+        /<script\b[^>]*>[\s\S]*?<\/script>/g,
+        '',
+      );
+      await writeFile(path.join(scratch, name), html);
+    }
+    await cp(path.join(project, 'extension/ui.css'), path.join(scratch, 'ui.css'));
+    await writeTokens(path.join(scratch, 'tokens.css'), 'fonts/');
+    await cp(path.join(project, 'public/favicon.svg'), path.join(scratch, 'icons/echo.svg'));
+    for (const name of FONT_FILES)
+      await cp(path.join(project, 'public/fonts', name), path.join(scratch, 'fonts', name));
+    const executablePath =
+      process.env['CHROMIUM_PATH'] ||
+      (process.platform === 'darwin'
+        ? '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
+        : '/usr/bin/chromium');
+    // Use the shorter project temp root for Chromium's bounded Unix socket path.
+    browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      env: { ...process.env, TMPDIR: path.join(project, 'tmp') },
+    });
+    const page = await browser.newPage({ viewport: { width: 190, height: 600 } });
+    await page.goto(pathToFileURL(path.join(scratch, 'popup.html')).href);
+    await page.evaluate(() => document.fonts.ready);
+    assert.equal(
+      await page.evaluate(() => document.documentElement.getBoundingClientRect().width),
+      390,
+      'intrinsic width must not collapse to the initial 190px host viewport',
+    );
+    await page.setViewportSize({ width: 390, height: 600 });
+    await page.evaluate(() => {
+      function defined<T>(value: T): NonNullable<T> {
+        if (value === undefined || value === null)
+          throw new Error('Expected fixture value to be present.');
+        return value;
+      }
+
+      defined(document.getElementById('mic-device-field')).hidden = false;
+      defined(document.querySelector<HTMLSelectElement>('#mic-device')).add(
+        new Option('System default microphone', 'default'),
+      );
+      defined(document.getElementById('meeting')).textContent = 'Google Meet · This tab is ready.';
+    });
+    const normal = await page.evaluate(() => {
+      function defined<T>(value: T): NonNullable<T> {
+        if (value === undefined || value === null)
+          throw new Error('Expected fixture value to be present.');
+        return value;
+      }
+
+      const heading = document.querySelector('#start-panel h1');
+      const start = defined(document.getElementById('start')).getBoundingClientRect();
+      return {
+        headingLines: Math.round(
+          defined(heading).getBoundingClientRect().height /
+            parseFloat(getComputedStyle(defined(heading)).lineHeight),
+        ),
+        startBottom: start.bottom,
+        titleWidth: defined(document.getElementById('title')).getBoundingClientRect().width,
+        scrollWidth: document.documentElement.scrollWidth,
+      };
+    });
+    assert.equal(normal.headingLines, 1);
+    assert.ok(normal.startBottom <= 600, JSON.stringify(normal));
+    assert.ok(normal.titleWidth >= 300, JSON.stringify(normal));
+    assert.equal(normal.scrollWidth, 390);
+    for (const zoom of [1.5, 2]) {
+      await page.setViewportSize({ width: Math.round(390 * zoom), height: 600 });
+      await page.evaluate((zoom) => {
+        document.documentElement.style.zoom = String(zoom);
+      }, zoom);
+      const width = await page.evaluate(() => document.documentElement.scrollWidth);
+      assert.ok(width <= Math.round(390 * zoom), `horizontal overflow at ${zoom}x`);
+      await page.locator('#start').scrollIntoViewIfNeeded();
+      const bounds = await page.locator('#start').boundingBox();
+      assert.ok(
+        defined(bounds).y >= 0 && defined(bounds).y + defined(bounds).height <= 600,
+        `Start reachable at ${zoom}x: ${JSON.stringify(bounds)}`,
+      );
+    }
+    await page.goto(pathToFileURL(path.join(scratch, 'setup.html')).href);
+    await page.setViewportSize({ width: 320, height: 600 });
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+      320,
+      'setup stays responsive at 320px',
+    );
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((theme) => (document.documentElement.dataset['theme'] = theme), theme);
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+        320,
+        `${theme} setup stays responsive`,
+      );
+      const colors = await page.locator('#connect').evaluate((button) => ({
+        ink: getComputedStyle(button).color,
+        background: getComputedStyle(button).backgroundColor,
+      }));
+      assert.notEqual(
+        colors.ink,
+        colors.background,
+        `${theme} primary control has distinct text and background`,
+      );
+    }
+    console.log(
+      `Popup layout: ${normal.titleWidth}px input; one-line heading; Start bottom ${normal.startBottom}px; 150%/200% zoom reachable; setup 320px.`,
+    );
+  } finally {
+    if (browser) await browser.close();
+    await rm(scratch, { recursive: true, force: true, maxRetries: 3 });
+  }
+});

@@ -1,0 +1,71 @@
+{
+  "name": "Organic",
+  "palette": {
+    "hue": 24,
+    "band": "light",
+    "scheme": "mono",
+    "sat": 0.55,
+    "pin": {
+      "bg": "#f5ead8",
+      "surface": "#ebddc5",
+      "accent2": "#7a8a5e"
+    },
+    "bg": "#f5ead8",
+    "surface": "#ebddc5",
+    "text": "#201e1d",
+    "accent": "#c67139",
+    "accent2": "#7a8a5e",
+    "dark": {
+      "bg": "#2e2b25",
+      "surface": "#3b372f",
+      "surfaceAlt": "#474238",
+      "text": "#f9f4ed",
+      "textMuted": "#c0b6a5",
+      "accent": "#c67139",
+      "accentText": "#f6a06b",
+      "accent2": "#7a8a5e"
+    }
+  },
+  "fonts": {
+    "heading": {
+      "family": "Mulish",
+      "class": "humanist",
+      "weights": [
+        800
+      ]
+    },
+    "body": {
+      "family": "Mulish",
+      "class": "humanist",
+      "weights": [
+        400,
+        600,
+        700
+      ]
+    }
+  },
+  "density": 1.1,
+  "radius": 16,
+  "layoutStyle": "left",
+  "frame": "rounded",
+  "imageTreatment": "washed",
+  "photo": "organic",
+  "iconSet": "lucide-bold",
+  "roles": {
+    "light": {
+      "surfaceAlt": "neutral-200",
+      "textMuted": "neutral-700",
+      "accentText": "accent-700",
+      "accentHover": "accent-500",
+      "accentPressed": "accent-400",
+      "onAccent": "#201e1d",
+      "focus": "accent-600"
+    },
+    "dark": {
+      "textMuted": "neutral-400",
+      "accentText": "accent-400",
+      "focus": "accent-400",
+      "onAccent": "#201e1d"
+    }
+  }
+}

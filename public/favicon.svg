@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="19" fill="#6c5bdb"/><g stroke="white" stroke-width="5" stroke-linecap="round"><path d="M19 29v6m9-16v26m9-21v16m9-11v6"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Echo">
+  <clipPath id="echo-logo-clip"><path d="M34 7C48 8 58 18 57 33C56 48 45 58 30 57C15 56 6 46 7 31C8 16 20 6 34 7Z"/></clipPath>
+  <mask id="echo-logo-gap"><rect width="64" height="64" fill="#fff"/><path d="M0 36C10 27 18 27 26 35S42 45 50 37S60 29 64 31" fill="none" stroke="#000" stroke-width="4.5"/></mask>
+  <g clip-path="url(#echo-logo-clip)" mask="url(#echo-logo-gap)">
+    <rect width="64" height="64" fill="#c67139"/>
+    <path d="M0 36C10 27 18 27 26 35S42 45 50 37S60 29 64 31L64 64L0 64Z" fill="#7a8a5e"/>
+  </g>
+</svg>

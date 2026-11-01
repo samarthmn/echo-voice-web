@@ -1,0 +1,69 @@
+/* Organic on Starlight. tokens.generated.css supplies the --color-* tokens for
+   both themes (Starlight sets the same data-theme attribute the tokens use).
+   Unlayered rules here override Starlight's layered defaults. */
+:root {
+  --sl-font: var(--font-body);
+  --sl-font-system: var(--font-body);
+  --sl-color-accent-low: var(--color-accent-soft);
+  --sl-color-accent: var(--color-accent);
+  --sl-color-accent-high: var(--color-accent-200);
+  --sl-color-text-accent: var(--color-accent-text);
+  --sl-color-white: var(--color-text);
+  --sl-color-gray-1: var(--color-neutral-200);
+  --sl-color-gray-2: var(--color-neutral-300);
+  --sl-color-gray-3: var(--color-text-muted);
+  --sl-color-gray-4: var(--color-neutral-500);
+  --sl-color-gray-5: var(--color-neutral-700);
+  --sl-color-gray-6: var(--color-surface);
+  --sl-color-gray-7: var(--color-surface-alt);
+  --sl-color-black: var(--color-bg);
+  --sl-color-bg-nav: var(--color-bg);
+  --sl-color-bg-sidebar: var(--color-bg);
+  --sl-color-hairline: var(--color-divider);
+  --sl-color-hairline-light: var(--color-divider);
+  --sl-color-hairline-shade: var(--color-divider);
+}
+:root[data-theme='light'] {
+  --sl-color-accent-high: var(--color-accent-800);
+  --sl-color-gray-1: var(--color-neutral-800);
+  --sl-color-gray-2: var(--color-neutral-700);
+  --sl-color-gray-3: var(--color-text-muted);
+  --sl-color-gray-4: var(--color-neutral-500);
+  --sl-color-gray-5: var(--color-neutral-400);
+  --sl-color-gray-6: var(--color-surface);
+  --sl-color-gray-7: var(--color-surface-alt);
+}
+
+:root {
+  --sl-content-width: 46rem;
+}
+h1,
+h2,
+h3,
+h4,
+.site-title {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  letter-spacing: -0.015em;
+}
+.site-title {
+  font-size: 1.35rem;
+  color: var(--color-text);
+}
+.sl-markdown-content a {
+  color: var(--color-accent-text);
+  text-underline-offset: 3px;
+}
+.sl-markdown-content code:not(pre code) {
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+.expressive-code .frame,
+.starlight-aside,
+.sl-markdown-content table {
+  border-radius: var(--radius-md);
+}
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

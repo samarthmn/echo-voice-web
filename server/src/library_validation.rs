@@ -12,7 +12,17 @@ fn verify_protected_tree(path: &Path, depth: usize) -> Result<(), ApiError> {
     }
     if metadata.is_dir() {
         for entry in std::fs::read_dir(path)? {
-            verify_protected_tree(&entry?.path(), depth + 1)?;
+            let entry = entry?;
+            if path.file_name().is_some_and(|name| name == "credentials")
+                && matches!(
+                    entry.file_name().to_str(),
+                    Some("runner-token" | "runner-token.lock")
+                )
+                && entry.file_type()?.is_file()
+            {
+                continue;
+            }
+            verify_protected_tree(&entry.path(), depth + 1)?;
         }
     } else if metadata.is_file() {
         let mut reader = store::protected_reader(path)?;
@@ -82,7 +92,7 @@ pub(crate) fn verify() -> Result<(), ApiError> {
         {
             return Err(ApiError::bad("The selected library contains an invalid audio reference. The original has not been changed."));
         }
-        let path = store::data_dir().join(area).join(id).join(file);
+        let path = store::data_dir()?.join(area).join(id).join(file);
         let data = zeroize::Zeroizing::new(store::read_protected(&path)?);
         if data.len() as u64 != bytes || format!("{:x}", Sha256::digest(data.as_slice())) != digest
         {
@@ -91,8 +101,8 @@ pub(crate) fn verify() -> Result<(), ApiError> {
     }
     // The database references alone cannot prove the copied tree is complete:
     // offline/recovery files and optional credentials may not have indexed rows.
-    for name in ["audio", "extension-pcm", "credentials", "chatgpt/auth.json"] {
-        let path = store::data_dir().join(name);
+    for name in ["audio", "extension-pcm", "credentials"] {
+        let path = store::data_dir()?.join(name);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => verify_protected_tree(&path, 0)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -120,7 +130,6 @@ mod tests {
             "audio/recovery/unindexed.chunk",
             "extension-pcm/recovery/unindexed.pcm",
             "credentials/extra.json",
-            "chatgpt/auth.json",
         ] {
             let path = directory.path().join(name);
             store::mkdir(path.parent().unwrap()).unwrap();
@@ -140,6 +149,47 @@ mod tests {
         std::os::unix::fs::symlink(&outside, directory.path().join("audio/link")).unwrap();
         assert!(verify().is_err());
         assert_eq!(std::fs::read(&outside).unwrap(), b"unrelated plaintext");
+        store::reset_for_tests();
+        std::env::remove_var("ECHO_DATA_DIR");
+    }
+
+    #[test]
+    fn legacy_chatgpt_folders_survive_open_and_validation() {
+        let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();
+        let directory = store::test_directory();
+        store::reset_for_tests();
+        std::env::set_var("ECHO_DATA_DIR", directory.path());
+        store::test_key();
+        store::init().unwrap();
+        assert!(!directory.path().join("chatgpt").exists());
+        let legacy = directory.path().join("chatgpt");
+        store::mkdir(&legacy).unwrap();
+        let path = legacy.join("auth.json");
+        store::write_protected(&path, b"legacy protected state").unwrap();
+        let encrypted = std::fs::read(&path).unwrap();
+        let mut damaged = encrypted.clone();
+        *damaged.last_mut().unwrap() ^= 1;
+        for bytes in [encrypted, b"legacy plaintext".to_vec(), damaged] {
+            std::fs::write(&path, &bytes).unwrap();
+            store::with_db(|db| {
+                db.execute("DELETE FROM storage_protection", [])?;
+                Ok(())
+            })
+            .unwrap();
+            store::reset_for_tests();
+            store::init().unwrap();
+            verify().unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        for area in ["audio", "extension-pcm", "credentials"] {
+            let active = directory.path().join(area).join("unprotected-secret");
+            store::mkdir(active.parent().unwrap()).unwrap();
+            std::fs::write(&active, b"sensitive plaintext").unwrap();
+            assert!(verify().is_err());
+            assert_eq!(std::fs::read(&active).unwrap(), b"sensitive plaintext");
+            std::fs::remove_file(active).unwrap();
+            verify().unwrap();
+        }
         store::reset_for_tests();
         std::env::remove_var("ECHO_DATA_DIR");
     }
@@ -198,7 +248,7 @@ mod tests {
         store::test_key();
         let audio = b"RIFF\x24\0\0\0WAVEfmt legacy-audio-secret";
         let meeting = json!({"id":"legacy_meeting-1","title":"Legacy backup","mode":"import","consent":false,"status":"saved","createdAt":store::now(),"updatedAt":store::now(),"duration":0,"speechModel":"local","notesModel":"local","liveTranscription":false,"tracks":[{"id":"room","label":"Room","mimeType":"audio/wav","bytes":audio.len(),"url":"/api/meetings/legacy_meeting-1/audio/room"}],"transcripts":[],"notes":[],"moments":[],"gaps":[]});
-        store::import_library(json!({"format":"echo-voice-web","version":1,"exportedAt":store::now(),"meetings":[meeting],"vocabulary":[],"audio":[{"meetingId":"legacy_meeting-1","trackId":"room","sequence":0,"data":STANDARD.encode(audio)}]})).unwrap();
+        store::import_library(&json!({"format":"echo-voice-web","version":1,"exportedAt":store::now(),"meetings":[meeting],"vocabulary":[],"audio":[{"meetingId":"legacy_meeting-1","trackId":"room","sequence":0,"data":STANDARD.encode(audio)}]})).unwrap();
         verify().unwrap();
         for invalid in [
             "../outside.chunk",

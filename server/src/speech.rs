@@ -32,8 +32,8 @@ const MODEL: &str = "onnx-community/whisper-large-v3";
 const CHECKPOINT: &str = "Xenova/whisper-large-v3";
 const REVISION: &str = "67bf02d92b7754a1ff82a7f8545f8b8c378b2ef0";
 const WEIGHTS: [(&str, u64); 2] = [
-    ("encoder_model_quantized.onnx", 645260435),
-    ("decoder_model_merged_quantized.onnx", 915059840),
+    ("encoder_model_quantized.onnx", 645_260_435),
+    ("decoder_model_merged_quantized.onnx", 915_059_840),
 ];
 const MODEL_JSON: [&str; 5] = [
     "config.json",
@@ -70,10 +70,10 @@ fn manager() -> Arc<Manager> {
     MANAGER.get_or_init(|| Arc::new(Manager::default())).clone()
 }
 fn root() -> Result<PathBuf> {
-    Ok(crate::paths::get().resource_root)
+    Ok(crate::paths::get()?.resource_root)
 }
-fn cache_dir() -> PathBuf {
-    crate::paths::get().cache_dir.join("native-large-v3")
+fn cache_dir() -> Result<PathBuf> {
+    Ok(crate::paths::get()?.cache_dir.join("native-large-v3"))
 }
 fn valid_id(id: &str) -> Result<String> {
     uuid::Uuid::parse_str(id)
@@ -91,13 +91,16 @@ fn is_cancelled(receiver: &watch::Receiver<bool>) -> bool {
 }
 
 /// Register bounded native job, readiness, cancellation and model-removal endpoints.
-pub fn routes() -> Router {
+pub(crate) fn routes() -> Router {
     Router::new()
         .route("/speech", get(status))
         .route("/speech/jobs", post(start))
         .route("/speech/jobs/{id}", get(read).delete(cancel))
         .route("/speech/model", delete(remove_model))
 }
+
+// Node 22.18 enables type stripping by default for the native TypeScript helper.
+const NODE_VERSION_CHECK: &str = "const [major,minor]=process.versions.node.split('.').map(Number);if(major<22||(major===22&&minor<18))process.exit(1)";
 
 async fn runtime_available(owner: &Manager) -> (bool, String) {
     let mut cached = owner.runtime.lock().await;
@@ -109,31 +112,31 @@ async fn runtime_available(owner: &Manager) -> (bool, String) {
     let available = async {
         let root = root().ok()?;
         for file in [
-            "scripts/native-speech.mjs",
+            "scripts/native-speech.ts",
             "node_modules/@huggingface/transformers/package.json",
             "node_modules/onnxruntime-node/package.json",
         ] {
-            if !root.join(file).is_file() {
+            if !tokio::fs::metadata(root.join(file)).await.is_ok_and(|metadata| metadata.is_file()) {
                 return None;
             }
         }
         let output = timeout(Duration::from_secs(3), Command::new("node")
             .arg("--input-type=module").arg("-e")
-            .arg("if(Number(process.versions.node.split('.')[0])<22)process.exit(1);await import('onnxruntime-node');await import('./scripts/native-speech.mjs');process.stdout.write('echo-native-ready')")
+            .arg(format!("{NODE_VERSION_CHECK};await import('onnxruntime-node');await import('./scripts/native-speech.ts');process.stdout.write('echo-native-ready')"))
             .current_dir(root).kill_on_drop(true).output()).await.ok()?.ok()?;
         (output.status.success() && output.stdout == b"echo-native-ready").then_some(())
     }
     .await
     .is_some();
-    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22 or newer and the native speech dependencies. Run npm ci in the Echo Voice folder, then retry." }.to_owned();
+    let detail = if available { "Large V3 runs locally through the native speech helper." } else { "Large V3 requires Node.js 22.18 or newer and the native speech dependencies. Run pnpm install in the Echo Voice folder, then retry." }.to_owned();
     *cached = Some((Instant::now(), available, detail.clone()));
     (available, detail)
 }
 
 /// Private native model files never enter browser backup exports or accept client paths.
 fn safe_cache(create: bool) -> Result<PathBuf> {
-    let parent = crate::paths::get().cache_dir;
-    let path = cache_dir();
+    let parent = crate::paths::get()?.cache_dir;
+    let path = cache_dir()?;
     for folder in [&parent, &path] {
         if std::fs::symlink_metadata(folder).is_ok_and(|metadata| metadata.file_type().is_symlink())
         {
@@ -230,7 +233,9 @@ async fn status() -> Result<Json<Value>> {
         .as_ref()
         .and_then(|id| state.jobs.get(id))
         .is_some_and(|job| job.operation.as_deref() == Some("download"));
-    let ready = available && !qualifying && safe_cache(false).is_ok_and(|path| qualified(&path));
+    let ready = available
+        && !qualifying
+        && store::blocking(|| Ok(safe_cache(false).is_ok_and(|path| qualified(&path)))).await?;
     let active = state
         .active
         .as_ref()
@@ -253,7 +258,7 @@ async fn reserve(owner: &Manager, id: &str, operation: &str) -> Result<watch::Re
     let mut state = owner.state.lock().await;
     state
         .cancelled
-        .retain(|(_, at)| at.elapsed() < Duration::from_secs(600));
+        .retain(|(_, at)| at.elapsed() < Duration::from_mins(10));
     if state.cancelled.iter().any(|(cancelled, _)| cancelled == id) {
         return Err(cancelled_error());
     }
@@ -296,7 +301,9 @@ async fn finish(owner: &Manager, id: &str, outcome: Result<Value>) {
     if let Some(job) = state.jobs.get_mut(id) {
         if *job.cancel.borrow() {
             job.public["state"] = json!("cancelled");
-            job.public.as_object_mut().unwrap().remove("result");
+            if let Some(public) = job.public.as_object_mut() {
+                public.remove("result");
+            }
         } else {
             match outcome {
                 Ok(result) => {
@@ -398,9 +405,9 @@ fn clean_namespace(project: &FsPath, data: &FsPath) -> Result<()> {
     }
     Ok(())
 }
-/// Recover only this library's abandoned PCM spools after store::init holds its exclusive lock.
-pub fn recover_spools() -> Result<()> {
-    clean_namespace(&root()?, &store::data_dir())
+/// Recover only this library's abandoned PCM spools after `store::init` holds its exclusive lock.
+pub(crate) fn recover_spools() -> Result<()> {
+    clean_namespace(&root()?, &store::data_dir()?)
 }
 async fn remove_spool(path: &FsPath) {
     let _ = tokio::fs::remove_dir_all(path).await;
@@ -410,7 +417,7 @@ async fn remove_spool(path: &FsPath) {
     }
 }
 fn spool(id: &str) -> Result<PathBuf> {
-    let namespace = spool_namespace(&root()?, &store::data_dir())?;
+    let namespace = spool_namespace(&root()?, &store::data_dir()?)?;
     std::fs::create_dir_all(&namespace)?;
     #[cfg(unix)]
     {
@@ -488,7 +495,8 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
     }
     let owner = manager();
     let mut cancellation = reserve(&owner, &id, &input.operation).await?;
-    let spool = match spool(&id) {
+    let spool_id = id.clone();
+    let spool = match store::blocking(move || spool(&spool_id)).await {
         Ok(path) => path,
         Err(error) => {
             finish(
@@ -510,14 +518,14 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
         let (available, detail) = runtime_available(&owner).await;
         if !available { return Err(ApiError::new(503, detail)); }
         if is_cancelled(&cancellation) { return Err(cancelled_error()); }
-        let cache = safe_cache(true)?;
-        if input.operation == "transcribe" && !qualified(&cache) { return Err(ApiError::new(409,"Download and qualify Large V3 in Models before transcribing.")); }
+        let transcribe = input.operation == "transcribe";
+        let cache = store::blocking(move || { let cache = safe_cache(true)?; if transcribe && !qualified(&cache) { return Err(ApiError::new(409,"Download and qualify Large V3 in Models before transcribing.")); } Ok(cache) }).await?;
         let audio = spool.join("audio.enc");
         let mut audio_secret = None;
         if input.operation == "transcribe" {
             let mut file = speech_spool::Writer::create(&audio).await?;
             let mut body = request.into_body().into_data_stream(); let mut bytes = 0usize;
-            while let Some(chunk) = tokio::select! { _ = cancellation.changed() => { return Err(cancelled_error()); }, value = timeout(Duration::from_secs(60), body.next()) => value.map_err(|_| ApiError::new(408,"The speech upload timed out. Retry the saved audio."))? } {
+            while let Some(chunk) = tokio::select! { _ = cancellation.changed() => { return Err(cancelled_error()); }, value = timeout(Duration::from_mins(1), body.next()) => value.map_err(|_| ApiError::new(408,"The speech upload timed out. Retry the saved audio."))? } {
                 let chunk = chunk.map_err(|_| ApiError::bad("The speech upload was interrupted. Retry the saved audio."))?;
                 bytes = bytes.checked_add(chunk.len()).ok_or_else(|| ApiError::new(413,"Native speech accepts recordings up to two hours."))?;
                 if bytes > MAX_PCM { return Err(ApiError::new(413,"Native speech accepts recordings up to two hours.")); }
@@ -528,12 +536,12 @@ async fn start(Query(input): Query<Start>, request: Request) -> Result<(StatusCo
         } else {
             let body = tokio::select! {
                 _ = cancellation.changed() => return Err(cancelled_error()),
-                body = timeout(Duration::from_secs(60), axum::body::to_bytes(request.into_body(), 0)) => body.map_err(|_| ApiError::new(408,"The model request timed out. Retry the download."))?.map_err(|_|ApiError::bad("A model download does not accept an audio body."))?,
+                body = timeout(Duration::from_mins(1), axum::body::to_bytes(request.into_body(), 0)) => body.map_err(|_| ApiError::new(408,"The model request timed out. Retry the download."))?.map_err(|_|ApiError::bad("A model download does not accept an audio body."))?,
             };
             if !body.is_empty() { return Err(ApiError::bad("A model download does not accept an audio body.")); }
         }
         if is_cancelled(&cancellation) { return Err(cancelled_error()); }
-        let cache = std::fs::canonicalize(cache)?;
+        let cache = store::blocking(move || Ok(std::fs::canonicalize(cache)?)).await?;
         let mut value = json!({"operation":input.operation,"cacheDir":cache,"language":language});
         if let Some((key, bytes)) = audio_secret {
             value["audioPath"] = json!(audio);
@@ -618,7 +626,7 @@ fn result(value: &Value, operation: &str) -> Result<Value> {
     };
     let words = value["words"]
         .as_array()
-        .filter(|words| words.len() <= 200000)
+        .filter(|words| words.len() <= 200_000)
         .ok_or_else(|| ApiError::new(502, "Native speech returned invalid word timestamps."))?;
     for word in words {
         let text = word["text"]
@@ -661,10 +669,10 @@ async fn run(
     let project = root()?;
     let mut command = Command::new("node");
     command
-        .arg(project.join("scripts/native-speech.mjs"))
+        .arg(project.join("scripts/native-speech.ts"))
         .arg("--stdin-request")
         .current_dir(&project)
-        .env("TMPDIR", crate::paths::get().runtime_dir);
+        .env("TMPDIR", crate::paths::get()?.runtime_dir);
     supervise_request(
         owner,
         id,
@@ -740,7 +748,7 @@ async fn supervise_request(
     });
     update(owner, id, json!({"state":"running"})).await;
     let mut reader = BufReader::new(stdout);
-    let outcome=timeout(Duration::from_secs(7200),async {
+    let outcome=timeout(Duration::from_hours(2),async {
         loop {
             let next=tokio::select! { _=cancellation.changed()=>return Err(cancelled_error()), value=line(&mut reader)=>value? };
             let Some(bytes)=next else { break; };
@@ -754,7 +762,7 @@ async fn supervise_request(
                     // The fixed helper flushes its terminal result and holds the lease;
                     // terminate and reap that owned process before publishing completion.
                     let _ = child.kill().await; let _ = child.wait().await;
-                    if operation == "download" && !safe_cache(false).is_ok_and(|path|qualified(&path)) { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
+                    if operation == "download" && !store::blocking(|| Ok(safe_cache(false).is_ok_and(|path|qualified(&path)))).await? { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
                     return Ok(completed);
                 },
                 Some("error") => return Err(ApiError::new(502,message["error"].as_str().filter(|s|s.len()<=4096).unwrap_or("Native speech failed. Saved audio is unchanged."))),
@@ -763,19 +771,18 @@ async fn supervise_request(
         }
         let status=tokio::select! { _=cancellation.changed()=>return Err(cancelled_error()), status=child.wait()=>status? };
         if !status.success() { return Err(ApiError::new(502,format!("Native speech stopped unexpectedly ({status}). Saved audio and earlier results are unchanged."))); }
-        if operation=="download" && !safe_cache(false).is_ok_and(|path|qualified(&path)) { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
+        if operation=="download" && !store::blocking(|| Ok(safe_cache(false).is_ok_and(|path|qualified(&path)))).await? { return Err(ApiError::new(502,"Large V3 did not complete its native execution check. Retry the download.")); }
         Err(ApiError::new(502,"Native speech stopped without a result. Retry the saved audio."))
     }).await.unwrap_or_else(|_|Err(ApiError::new(504,"Native speech exceeded its execution time limit. Saved audio is unchanged.")));
     if outcome.is_err() {
         let _ = child.kill().await;
         let _ = child.wait().await;
     }
-    let tail = match timeout(Duration::from_secs(1), &mut diagnostics).await {
-        Ok(Ok(bytes)) => bytes,
-        _ => {
-            diagnostics.abort();
-            Vec::new()
-        }
+    let tail = if let Ok(Ok(bytes)) = timeout(Duration::from_secs(1), &mut diagnostics).await {
+        bytes
+    } else {
+        diagnostics.abort();
+        Vec::new()
     };
     if outcome.is_err() {
         if !tail.is_empty() {
@@ -787,7 +794,7 @@ async fn supervise_request(
         }
         if operation == "download" {
             // An encoder probe followed by a teardown crash is not a qualified download.
-            if let Ok(cache) = safe_cache(false) {
+            if let Ok(cache) = store::blocking(|| safe_cache(false)).await {
                 let _ = tokio::fs::remove_file(cache.join("ready.json")).await;
             }
         }
@@ -820,12 +827,14 @@ async fn cancel(Path(id): Path<String>) -> Result<Json<Value>> {
         ) {
             let _ = job.cancel.send(true);
             job.public["state"] = json!("cancelled");
-            job.public.as_object_mut().unwrap().remove("result");
+            if let Some(public) = job.public.as_object_mut() {
+                public.remove("result");
+            }
         }
     }
     state
         .cancelled
-        .retain(|(old, at)| old != &id && at.elapsed() < Duration::from_secs(600));
+        .retain(|(old, at)| old != &id && at.elapsed() < Duration::from_mins(10));
     state.cancelled.push_back((id.clone(), Instant::now()));
     while state.cancelled.len() > TOMBSTONES {
         state.cancelled.pop_front();
@@ -841,15 +850,17 @@ async fn remove_model() -> Result<Json<Value>> {
             "Finish or cancel native speech before removing its model.",
         ));
     }
-    let cache = safe_cache(false)?;
-    if cache.exists() {
-        tokio::fs::remove_dir_all(cache).await?;
+    let cache = store::blocking(|| safe_cache(false)).await?;
+    match tokio::fs::remove_dir_all(cache).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     drop(state);
     Ok(Json(json!({"ok":true})))
 }
 /// Cancel owned helper and upload work before the HTTP server completes shutdown.
-pub async fn shutdown() {
+pub(crate) async fn shutdown() {
     let owner = manager();
     {
         let state = owner.state.lock().await;
@@ -871,6 +882,25 @@ pub async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_helper_requires_node_type_stripping() {
+        for (version, supported) in [
+            ("21.99.0", false),
+            ("22.17.9", false),
+            ("22.18.0", true),
+            ("22.19.0", true),
+            ("23.0.0", true),
+        ] {
+            let check =
+                NODE_VERSION_CHECK.replace("process.versions.node", &format!("'{version}'"));
+            let status = std::process::Command::new("node")
+                .args(["--input-type=module", "-e", &check])
+                .status()
+                .unwrap();
+            assert_eq!(status.success(), supported, "Node {version}");
+        }
+    }
+
     fn fixture() -> tempfile::TempDir {
         let root = FsPath::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -1152,7 +1182,7 @@ mod tests {
                 folder.path().join("ready.json"),
                 serde_json::to_vec(marker).unwrap(),
             )
-            .unwrap()
+            .unwrap();
         };
         write(&marker);
         assert!(qualified(folder.path()));

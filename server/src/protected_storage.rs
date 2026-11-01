@@ -54,7 +54,8 @@ impl LibraryKey {
             "x'{}'",
             self.0
                 .iter()
-                .map(|value| format!("{value:02x}"))
+                .flat_map(|byte| [byte >> 4, byte & 0x0f])
+                .map(|nibble| char::from(b"0123456789abcdef"[usize::from(nibble)]))
                 .collect::<String>()
         ))
     }
@@ -84,9 +85,8 @@ struct KeyReference {
 }
 
 /// Run before creating an OS key entry. Missing descriptors cannot authorize a
-/// replacement key while any encrypted library data remains, including optional
-/// ChatGPT state after partial loss of the database and key reference.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+/// replacement key while any encrypted data remains in active library areas.
+#[cfg(target_os = "macos")]
 fn preflight_new_library_key(root: &Path) -> Result<()> {
     let database = root.join("workspace.sqlite");
     if database.exists() {
@@ -99,8 +99,8 @@ fn preflight_new_library_key(root: &Path) -> Result<()> {
     if root.join("recovery.json").exists() || root.join(".workspace-encrypted.sqlite").exists() {
         return Err(key_error());
     }
-    for area in ["audio", "extension-pcm", "credentials", "bot", "chatgpt"] {
-        if contains_encrypted_file(&root.join(area))? {
+    for area in ["audio", "extension-pcm", "credentials"] {
+        if contains_encrypted_file(&root.join(area), area == "credentials")? {
             return Err(key_error());
         }
     }
@@ -126,15 +126,22 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
     if std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some() {
         return Err(key_error());
     }
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        if reference.exists() && fs::symlink_metadata(&reference)?.file_type().is_symlink() {
-            return Err(key_error());
+        if fs::symlink_metadata(&reference).is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("Symbolic link in key descriptor: {}", reference.display()),
+            ));
         }
         let existing = match fs::read(&reference) {
-            Ok(bytes) => {
-                Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|_| key_error())?)
-            }
+            Ok(bytes) => Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid key descriptor: {e}"),
+                )
+            })?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
         };
@@ -143,8 +150,12 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
                 return Err(key_error());
             }
             let entry = keyring::Entry::new("com.echo.voice.library", &existing.key_id)
-                .map_err(|_| key_error())?;
-            let password = Zeroizing::new(entry.get_password().map_err(|_| key_error())?);
+                .map_err(|e| std::io::Error::other(format!("Keychain entry: {e}")))?;
+            let password = Zeroizing::new(
+                entry
+                    .get_password()
+                    .map_err(|e| std::io::Error::other(format!("Keychain read: {e}")))?,
+            );
             let decoded = Zeroizing::new(
                 STANDARD
                     .decode(password.as_bytes())
@@ -157,13 +168,19 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
         // new unrelated key. New or plaintext libraries may be migrated later.
         preflight_new_library_key(root)?;
         let key_id = uuid::Uuid::new_v4().to_string();
-        let entry =
-            keyring::Entry::new("com.echo.voice.library", &key_id).map_err(|_| key_error())?;
+        let entry = keyring::Entry::new("com.echo.voice.library", &key_id)
+            .map_err(|e| std::io::Error::other(format!("Keychain entry: {e}")))?;
         let mut bytes = Zeroizing::new([0u8; 32]);
         OsRng.fill_bytes(bytes.as_mut());
         let encoded = Zeroizing::new(STANDARD.encode(bytes.as_ref()));
-        entry.set_password(&encoded).map_err(|_| key_error())?;
-        let confirmed = Zeroizing::new(entry.get_password().map_err(|_| key_error())?);
+        entry
+            .set_password(&encoded)
+            .map_err(|e| std::io::Error::other(format!("Keychain write: {e}")))?;
+        let confirmed = Zeroizing::new(
+            entry
+                .get_password()
+                .map_err(|e| std::io::Error::other(format!("Keychain read: {e}")))?,
+        );
         if confirmed.as_str() != encoded.as_str() {
             return Err(key_error());
         }
@@ -188,7 +205,7 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
         saved?;
         Ok(LibraryKey::from_bytes(*bytes))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = reference;
         Err(key_error())
@@ -216,16 +233,19 @@ pub(crate) fn restore_library_key(root: &Path, master: &[u8; 32]) -> Result<()> 
     if std::env::var_os("ECHO_TEST_STORAGE_KEY").is_some() {
         return Err(key_error());
     }
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
         let path = root.join("protection.json");
         if path.exists() && fs::symlink_metadata(&path)?.file_type().is_symlink() {
             return Err(key_error());
         }
         let existing = match fs::read(&path) {
-            Ok(bytes) => {
-                Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|_| key_error())?)
-            }
+            Ok(bytes) => Some(serde_json::from_slice::<KeyReference>(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid key descriptor: {e}"),
+                )
+            })?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
@@ -240,8 +260,14 @@ pub(crate) fn restore_library_key(root: &Path, master: &[u8; 32]) -> Result<()> 
         let entry = keyring::Entry::new("com.echo.voice.library", &reference.key_id)
             .map_err(|_| key_error())?;
         let encoded = Zeroizing::new(STANDARD.encode(master));
-        entry.set_password(&encoded).map_err(|_| key_error())?;
-        let confirmed = Zeroizing::new(entry.get_password().map_err(|_| key_error())?);
+        entry
+            .set_password(&encoded)
+            .map_err(|e| std::io::Error::other(format!("Keychain write: {e}")))?;
+        let confirmed = Zeroizing::new(
+            entry
+                .get_password()
+                .map_err(|e| std::io::Error::other(format!("Keychain read: {e}")))?,
+        );
         if confirmed.as_str() != encoded.as_str() {
             return Err(key_error());
         }
@@ -265,27 +291,47 @@ pub(crate) fn restore_library_key(root: &Path, master: &[u8; 32]) -> Result<()> 
         }
         Ok(())
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = (root, master);
         Err(key_error())
     }
 }
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn contains_encrypted_file(directory: &Path) -> Result<bool> {
-    if !directory.exists() {
-        return Ok(false);
-    }
-    if fs::symlink_metadata(directory)?.file_type().is_symlink() {
-        return Err(key_error());
+#[cfg(target_os = "macos")]
+fn contains_encrypted_file(directory: &Path, credentials_root: bool) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("Symbolic link in protected data: {}", directory.display()),
+        ));
     }
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         if entry.file_type()?.is_symlink() {
-            return Err(key_error());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "Symbolic link in protected data: {}",
+                    entry.path().display()
+                ),
+            ));
+        }
+        if credentials_root
+            && matches!(
+                entry.file_name().to_str(),
+                Some("runner-token" | "runner-token.lock")
+            )
+            && entry.file_type()?.is_file()
+        {
+            continue;
         }
         if entry.file_type()?.is_dir() {
-            if contains_encrypted_file(&entry.path())? {
+            if contains_encrypted_file(&entry.path(), false)? {
                 return Ok(true);
             }
         } else if entry.file_type()?.is_file() && is_encrypted(&entry.path())? {
@@ -400,7 +446,8 @@ impl Reader {
         while offset < end {
             let index = offset / BLOCK as u64;
             let block_start = index * BLOCK as u64;
-            let block_length = (self.len - block_start).min(BLOCK as u64) as usize;
+            let block_length = usize::try_from((self.len - block_start).min(BLOCK as u64))
+                .map_err(|_| invalid())?;
             self.file.seek(SeekFrom::Start(
                 HEADER_BYTES as u64 + index * (BLOCK as u64 + 16),
             ))?;
@@ -417,19 +464,20 @@ impl Reader {
                     )
                     .map_err(|_| invalid())?,
             );
-            let from = (offset - block_start) as usize;
-            let count = (end - offset).min((block_length - from) as u64) as usize;
+            let from = usize::try_from(offset - block_start).map_err(|_| invalid())?;
+            let count = usize::try_from((end - offset).min((block_length - from) as u64))
+                .map_err(|_| invalid())?;
             output.extend_from_slice(&plaintext[from..from + count]);
             offset += count as u64;
         }
         Ok(output)
     }
     pub(crate) fn read_all(&mut self) -> Result<Vec<u8>> {
-        let mut output = Vec::with_capacity(self.len as usize);
-        while output.len() < (self.len as usize) {
+        let length = usize::try_from(self.len).map_err(|_| invalid())?;
+        let mut output = Vec::with_capacity(length);
+        while output.len() < length {
             let start = output.len() as u64;
-            output
-                .extend(self.read_range(start, (self.len - start).min(8 * 1024 * 1024) as usize)?);
+            output.extend(self.read_range(start, (length - output.len()).min(8 * 1024 * 1024))?);
         }
         Ok(output)
     }
@@ -453,7 +501,7 @@ mod tests {
         std::env::remove_var("ECHO_DATA_DIR");
     }
     fn fixture() -> tempfile::TempDir {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
             .join("tmp");
@@ -464,52 +512,58 @@ mod tests {
             .unwrap()
     }
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    fn missing_key_reference_rejects_chatgpt_remnants_before_key_or_database_creation() {
-        for relative in ["chatgpt/auth.json", "chatgpt/sessions/history.jsonl"] {
+    #[cfg(target_os = "macos")]
+    fn missing_key_reference_rejects_encrypted_active_areas() {
+        for area in ["audio", "extension-pcm", "credentials"] {
             let dir = fixture();
-            let root = dir.path();
-            // This is the exact guard invoked before Entry::new/set_password.
-            // Calling it directly never reaches an OS credential provider.
-            preflight_new_library_key(root).unwrap();
-            let path = root.join(relative);
+            let path = dir.path().join(area).join("nested/state");
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             let key = LibraryKey::from_bytes([31; 32]);
-            write_file(&key, &path, "synthetic-chatgpt-state", b"synthetic state").unwrap();
+            write_file(&key, &path, "synthetic-state", b"synthetic state").unwrap();
             let before = fs::read(&path).unwrap();
-            let error = preflight_new_library_key(root).unwrap_err();
-            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            assert_eq!(
+                preflight_new_library_key(dir.path()).unwrap_err().kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
             assert_eq!(fs::read(&path).unwrap(), before);
-            assert!(!root.join("protection.json").exists());
-            assert!(!root.join("workspace.sqlite").exists());
-            // A remaining plaintext database must not bypass the same guard.
-            let database = root.join("workspace.sqlite");
-            fs::write(&database, b"SQLite format 3\0synthetic legacy database").unwrap();
-            let database_before = fs::read(&database).unwrap();
-            assert!(preflight_new_library_key(root).is_err());
-            assert_eq!(fs::read(&database).unwrap(), database_before);
-            assert_eq!(fs::read(&path).unwrap(), before);
-            assert!(!root.join("protection.json").exists());
+            assert!(!dir.path().join("protection.json").exists());
+            assert!(!dir.path().join("workspace.sqlite").exists());
         }
     }
 
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    fn preflight_allows_only_unprotected_chatgpt_state_for_legacy_migration() {
+    #[cfg(target_os = "macos")]
+    fn legacy_chatgpt_state_is_ignored_before_key_creation() {
         let dir = fixture();
         let path = dir.path().join("chatgpt/auth.json");
         fs::create_dir(path.parent().unwrap()).unwrap();
-        fs::write(&path, b"{\"fixture\":true}").unwrap();
+        let key = LibraryKey::from_bytes([31; 32]);
+        write_file(&key, &path, "legacy-state", b"synthetic state").unwrap();
+        let encrypted = fs::read(&path).unwrap();
+        for bytes in [encrypted, b"legacy plaintext".to_vec()] {
+            fs::write(&path, &bytes).unwrap();
+            preflight_new_library_key(dir.path()).unwrap();
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+            assert!(!dir.path().join("protection.json").exists());
+            assert!(!dir.path().join("workspace.sqlite").exists());
+        }
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink("missing-legacy-state", &path).unwrap();
         preflight_new_library_key(dir.path()).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"{\"fixture\":true}");
-        assert!(!dir.path().join("protection.json").exists());
-        assert!(!dir.path().join("workspace.sqlite").exists());
+        for area in ["audio", "extension-pcm", "credentials"] {
+            let active = dir.path().join(area);
+            std::os::unix::fs::symlink("missing-sensitive-state", &active).unwrap();
+            assert!(preflight_new_library_key(dir.path()).is_err());
+            fs::remove_file(active).unwrap();
+        }
     }
     #[test]
     fn ranges_and_empty_files_are_authenticated() {
         let dir = fixture();
         let key = LibraryKey::from_bytes([7; 32]);
-        let data: Vec<_> = (0..BLOCK * 3 + 12).map(|i| (i % 251) as u8).collect();
+        let data: Vec<_> = (0..BLOCK * 3 + 12)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
         let path = dir.path().join("audio");
         write_file(&key, &path, "audio:recording-1:part-1", &data).unwrap();
         let mut reader = Reader::open(&key, &path, "audio:recording-1:part-1").unwrap();

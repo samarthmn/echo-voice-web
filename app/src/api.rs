@@ -21,16 +21,21 @@ async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value,
     let status = response.status();
     let value = response.json::<Value>().await;
     if !(200..300).contains(&status) {
+        if path == "/extensions/intent" && status == 404 {
+            return Err("Update Echo to connect your browser extension.".into());
+        }
         return Err(value
             .as_ref()
             .ok()
             .and_then(|v| v["error"].as_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                format!(
+            .map_or_else(
+                || {
+                    format!(
                     "The server could not complete this request (HTTP {status}). Please try again."
                 )
-            }));
+                },
+                str::to_owned,
+            ));
     }
     let value = value.map_err(|_| "The server returned an unreadable response.".to_string())?;
     Ok(value)
@@ -56,6 +61,11 @@ pub fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or_default().to_string()
 }
 /// Format nonnegative audio seconds as minutes and seconds.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Display seconds are clamped nonnegative and intentionally truncated; float casts saturate at u64 bounds."
+)]
 pub fn time(seconds: f64) -> String {
     let n = seconds.max(0.) as u64;
     format!("{}:{:02}", n / 60, n % 60)
@@ -75,22 +85,28 @@ pub fn local_date(value: &str) -> String {
     )
 }
 
-/// Render stored UTC timestamps with the browser's calendar time and UTC offset.
+/// Display timestamps in the browser's local time.
 pub fn local_date_time(value: &str) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
     if !date.get_time().is_finite() {
         return value.to_string();
     }
-    let offset = -date.get_timezone_offset() as i32;
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let hours = date.get_hours();
     format!(
-        "{} · {:02}:{:02}:{:02} UTC{}{:02}:{:02}",
-        local_date(value),
-        date.get_hours(),
+        "{} {} {}, {}:{:02} {}",
+        date.get_date(),
+        months[date.get_month() as usize],
+        date.get_full_year(),
+        if hours.is_multiple_of(12) {
+            12
+        } else {
+            hours % 12
+        },
         date.get_minutes(),
-        date.get_seconds(),
-        if offset >= 0 { "+" } else { "−" },
-        offset.abs() / 60,
-        offset.abs() % 60
+        if hours < 12 { "AM" } else { "PM" }
     )
 }
 /// Format a finite nonnegative byte count for storage and recording displays.
@@ -98,12 +114,12 @@ pub fn bytes(n: f64) -> String {
     let n = if n.is_finite() && n > 0. { n } else { 0. };
     if n < 1024. {
         format!("{n:.0} B")
-    } else if n < 1048576. {
+    } else if n < 1_048_576. {
         format!("{:.1} KB", n / 1024.)
-    } else if n < 1073741824. {
-        format!("{:.1} MB", n / 1048576.)
+    } else if n < 1_073_741_824. {
+        format!("{:.1} MB", n / 1_048_576.)
     } else {
-        format!("{:.1} GB", n / 1073741824.)
+        format!("{:.1} GB", n / 1_073_741_824.)
     }
 }
 
@@ -111,7 +127,7 @@ pub fn bytes(n: f64) -> String {
 /// the JSON bridge, and preserve actionable browser errors as plain text.
 pub async fn evaluate(script: &str) -> Result<Value, String> {
     let source = format!(
-        r#"try {{ const value = await (async () => {{ {script} }})(); return {{ok:true,value:value === undefined ? null : value}}; }} catch(error) {{ return {{ok:false,error:error?.message || String(error)}}; }}"#
+        r"try {{ const value = await (async () => {{ {script} }})(); return {{ok:true,value:value === undefined ? null : value}}; }} catch(error) {{ return {{ok:false,error:error?.message || String(error)}}; }}"
     );
     let result = dioxus::document::eval(&source)
         .await

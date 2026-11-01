@@ -1,0 +1,19 @@
+// Referenced projects emit declarations into node_modules/.cache/tsbuild.
+// TS 6 and TS 7 require declarations for cross-project imports; no JS is emitted.
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./web"
+    },
+    {
+      "path": "./extension"
+    },
+    {
+      "path": "./scripts"
+    },
+    {
+      "path": "./tests"
+    }
+  ]
+}
