@@ -26,18 +26,18 @@
     "lint:md": "markdownlint-cli2"
   },
   "dependencies": {
-    "@huggingface/transformers": "3.8.1",
-    "@scure/bip39": "2.2.0",
-    "onnxruntime-node": "1.21.0",
-    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4"
+    "@huggingface/transformers": "4.3.2",
+    "@scure/bip39": "2.4.0",
+    "onnxruntime-node": "1.31.1",
+    "onnxruntime-web": "1.31.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "10.0.1",
     "@playwright/test": "^1.55.0",
     "@types/chrome": "0.3.7",
-    "@types/node": "22.18.0",
-    "esbuild": "^0.25.0",
+    "@types/node": "26.6.6",
+    "esbuild": "^0.28.2",
     "eslint": "10.14.0",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.13.0",
@@ -45,10 +45,10 @@
     "knip": "6.44.0",
     "lucide-static": "1.66.0",
     "markdownlint-cli2": "0.24.0",
-    "prettier": "3.6.2",
+    "prettier": "3.9.10",
     "stylelint": "17.16.0",
     "stylelint-config-standard": "40.0.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "typescript-eslint": "8.72.1",
     "typescript-native": "npm:typescript@7.0.2"
   },
