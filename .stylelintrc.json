@@ -7,14 +7,7 @@
     "no-descending-specificity": null,
     "no-duplicate-selectors": null
   },
-  "overrides": [
-    {
-      "files": [
-        "public/design-tokens.css"
-      ],
-      "rules": {
-        "color-no-hex": null
-      }
-    }
+  "ignoreFiles": [
+    "public/tokens.css"
   ]
 }

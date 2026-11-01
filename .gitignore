@@ -6,6 +6,7 @@
 /public/assets/
 /public/js/
 /public/wasm/
+/public/tokens.css
 /.echo-data/
 /.echo-dev-data/
 .env*

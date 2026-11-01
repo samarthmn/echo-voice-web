@@ -60,7 +60,7 @@
 .settings-tabs button.is-active::after {
   content: '';
   height: 2px;
-  background: var(--accent, var(--accent-fallback));
+  background: var(--color-accent);
   position: absolute;
   bottom: 0;
   left: 0;
@@ -89,7 +89,7 @@
   background: var(--surface);
   padding: 25px 27px;
   margin-bottom: 20px;
-  box-shadow: 0 2px 5px var(--shadow-settings-tab);
+  box-shadow: var(--shadow-sm);
 }
 .settings-card-heading {
   display: flex;
@@ -212,11 +212,11 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  box-shadow: 0 1px 3px var(--shadow-toggle);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.2s;
 }
 .settings-switch[aria-checked='true'] {
-  background: var(--accent, var(--accent-fallback));
+  background: var(--color-accent);
 }
 .settings-switch[aria-checked='true'] span {
   transform: translateX(14px);
@@ -302,13 +302,13 @@
     transform 0.15s;
 }
 .settings-page .button-primary {
-  background: var(--accent, var(--accent-fallback));
-  border: 1px solid var(--accent, var(--accent));
-  color: white;
-  box-shadow: 0 2px 3px var(--shadow-settings-primary);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  color: var(--color-on-accent);
+  box-shadow: var(--shadow-sm);
 }
 .settings-page .button-primary:hover:not(:disabled) {
-  background: var(--settings-primary-hover);
+  background: var(--color-accent-hover);
   transform: translateY(-1px);
 }
 .settings-page .button-secondary {
@@ -587,7 +587,7 @@
   min-width: 5px;
   height: 100%;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--settings-banner-start), var(--purple-soft));
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-pressed));
 }
 .settings-storage-legend {
   display: flex;
@@ -1125,7 +1125,7 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 4px 20px var(--shadow-settings-save);
+  box-shadow: var(--shadow-lg);
 }
 .settings-save-actions {
   display: flex;

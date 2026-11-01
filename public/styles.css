@@ -1,4 +1,43 @@
-@import url('/fonts/inter.css');
+/* Organic tokens come from the generated /tokens.css (scripts/build-tokens.ts).
+   Legacy names below are a temporary bridge: Phase 4 rewrites the app CSS on
+   the Organic names and removes them. */
+:root {
+  --ink: var(--color-text);
+  --muted: var(--color-text-muted);
+  --accent: var(--color-accent);
+  --accent-dark: var(--color-accent-hover);
+  --accent-text: var(--color-accent-text);
+  --line: var(--color-divider);
+  --canvas: var(--color-bg);
+  --surface: var(--color-surface);
+  --surface-alt: var(--color-surface-alt);
+  --purple-soft: var(--color-accent-soft);
+  --on-accent: var(--color-on-accent);
+  --focus: var(--color-focus);
+  --success: var(--color-success);
+  --success-soft: var(--color-success-soft);
+  --warning: var(--color-warning);
+  --warning-soft: var(--color-warning-soft);
+  --danger: var(--color-danger);
+  --danger-fill: var(--color-danger);
+  --danger-soft: var(--color-danger-soft);
+  --info: var(--color-info);
+  --info-soft: var(--color-info-soft);
+  --sidebar: 245px;
+
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-synthesis: none;
+}
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+}
 * {
   box-sizing: border-box;
 }
@@ -149,8 +188,8 @@ button:hover:not(:disabled) {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  box-shadow: 0 3px 5px var(--shadow-brand-mark);
-  color: white;
+  box-shadow: var(--shadow-sm);
+  color: var(--color-on-accent);
   font-size: 24px;
   font-weight: 600;
 }
@@ -310,9 +349,9 @@ button:hover:not(:disabled) {
 }
 .button-primary {
   background: var(--accent);
-  color: white;
+  color: var(--color-on-accent);
   border-color: var(--accent);
-  box-shadow: 0 2px 4px var(--shadow-primary-button);
+  box-shadow: var(--shadow-sm);
 }
 .button-primary:hover:not(:disabled) {
   background: var(--accent-dark);
@@ -321,7 +360,7 @@ button:hover:not(:disabled) {
   border-color: var(--line);
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 1px 2px var(--shadow-secondary-button);
+  box-shadow: var(--shadow-sm);
 }
 .button-ghost {
   color: var(--muted);
@@ -408,7 +447,7 @@ button:hover:not(:disabled) {
 }
 .quick-action:hover {
   border-color: var(--line);
-  box-shadow: 0 4px 14px var(--shadow-quick-action);
+  box-shadow: var(--shadow-md);
 }
 .quick-icon {
   width: 38px;
@@ -662,7 +701,7 @@ button:hover:not(:disabled) {
 }
 .meeting-card:hover {
   border-color: var(--line);
-  box-shadow: 0 6px 18px var(--shadow-model-download);
+  box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
 .meeting-card-top {
@@ -802,7 +841,7 @@ button:hover:not(:disabled) {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: var(--dialog-backdrop);
+  background: var(--color-backdrop);
   backdrop-filter: blur(5px);
   display: flex;
   align-items: center;
@@ -814,7 +853,7 @@ button:hover:not(:disabled) {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 16px;
-  box-shadow: 0 25px 100px var(--shadow-dialog);
+  box-shadow: var(--shadow-lg);
   width: 100%;
   max-width: 500px;
   max-height: calc(100dvh - 44px);
@@ -987,7 +1026,7 @@ button:hover:not(:disabled) {
   gap: 11px;
   background: var(--surface);
   border: 1px solid var(--line);
-  box-shadow: 0 8px 40px var(--shadow-toast);
+  box-shadow: var(--shadow-lg);
   border-radius: 10px;
   padding: 12px 13px 12px 17px;
   max-width: min(480px, calc(100vw - 30px));
@@ -1016,7 +1055,7 @@ button:hover:not(:disabled) {
   gap: 16px;
   background: var(--surface);
   border-top: 1px solid var(--line);
-  box-shadow: 0 -5px 24px var(--shadow-recorder);
+  box-shadow: var(--shadow-md);
   padding: 19px 30px;
   flex-wrap: wrap;
 }
@@ -1042,7 +1081,7 @@ button:hover:not(:disabled) {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--record-dot);
+  background: var(--color-accent);
   display: block;
   flex-shrink: 0;
 }
@@ -1069,7 +1108,7 @@ button:hover:not(:disabled) {
   transition: background 0.1s;
 }
 .recorder-level .lit {
-  background: var(--recorder-level-lit);
+  background: var(--color-accent-2);
 }
 .button-record-stop {
   background: var(--surface-alt);
@@ -1092,7 +1131,7 @@ button:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 10px;
-  box-shadow: 0 6px 20px var(--shadow-recorder-error);
+  box-shadow: var(--shadow-md);
   z-index: 50;
   font-size: 11px;
   color: var(--accent-text);
@@ -1109,7 +1148,7 @@ button:hover:not(:disabled) {
 }
 .model-selected {
   border-color: var(--line);
-  box-shadow: 0 0 0 1px var(--recorder-select-ring);
+  box-shadow: 0 0 0 1px var(--color-divider);
 }
 .model-card-top {
   display: flex;
@@ -1172,7 +1211,7 @@ button:hover:not(:disabled) {
   flex-shrink: 0;
 }
 .connection-dot.ready {
-  background: var(--privacy-status-dot);
+  background: var(--color-accent-2);
 }
 .model-card-actions {
   display: flex;
@@ -1614,7 +1653,7 @@ button:hover:not(:disabled) {
     position: fixed;
     inset: 0;
     z-index: 29;
-    background: var(--mobile-menu-backdrop);
+    background: var(--color-backdrop);
     backdrop-filter: blur(3px);
   }
   .main-shell {
@@ -1932,10 +1971,7 @@ button:hover:not(:disabled) {
   }
 }
 
-/* Shared, contrast-checked supporting text and interaction sizes. */
-:root {
-  --muted: var(--supporting-text);
-}
+/* Shared interaction sizes. */
 .skip-link {
   top: 10px;
   opacity: 0;
@@ -2132,7 +2168,7 @@ button:hover:not(:disabled) {
 }
 .upload-progress {
   padding: 15px 18px;
-  box-shadow: 0 6px 24px var(--shadow-toast-error);
+  box-shadow: var(--shadow-md);
   min-width: 270px;
 }
 .upload-progress > div {
@@ -2342,7 +2378,7 @@ button:hover:not(:disabled) {
   color: var(--ink);
 }
 .extension-approval-dialog::backdrop {
-  background: rgb(0 0 0 / 50%);
+  background: var(--color-backdrop);
 }
 .extension-approval-dialog p {
   margin: 14px 0;

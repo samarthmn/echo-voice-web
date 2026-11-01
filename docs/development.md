@@ -62,13 +62,13 @@ pnpm typecheck:compat       # TypeScript 6.0.3 compatibility build
 
 ESLint uses `eslint.config.ts` with the recommended JavaScript rules, strict and stylistic type-checked TypeScript rules, and Prettier compatibility. It lints browser, extension, script and test TypeScript plus the config itself, using each project’s TypeScript types. It runs in `check.sh --lint` and CI.
 
-Stylelint extends `stylelint-config-standard` in `.stylelintrc.json`. Raw hex colors are banned except in `public/design-tokens.css`; `public/theme.css` consumes tokens and has no exception. Fixed colors use fixed-value tokens so extracting them preserves both themes. Pixel units remain allowed until the Phase 3 spacing work. Exceptions are documented here because JSON has no comments:
+Stylelint extends `stylelint-config-standard` in `.stylelintrc.json`. Raw hex colors are banned in app and extension CSS: colours come from the design tokens. The generated `public/tokens.css` is ignored. Pixel units remain allowed until the Phase 4 restyle. Exceptions are documented here because JSON has no comments:
 
 - `// rule-empty-line-before: null` keeps the existing compact spacing between CSS rules; Prettier owns public CSS formatting.
 - `// declaration-block-single-line-max-declarations: null` preserves the extension's compact CSS blocks.
 - `// no-descending-specificity: null` preserves the existing ordered component, theme and responsive overrides.
 - `// no-duplicate-selectors: null` preserves repeated selectors that layer later overrides without moving declarations in the cascade.
-- `// color-no-hex: null` applies only to `public/design-tokens.css`, the shared color definitions.
+- `// ignoreFiles: public/tokens.css` skips the generated token file, which legitimately holds hex values.
 
 Three local Stylelint exceptions retain existing behavior, each with a reason beside the declaration: `property-no-deprecated` for the screen-reader-only `clip` fallback in `public/review.css`, `property-no-vendor-prefix` for the WebKit `appearance` fallback, and `declaration-property-value-keyword-no-deprecated` for emergency `word-break: break-word` wrapping in `public/theme.css`.
 
@@ -77,6 +77,18 @@ Markdownlint uses `.markdownlint-cli2.jsonc` for root `*.md` and `docs/**/*.md`,
 Use Node.js 22.18 or newer, which runs `.ts` files through built-in type stripping. Browser, extension, script, and test projects extend `tsconfig.base.json`; relative TypeScript imports include `.ts`. TypeScript 6.0.3 provides the JavaScript API for editors and tooling, while `typescript-native` pins 7.0.2 for `pnpm typecheck`; `pnpm typecheck:compat` checks compiler drift. Both scripts use explicit compiler paths because both packages publish a `tsc` binary. Both compilers require declarations for cross-project references, so solution builds emit declarations and build metadata under `node_modules/.cache/tsbuild/`; esbuild owns JavaScript assets.
 
 Tests are grouped into `tests/unit/`, `tests/integration/`, and `tests/e2e/`, with shared fixtures in `tests/helpers/`. Run one unit test with `node --test tests/unit/foo.test.ts`. Integration files run serially to isolate server and extension fixtures; `scripts/test-browser.ts` preserves the browser suite's defined order. Scripts and tests execute directly as TypeScript; generated browser bundle names remain unchanged.
+
+## Design tokens, fonts and icons
+
+The look comes from the Organic design system in `design-system/`. `design-system/styles.css` is the single source of design tokens: colour ramps, semantic roles (`--color-text-muted`, `--color-accent-text`, `--color-on-accent`, status pairs and so on), type, spacing, radii and shadows, for the light theme in `:root` and Organic dark in `[data-theme='dark']`.
+
+`scripts/build-tokens.ts` (`pnpm build:tokens`) extracts those two blocks and writes `tokens.css`: the self-hosted `@font-face` rules, the light tokens, the dark tokens, and the dark tokens again under `prefers-color-scheme: dark` unless the page sets `data-theme='light'`. `pnpm build:assets` writes `public/tokens.css` and `pnpm build:extension` writes the extension's copy. Both are build outputs and are not committed. To change a colour, edit `design-system/styles.css` (and `theme.json`/`readme.md` if a role changes), then rebuild.
+
+`tests/unit/contrast.test.ts` reads the same source and asserts WCAG AA (4.5:1 for text, 3:1 for focus rings and accent fills) for every text/ground pairing the UI uses, in both themes. Add a pair there when you introduce a new combination.
+
+Fonts are self-hosted in `public/fonts/`: Caprasimo for headings and Figtree for body text, both under the SIL OFL. `public/fonts/README.md` records the pinned source and how to update them. Nothing loads from a font CDN.
+
+Icons are [Lucide](https://lucide.dev) at stroke width 2.75. `scripts/build-icons.ts` (`pnpm build:icons`) reads the pinned `lucide-static` devDependency and generates `app/src/icons.rs`, which maps the app's icon names (`Icon { name: "mic" }`) to Lucide markup. To add an icon, add a line to the name map in the script and rerun it. `check.sh --lint` fails (`icons-fresh`) if the generated file is stale.
 
 ## Building and packaging the extension
 

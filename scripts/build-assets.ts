@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { mkdir } from 'node:fs/promises';
 import { writeAssetManifest } from './asset-manifest.ts';
+import { writeTokens } from './build-tokens.ts';
 import './copy-wasm.ts';
 await mkdir('public/js', { recursive: true });
 await build({
@@ -15,4 +16,5 @@ await build({
   loader: { '.wasm': 'file' },
   define: { 'process.env.NODE_ENV': '"production"' },
 });
+await writeTokens('public/tokens.css', '/fonts/');
 await writeAssetManifest();

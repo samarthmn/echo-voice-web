@@ -1,5 +1,6 @@
 import type * as TestModule from '@playwright/test';
 import { defined } from '../helpers/assertions.ts';
+import { FONT_FILES, writeTokens } from '../../scripts/build-tokens.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
@@ -25,12 +26,9 @@ void test('popup has an intrinsic width, reachable controls at zoom, and respons
       await writeFile(path.join(scratch, name), html);
     }
     await cp(path.join(project, 'extension/ui.css'), path.join(scratch, 'ui.css'));
-    await cp(
-      path.join(project, 'public/design-tokens.css'),
-      path.join(scratch, 'design-tokens.css'),
-    );
+    await writeTokens(path.join(scratch, 'tokens.css'), 'fonts/');
     await cp(path.join(project, 'public/favicon.svg'), path.join(scratch, 'icons/echo.svg'));
-    for (const name of ['inter-400.woff2', 'inter-500.woff2', 'inter-600.woff2'])
+    for (const name of FONT_FILES)
       await cp(path.join(project, 'public/fonts', name), path.join(scratch, 'fonts', name));
     const executablePath =
       process.env['CHROMIUM_PATH'] ||

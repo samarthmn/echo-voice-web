@@ -6,6 +6,7 @@
 mod api;
 mod calendar;
 mod extension;
+mod icons;
 use extension::ExtensionRecordingStatus;
 mod models;
 mod notes_model;
@@ -183,34 +184,8 @@ fn main() {
 }
 
 #[component]
-/// Render one of the workspace's inline vector icons at the requested size.
+/// Render one of the workspace's Lucide icons (see `icons.rs`) at the requested size.
 pub fn Icon(name: String, #[props(default = 18)] size: u32) -> Element {
-    let path = match name.as_str() {
-        "home" => "m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z",
-        "mic" => "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8",
-        "calendar" => "M8 2v4m8-4v4M3 10h18M4 4h16a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm4 10h2m4 0h2m-8 3h2",
-        "clock" => "M12 7v5l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z",
-        "check" => "m5 12 4 4L19 6", "plus" => "M12 5v14M5 12h14", "search" => "m21 21-4.3-4.3M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0Z",
-        "close"|"x" => "m6 6 12 12M6 18 18 6", "arrow"=>"M7 17 17 7M7 7h10v10", "arrow-right"=>"M4 12h16m-6-6 6 6-6 6", "arrow-left"=>"M20 12H4m6-6-6 6 6 6", "chevron"=>"m9 5 7 7-7 7", "chevron-down"=>"m6 9 6 6 6-6",
-        "shield"|"lock" => "m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Zm-4 9 3 3 5-6",
-        "file"|"book"|"folder" => "M14 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9ZM14 2v7h7M7 13h10M7 17h7",
-        "library" => "M4 3v18M8 3v18m4-18 5 18M19 3v18", "upload"=>"M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5", "download"=>"M12 3v13m-5-5 5 5 5-5M4 15v5h16v-5",
-        "play" => "m7 4 14 8-14 8Z", "pause"=>"M8 4v16M16 4v16", "stop"=>"M5 5h14v14H5Z", "more"=>"M5 12h.01M12 12h.01M19 12h.01",
-        "sparkles"=>"m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5ZM20 2v4m-2-2h4",
-        "cpu"|"hard-drive"=>"M6 6h12v12H6ZM9 9h6v6H9ZM9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4",
-        "bookmark"=>"M6 3h12v18l-6-4-6 4Z", "trash"=>"M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7",
-        "settings"=>"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM9 2h6l1 4 4 1 2 5-3 3v4l-5 3-3-3H7l-4-4 1-4-2-3 3-5Z",
-        "help"|"info"=>"M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4m.1 3h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z",
-        "refresh"|"loader"=>"M20 7v5h-5M4 17v-5h5m-4-4a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3",
-        "volume"=>"m11 5-6 4H2v6h3l6 4Zm4 3a5 5 0 0 1 0 8m3-11a9 9 0 0 1 0 14",
-        "mute"=>"m11 5-6 4H2v6h3l6 4Zm5 4 5 6m-5 0 5-6",
-        "edit"=>"m16 3 5 5-13 13H3v-5Zm-2 2 5 5", "users"=>"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm5-3a4 4 0 0 1 0 8m4 9v-2a4 4 0 0 0-3-4",
-        "link"=>"m10 13 4-4m-7 7-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m4 1 2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0",
-        "sun"=>"M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M5.6 18.4 7 17m10-10 1.4-1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
-        "moon"=>"M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z",
-        "menu"=>"M4 6h16M4 12h16M4 18h16", "alert"=>"m12 3 10 18H2Zm0 6v5m0 3h.01", "video"=>"M3 5h12v14H3Zm12 5 7-4v12l-7-4",
-        _ => "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
-    };
     rsx! {
         svg {
             width: "{size}",
@@ -218,11 +193,12 @@ pub fn Icon(name: String, #[props(default = 18)] size: u32) -> Element {
             view_box: "0 0 24 24",
             fill: "none",
             stroke: "currentColor",
-            stroke_width: "1.7",
+            stroke_width: "2.75",
             stroke_linecap: "round",
             stroke_linejoin: "round",
             "aria-hidden": "true",
-            path { d: path }
+            // Safe: the markup is a compile-time constant generated from the Lucide package.
+            dangerous_inner_html: icons::icon_markup(&name),
         }
     }
 }

@@ -215,6 +215,9 @@ importers:
       knip:
         specifier: 6.44.0
         version: 6.44.0
+      lucide-static:
+        specifier: 1.66.0
+        version: 1.66.0
       markdownlint-cli2:
         specifier: 0.24.0
         version: 0.24.0(supports-color@10.2.2)
@@ -1719,6 +1722,9 @@ packages:
 
   long@5.3.2:
     resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
+
+  lucide-static@1.66.0:
+    resolution: {integrity: sha512-j8Bjf/f21PtlD8p0wx1lRxyOrs98WZ1QEImkWmfskuJ8mOCwTN7Dwc6EHUzJDSzh79aB+Bo7SWcoTCM2zEjnJg==}
 
   markdown-it@15.0.3:
     resolution: {integrity: sha512-+Az7Ojz3iRGu8KYMvJ6xVhvrxP3eE+vEtJX75Ow88XBpcQNV/0lGX5ZynIIBftREo4DC2jsveAMDaeltmm8QvQ==}
@@ -3416,6 +3422,8 @@ snapshots:
   lodash.truncate@4.4.2: {}
 
   long@5.3.2: {}
+
+  lucide-static@1.66.0: {}
 
   markdown-it@15.0.3:
     dependencies:

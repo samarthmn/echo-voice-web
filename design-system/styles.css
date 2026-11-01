@@ -61,6 +61,58 @@
   --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2b25 14%, transparent);
   --shadow-md: 0 3px 10px color-mix(in srgb, #2e2b25 16%, transparent);
   --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2b25 22%, transparent);
+
+  /* Semantic roles — what product UI should reach for. Every text/ground
+     pair here meets WCAG AA (tests/unit/contrast.test.ts checks both themes). */
+  --color-surface-alt: var(--color-neutral-200);
+  --color-text-muted: var(--color-neutral-700);
+  --color-accent-text: var(--color-accent-700);   /* links and accent-coloured text */
+  --color-accent-hover: var(--color-accent-500);  /* primary fill on hover */
+  --color-accent-pressed: var(--color-accent-400);
+  --color-on-accent: #201e1d;                     /* text on --color-accent fills */
+  --color-accent-soft: var(--color-accent-100);   /* tinted fill for accent text */
+  --color-focus: var(--color-accent-600);         /* 3:1 on bg and surface */
+  --color-success: var(--color-accent-2-700);
+  --color-success-soft: var(--color-accent-2-100);
+  --color-warning: var(--color-accent-800);
+  --color-warning-soft: var(--color-accent-100);
+  --color-danger: #9e3b2c;
+  --color-danger-soft: #fbe9e4;
+  --color-on-danger: #f5ead8;
+  --color-info: var(--color-neutral-800);
+  --color-info-soft: var(--color-neutral-200);
+  --color-backdrop: color-mix(in srgb, #2e2b25 45%, transparent);
+  color-scheme: light;
+}
+
+/* Organic dark — dark earth ground from the neutral 800–900 steps; accents
+   move one or two steps lighter wherever they are text or thin strokes.
+   tokens.css also applies this block under prefers-color-scheme: dark
+   unless the page sets data-theme='light'. */
+[data-theme='dark'] {
+  --color-bg: #2e2b25;             /* neutral-900 */
+  --color-surface: #3b372f;        /* midway between neutral-900 and neutral-800 */
+  --color-surface-alt: #474238;    /* neutral-800 */
+  --color-text: #f9f4ed;           /* neutral-100 */
+  --color-text-muted: #c0b6a5;     /* neutral-400 */
+  --color-divider: color-mix(in srgb, #f9f4ed 16%, transparent);
+  --color-accent-text: #f6a06b;    /* accent-400 */
+  --color-accent-soft: #402310;    /* accent-900 */
+  --color-focus: #f6a06b;
+  --color-success: #ccdbb2;        /* accent-2-300 */
+  --color-success-soft: #272e1b;   /* accent-2-900 */
+  --color-warning: #ffc6a5;        /* accent-300 */
+  --color-warning-soft: #402310;   /* accent-900 */
+  --color-danger: #f2a596;
+  --color-danger-soft: #4a2219;
+  --color-on-danger: #201e1d;
+  --color-info: #dcd3c4;           /* neutral-300 */
+  --color-info-soft: #474238;      /* neutral-800 */
+  --color-backdrop: color-mix(in srgb, #000 60%, transparent);
+  --shadow-sm: 0 0 0 1px color-mix(in srgb, #f9f4ed 6%, transparent), 0 1px 2px color-mix(in srgb, #000 40%, transparent);
+  --shadow-md: 0 0 0 1px color-mix(in srgb, #f9f4ed 7%, transparent), 0 4px 12px color-mix(in srgb, #000 45%, transparent);
+  --shadow-lg: 0 0 0 1px color-mix(in srgb, #f9f4ed 8%, transparent), 0 14px 36px color-mix(in srgb, #000 55%, transparent);
+  color-scheme: dark;
 }
 
 body {
@@ -92,16 +144,16 @@ h5 { font-size: 16px; }
 h6 { font-size: 13px; }
 h6 { letter-spacing: 0.08em; text-transform: uppercase; }
 p { margin: 0 0 var(--space-3); }
-a { color: var(--color-accent); text-underline-offset: 3px; }
+a { color: var(--color-accent-text); text-underline-offset: 3px; }
 img { display: block; max-width: 100%; }
 figure { margin: 0; }
 figcaption {
   font-size: 11px; margin-top: var(--space-1);
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  color: var(--color-text-muted);
 }
-.text-muted { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.text-muted { color: var(--color-text-muted); }
 :focus { outline: none; }
-:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 ::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 
 /* — rules — */
@@ -123,13 +175,13 @@ figcaption {
 }
 .btn svg { display: block; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-primary { background: var(--color-accent); color: var(--color-bg); }
-.btn-primary:hover { background: var(--color-accent-600); }
-.btn-primary:active { background: var(--color-accent-700); }
+.btn-primary { background: var(--color-accent); color: var(--color-on-accent); }
+.btn-primary:hover { background: var(--color-accent-hover); }
+.btn-primary:active { background: var(--color-accent-pressed); }
 .btn-secondary { border-color: var(--color-divider); }
 .btn-secondary:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .btn-secondary:active { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
-.btn-ghost { color: var(--color-accent); padding-inline: var(--space-1); }
+.btn-ghost { color: var(--color-accent-text); padding-inline: var(--space-1); }
 .btn-ghost:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
 .btn-ghost:active { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
 .btn-icon { width: 36px; height: 36px; padding: 0; }
@@ -172,7 +224,7 @@ textarea.input { min-height: 90px; resize: vertical; }
   padding: 7px 12px; font-size: 13px; cursor: pointer;
 }
 .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
-.seg-opt:has(input:checked) { background: var(--color-accent); color: var(--color-bg); }
+.seg-opt:has(input:checked) { background: var(--color-accent); color: var(--color-on-accent); }
 .seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .seg-opt:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
@@ -181,7 +233,7 @@ textarea.input { min-height: 90px; resize: vertical; }
   display: flex; flex-direction: column; gap: var(--space-2);
   padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface);
 }
-.card-kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent); }
+.card-kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-text); }
 .card-title {
   font-family: var(--font-heading); font-weight: var(--font-heading-weight);
   font-size: 17px; line-height: 1.2;
@@ -204,7 +256,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 .tag-accent { background: var(--color-accent-100); color: var(--color-accent-800); }
 .tag-accent-2 { background: var(--color-accent-2-100); color: var(--color-accent-2-800); }
 .tag-neutral { background: var(--color-neutral-100); color: var(--color-neutral-800); }
-.tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent); }
+.tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent-text); }
 
 /* — navigation — */
 .nav {
@@ -217,7 +269,7 @@ textarea.input { min-height: 90px; resize: vertical; }
   font-size: 18px; margin-right: auto;
 }
 .nav a { color: inherit; text-decoration: none; font-size: 14px; }
-.nav a:hover, .nav a[aria-current='page'] { color: var(--color-accent); }
+.nav a:hover, .nav a[aria-current='page'] { color: var(--color-accent-text); }
 
 /* — tables — */
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }

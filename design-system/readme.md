@@ -17,6 +17,10 @@ Left-aligned, asymmetric layouts. Flush-left headings; content hugs the left edg
 
 A light ground (`--color-bg` #f5ead8) with `--color-text` #201e1d and two accents — `--color-accent` #c67139 and `--color-accent-2` #7a8a5e. Each role carries a 100–900 tonal ramp (`--color-neutral-100` … `--color-accent-2-900`) generated in OKLCH on a shared perceptual lightness scale, so the same step of any ramp has the same visual weight. Use the light steps (100–300) for tinted fills, hovers and subtle borders, 500 as the role's base, and the dark steps (700–900) for text on tinted fills and for pressed states; prefer ramp steps over ad-hoc `color-mix()`. For elevation use `--shadow-sm/md/lg` (already tuned to the ground) rather than ad-hoc box-shadows.
 
+**Semantic roles.** Product UI reaches for roles rather than raw ramp steps: `--color-surface-alt`, `--color-text-muted`, `--color-accent-text` (links and accent-coloured text), `--color-on-accent` (text on an accent fill), `--color-accent-hover`/`--color-accent-pressed`, `--color-focus`, and the status pairs `--color-success`/`-soft`, `--color-warning`/`-soft`, `--color-danger`/`-soft` (+ `--color-on-danger`) and `--color-info`/`-soft`. The base accent #c67139 is 3:1 against the ground, enough for fills, rings and large type but not body text, so accent text uses `--color-accent-text` (accent-700 on light) and an accent fill carries dark `--color-on-accent` text. Every text/ground pair meets WCAG AA in both themes.
+
+**Organic dark.** `[data-theme='dark']` swaps the ground to dark earth: `--color-bg` neutral-900 #2e2b25, `--color-surface` #3b372f (between neutral-900 and -800), `--color-surface-alt` neutral-800, `--color-text` neutral-100 and `--color-text-muted` neutral-400. Accent fills stay #c67139; accent text and the focus ring move to accent-400 (on light the ring is accent-600) #f6a06b; status colours use the light 300 steps on 900 fills. Shadows become a hairline light edge plus ambient darkness. Generated `tokens.css` also applies the dark block under `prefers-color-scheme: dark` unless the page sets `data-theme='light'`.
+
 ## Type
 
 Caprasimo for headings over Figtree for body text, loaded as `--font-heading` / `--font-body`. Density 1.10× and radius 16px are already baked into the `--space-*` / `--radius-*` scales — use the variables, not raw numbers.
@@ -27,7 +31,7 @@ Use Lucide icons (https://lucide.dev), at stroke-width 2.75 for a rounder, heavi
 
 ## Interaction states
 
-Interactive states are themed, never browser defaults: give every interactive element a `:hover` tint and a pressed state from the accent ramp (one step past the base — `--color-accent-600` on a light ground, `--color-accent-400` on a dark one, or a `color-mix()` tint for outlined/ghost variants), and style keyboard focus with `:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }` — never leave the default blue focus ring.
+Interactive states are themed, never browser defaults: give every interactive element a `:hover` tint and a pressed state from the accent ramp (`--color-accent-hover` then `--color-accent-pressed` for accent fills, which step lighter so the dark `--color-on-accent` text keeps its contrast, or a `color-mix()` tint for outlined/ghost variants), and style keyboard focus with `:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }` — never leave the default blue focus ring.
 
 ## Components
 

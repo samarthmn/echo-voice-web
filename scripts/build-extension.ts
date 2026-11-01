@@ -1,3 +1,4 @@
+import { FONT_FILES, writeTokens } from './build-tokens.ts';
 import { extensionManifest } from './guards.ts';
 import { errorInfo } from '../web/guards.ts';
 import { build } from 'esbuild';
@@ -7,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { WithImplicitCoercion } from 'buffer';
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const FONT_LICENSES = ['OFL-Caprasimo.txt', 'OFL-Figtree.txt'];
 export const EXTENSION_FILES = [
   'manifest.json',
   'background.js',
@@ -19,16 +21,14 @@ export const EXTENSION_FILES = [
   'setup.html',
   'offscreen.html',
   'ui.css',
-  'design-tokens.css',
+  'tokens.css',
   'icons/echo.svg',
   'icons/16.png',
   'icons/32.png',
   'icons/48.png',
   'icons/128.png',
-  'fonts/inter-400.woff2',
-  'fonts/inter-500.woff2',
-  'fonts/inter-600.woff2',
-  'fonts/LICENSE',
+  ...FONT_LICENSES.map((name) => `fonts/${name}`),
+  ...FONT_FILES.map((name) => `fonts/${name}`),
 ];
 export function extensionId(key: WithImplicitCoercion<string>) {
   return createHash('sha256')
@@ -104,13 +104,10 @@ export async function buildExtension({
     await mkdir(path.dirname(path.join(outdir, name)), { recursive: true });
     await cp(path.join(project, 'extension', name), path.join(outdir, name));
   }
-  await cp(
-    path.join(project, 'public', 'design-tokens.css'),
-    path.join(outdir, 'design-tokens.css'),
-  );
+  await writeTokens(path.join(outdir, 'tokens.css'), 'fonts/');
   await cp(path.join(project, 'public', 'favicon.svg'), path.join(outdir, 'icons', 'echo.svg'));
   await mkdir(path.join(outdir, 'fonts'), { recursive: true });
-  for (const name of ['inter-400.woff2', 'inter-500.woff2', 'inter-600.woff2', 'LICENSE'])
+  for (const name of [...FONT_LICENSES, ...FONT_FILES])
     await cp(path.join(project, 'public', 'fonts', name), path.join(outdir, 'fonts', name));
   const id = extensionId(manifest.key);
   const idFile = path.join(project, 'public', 'js', 'extension-id.json');

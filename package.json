@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build:assets": "node scripts/build-assets.ts",
+    "build:tokens": "node scripts/build-tokens.ts",
+    "build:icons": "node scripts/build-icons.ts",
     "build:extension": "node scripts/build-extension.ts",
     "package:extension": "node scripts/package-extension.ts",
     "test": "node --test \"tests/unit/**/*.test.ts\"",
@@ -39,6 +41,7 @@
     "globals": "17.13.0",
     "jiti": "2.7.0",
     "knip": "6.44.0",
+    "lucide-static": "1.66.0",
     "markdownlint-cli2": "0.24.0",
     "prettier": "3.6.2",
     "stylelint": "17.16.0",
