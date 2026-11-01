@@ -21,7 +21,7 @@ The site is a static Astro build deployed by Vercel's Git integration. Its setti
 
 1. In Vercel, choose **Add New → Project** and import `samarthmn/echo-voice-web`.
 2. Set the **Root Directory** to `site`, and keep **Include files outside the root directory in the Build Step** enabled: the site reads `docs/`, `brand/`, `public/fonts/` and `scripts/` from the repository root.
-3. Leave the framework, install and build settings to `site/vercel.json` (Astro; `pnpm install --frozen-lockfile --filter echo-site`; `pnpm build`; output `dist`).
+3. Leave the framework, install and build settings to `site/vercel.json` (Astro; output `dist`). It runs the repository's pinned pnpm (12.11.2) through `npx` for install and build, because Vercel's bundled pnpm cannot switch itself to pnpm 12. Keep that version in step with `packageManager` in `package.json`.
 4. Under **Settings → General**, choose Node.js 22 or newer.
 5. Under **Settings → Domains**, add `echo-web.samarthmn.com` and create the DNS record Vercel shows.
 6. Under **Analytics**, enable Web Analytics. Builds on Vercel then include its cookieless script, served from the site's own `/_vercel/insights` path. Analytics only ever run on the website, never in the app.
