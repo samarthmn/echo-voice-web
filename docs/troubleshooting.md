@@ -3,6 +3,14 @@ title: Troubleshooting
 description: Fixes for common Echo problems, from build errors to a locked library and an extension that will not connect.
 ---
 
+Start with the doctor. It checks your Mac, the build tools, the build, the running server, Ollama and the library, and prints a fix for anything that is off:
+
+```bash
+./scripts/doctor.sh
+```
+
+Its output contains no secrets, so you can paste it into a bug report.
+
 ## Setup and start
 
 | Symptom | Fix |

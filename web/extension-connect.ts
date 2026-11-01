@@ -1,4 +1,4 @@
-import { connectionRequest, extensionId, responseJson } from './guards.ts';
+import { connectionRequest, extensionIds, responseJson } from './guards.ts';
 import { errorInfo } from './guards.ts';
 function element(id: 'approve' | 'reject'): HTMLButtonElement;
 function element(id: string): HTMLElement;
@@ -93,10 +93,10 @@ async function load() {
 async function notifyExtension() {
   try {
     const response = await fetch('/js/extension-id.json');
-    const id = extensionId(await responseJson(response));
-    chrome.runtime.sendMessage(id, { type: 'ECHO_APPROVED', requestId }, () => {
-      if (chrome.runtime.lastError) return;
-    });
+    for (const id of extensionIds(await responseJson(response)))
+      chrome.runtime.sendMessage(id, { type: 'ECHO_APPROVED', requestId }, () => {
+        if (chrome.runtime.lastError) return;
+      });
   } catch {
     /* The extension also polls for approval. */
   }

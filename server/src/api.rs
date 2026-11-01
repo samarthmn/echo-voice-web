@@ -63,12 +63,31 @@ async fn blocking<T: Send + 'static>(
         ApiError::new(500, "Echo hit an internal error; retry.")
     })?
 }
-/// Report local storage readiness without exposing private paths or credentials.
-async fn health() -> ApiResult<Json<Value>> {
+/// Report readiness for diagnostics without exposing private paths or credentials.
+/// Reaching this point means the library opened, which needs the Keychain key.
+/// `?deep` also probes the local Ollama (up to 800 ms), for `scripts/doctor.sh`.
+async fn health(axum::extract::RawQuery(query): axum::extract::RawQuery) -> ApiResult<Json<Value>> {
     store::run(|_| Ok(())).await?;
-    Ok(Json(
-        json!({"status":"ok","version":env!("CARGO_PKG_VERSION"),"storage":"local","framework":"Dioxus + Axum"}),
-    ))
+    let data_dir = crate::paths::get()?.data_dir;
+    let disk_free = blocking(move || Ok(fs2::available_space(&data_dir).ok()))
+        .await
+        .ok()
+        .flatten();
+    let deep = query.is_some_and(|query| query.split('&').any(|pair| pair == "deep"));
+    let ollama = match (deep, deep && crate::notes::ollama_reachable().await) {
+        (false, _) => Value::Null,
+        (true, true) => json!("reachable"),
+        (true, false) => json!("unreachable"),
+    };
+    Ok(Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "storage": "local",
+        "library": "open",
+        "keychain": "ok",
+        "diskFreeBytes": disk_free,
+        "ollama": ollama,
+    })))
 }
 /// Return the saved meeting library.
 async fn list() -> ApiResult<Json<Value>> {

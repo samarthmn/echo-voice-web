@@ -1,17 +1,35 @@
 import { errorInfo } from '../web/guards.ts';
-import { mkdir, rm, readdir, lstat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { buildExtension, EXTENSION_FILES } from './build-extension.ts';
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/**
+ * Build and zip the extension. The default zip is for loading unpacked and keeps
+ * manifest.json's `key`, so the ID stays stable. `store: true` builds the Chrome
+ * Web Store upload instead: the store assigns its own ID and rejects a `key`.
+ */
 export async function packageExtension({
   outdir,
   archive,
-}: { outdir?: string | undefined; archive?: string } = {}) {
-  const result = await buildExtension({ outdir });
-  archive ??= path.join(project, 'dist', `echo-extension-${result.version}.zip`);
+  store = false,
+}: { outdir?: string | undefined; archive?: string; store?: boolean } = {}) {
+  const result = await buildExtension({
+    outdir: outdir ?? (store ? path.join(project, 'dist', 'extension-store') : undefined),
+  });
+  archive ??= path.join(
+    project,
+    'dist',
+    `echo-extension-${store ? 'store-' : ''}${result.version}.zip`,
+  );
+  if (store) {
+    const manifestFile = path.join(result.outdir, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as Record<string, unknown>;
+    delete manifest['key'];
+    await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
   async function checkDirectory(dir: string) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const file = path.join(dir, entry.name);
@@ -48,8 +66,11 @@ export async function packageExtension({
   return { ...result, archive };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const result = await packageExtension();
+  const store = process.argv.includes('--store');
+  const result = await packageExtension({ store });
   console.log(
-    `Packaged Echo extension: ${result.archive}\nStable development ID: ${result.extensionId}`,
+    store
+      ? `Packaged Echo extension for the Chrome Web Store: ${result.archive}`
+      : `Packaged Echo extension: ${result.archive}\nStable development ID: ${result.extensionId}`,
   );
 }

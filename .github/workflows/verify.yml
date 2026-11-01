@@ -24,19 +24,23 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Keep temporary files in the checkout
         run: |
           mkdir -p "$GITHUB_WORKSPACE/tmp"
           printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           # Failed runs still warm the cache, so the next run skips dependency builds.
           cache-on-failure: true
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+        with:
+          tool: cargo-deny@0.20.2
       - run: ./scripts/check.sh --rust
 
   app:
@@ -44,20 +48,21 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Keep temporary files in the checkout
         run: |
           mkdir -p "$GITHUB_WORKSPACE/tmp"
           printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           cache-on-failure: true
       - name: Read the wasm-bindgen version from Cargo.lock
@@ -66,7 +71,7 @@ jobs:
           version="$(awk '/name = "wasm-bindgen"/{getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       # A prebuilt binary instead of compiling wasm-bindgen-cli in setup.sh.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: wasm-bindgen@${{ steps.bindgen.outputs.version }}
       - run: ./scripts/setup.sh
@@ -78,18 +83,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Keep temporary files in the checkout
         run: |
           mkdir -p "$GITHUB_WORKSPACE/tmp"
           printf 'TMPDIR=%s/tmp\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: taiki-e/install-action@v2
+      - name: Audit production npm dependencies
+        run: pnpm audit --prod
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: actionlint@1.7.12
       - name: Verify preinstalled ShellCheck

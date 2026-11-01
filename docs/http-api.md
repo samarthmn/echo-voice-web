@@ -11,7 +11,7 @@ Used by the Echo web app. Requests must come from Echo's own origin with a loopb
 
 | Area | Routes |
 | --- | --- |
-| Health | `GET /api/health`: `{status, version, storage}` once the library is open |
+| Health | `GET /api/health`: `{status, version, library, keychain, diskFreeBytes}` once the library is open; `?deep` also reports whether Ollama is reachable |
 | Meetings | `GET /api/meetings`, `GET /api/meetings/{id}` (plus update and delete), `GET /api/meetings/{id}/audio/{track}` (range requests), `GET /api/meetings/{id}/export` |
 | Versions | `POST /api/meetings/{id}/transcripts`, `POST /api/meetings/{id}/notes`, `POST /api/meetings/{id}/moments` |
 | Processing | `POST /api/processing/heartbeat` |

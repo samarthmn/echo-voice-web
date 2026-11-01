@@ -36,10 +36,10 @@ export const sidebar = [
   },
   {
     label: 'Reference',
-    items: ['docs/architecture', 'docs/cli', 'docs/http-api'],
+    items: ['docs/architecture', 'docs/cli', 'docs/http-api', 'docs/licenses'],
   },
   {
     label: 'Contributing',
-    items: ['docs/development', 'docs/releasing'],
+    items: ['docs/development', 'docs/releasing', 'docs/store-listing'],
   },
 ];

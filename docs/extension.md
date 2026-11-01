@@ -16,7 +16,7 @@ The Manifest V3 extension (Brave or Chrome 120+) records the audio of a meeting 
 
 ### Chrome Web Store
 
-A Chrome Web Store listing is planned. Until it is published, load the extension unpacked as above. Both builds connect to your local Echo in the same way.
+A Chrome Web Store listing is planned. Until it is published, load the extension unpacked as above. Both builds connect to your local Echo in the same way, and Echo recognises either one.
 
 ### After rebuilding
 

@@ -1,16 +1,30 @@
-import { connectionRequest, extensionId, extensionReply, record, responseJson } from './guards.ts';
+import { connectionRequest, extensionIds, extensionReply, record, responseJson } from './guards.ts';
 import type { ConnectionRequest, ExtensionMessage, ExtensionReply } from './types/domain.ts';
 import { errorInfo } from './guards.ts';
-/** Send a message to the installed extension, using the ID generated at build time. */
+/**
+ * Send a message to the installed extension. The unpacked and Chrome Web Store
+ * builds have different IDs (generated at build time); the first that answers wins.
+ */
 async function extensionMessage(message: ExtensionMessage): Promise<ExtensionReply> {
   const response = await fetch('/js/extension-id.json', { cache: 'no-store' });
   if (!response.ok) throw new Error('Extension ID is unavailable');
-  const id = extensionId(await responseJson(response));
+  const ids = extensionIds(await responseJson(response));
   if (
     !(globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } }).chrome?.runtime
       ?.sendMessage
   )
     throw new Error('Extension is not installed');
+  let lastError: unknown;
+  for (const id of ids) {
+    try {
+      return await messageExtension(id, message);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+function messageExtension(id: string, message: ExtensionMessage): Promise<ExtensionReply> {
   return new Promise<ExtensionReply>((resolve, reject: (reason?: unknown) => void) => {
     chrome.runtime.sendMessage(id, message, (reply: unknown) => {
       const error = chrome.runtime.lastError;

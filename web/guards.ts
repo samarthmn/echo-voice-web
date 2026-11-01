@@ -258,10 +258,16 @@ export function connectionRequest(value: unknown): ConnectionRequest {
     throw new Error('This request is invalid. Try again from the extension.');
   return value as ConnectionRequest;
 }
-export function extensionId(value: unknown): string {
-  const id = record(value)['id'];
-  if (typeof id !== 'string') throw new Error('Extension ID is unavailable');
-  return id;
+/** Extension IDs to try, in order: the unpacked build, then the Chrome Web Store build. */
+export function extensionIds(value: unknown): string[] {
+  const ids = record(value)['ids'];
+  if (
+    !Array.isArray(ids) ||
+    !ids.length ||
+    !ids.every((id) => typeof id === 'string' && /^[a-p]{32}$/.test(id))
+  )
+    throw new Error('Extension ID is unavailable');
+  return ids as string[];
 }
 export function extensionRecordings(value: unknown): ExtensionRecording[] {
   const list = record(value)['recordings'] ?? [];

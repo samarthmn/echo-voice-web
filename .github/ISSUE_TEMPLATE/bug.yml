@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in Echo is broken or behaves unexpectedly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't include recovery phrases, OAuth secrets, recordings or meeting content.
+        Security problems go through the private process in SECURITY.md, not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of ./scripts/doctor.sh
+      description: Run it in your checkout and paste the full output. It contains no secrets.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Setup or start
+        - Browser extension and recording
+        - Transcription or speakers
+        - Notes (Ollama)
+        - Library, backups or recovery
+        - Google Calendar
+        - Website or docs
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Brave 1.80, Chrome 140, ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: From the start.sh Terminal or ~/Library/Logs/Echo Voice/server.log, and the extension's service worker console if relevant.
+      render: text

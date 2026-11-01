@@ -73,7 +73,7 @@ void test('approval page never approves on load, renders labels as text, and tel
     fetch: async (url: string, options: { method: string }) => {
       calls.push({ url, options });
       if (url === '/js/extension-id.json')
-        return { ok: true, json: async () => ({ id: 'poonbmodjfijfbfiopememgfijahgbag' }) };
+        return { ok: true, json: async () => ({ ids: ['poonbmodjfijfbfiopememgfijahgbag'] }) };
       return {
         ok: true,
         json: async () => ({

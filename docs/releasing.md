@@ -29,3 +29,27 @@ The site is served by Cloudflare Workers static assets, configured in `site/wran
 Pushes to `main` deploy to production; other branches get preview URLs.
 
 Security headers (CSP, HSTS and others) are in `site/public/_headers`.
+
+## Releasing a version
+
+Echo has one version number, `[workspace.package] version` in `Cargo.toml`. `scripts/version.ts` copies it into `package.json`, `extension/manifest.json` and `Cargo.lock`, and `check.sh --lint` fails if they drift.
+
+1. Move the `Unreleased` notes in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading, and update the links at the bottom.
+2. Set the version everywhere:
+
+   ```bash
+   node scripts/version.ts X.Y.Z
+   ```
+
+3. Re-check the competitor facts on the landing page (`site/src/data/site.ts`, with the "checked" date) and update them if they have changed.
+4. Run `./scripts/check.sh --all`, commit, and merge to `main`.
+5. Tag the merge commit and push the tag:
+
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+The `Release` workflow (`.github/workflows/release.yml`) checks that the tag matches the version, runs the Rust and app checks on macOS, builds the unpacked extension zip and the Chrome Web Store zip, writes `SHA256SUMS.txt`, and publishes a GitHub release whose notes are that version's CHANGELOG section.
+
+For the Chrome Web Store, upload the store zip from the release as described in the [store listing](store-listing.md).

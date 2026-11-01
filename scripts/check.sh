@@ -25,6 +25,14 @@ if [[ -z $mode || $mode == --all || $mode == --rust ]]; then
   run clippy cargo clippy --locked --workspace --all-targets -- -D warnings
   run wasm-clippy cargo clippy --locked -p echo-app --target wasm32-unknown-unknown -- -D warnings
   run rust-tests cargo test --locked --workspace
+  if command -v cargo-deny >/dev/null; then
+    run cargo-deny cargo deny check
+  elif [[ -n ${CI+x} ]]; then
+    printf '\n==> cargo-deny missing (install with: brew install cargo-deny)\n' >&2
+    exit 1
+  else
+    printf '\n==> cargo-deny skipped (install with: brew install cargo-deny)\n'
+  fi
 fi
 if [[ -z $mode || $mode == --all || $mode == --lint ]]; then
   run formatting pnpm format:check
@@ -48,6 +56,7 @@ if [[ -z $mode || $mode == --all || $mode == --lint ]]; then
   run typecheck-compat pnpm typecheck:compat
   run knip pnpm knip
   run icons-fresh node scripts/build-icons.ts --check
+  run version-sync node scripts/version.ts --check
   run site-build pnpm --filter echo-site build
 fi
 if [[ -z $mode || $mode == --all || $mode == --app ]]; then

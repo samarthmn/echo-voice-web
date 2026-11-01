@@ -2,7 +2,8 @@
   "globs": [
     "*.md",
     "docs/**/*.md",
-    "brand/*.md"
+    "brand/*.md",
+    ".github/**/*.md"
   ],
   "ignores": [
     "design-system/**",

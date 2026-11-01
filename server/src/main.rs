@@ -31,6 +31,13 @@ async fn not_found() -> (http::StatusCode, axum::Json<serde_json::Value>) {
 
 /// Bound runtime teardown even when an in-flight blocking operation cannot be cancelled.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if matches!(std::env::args().nth(1).as_deref(), Some("--version" | "-V")) {
+        #[allow(clippy::print_stdout, reason = "Report the version to the CLI caller.")]
+        {
+            println!("echo-server {}", env!("CARGO_PKG_VERSION"));
+        }
+        return Ok(());
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;

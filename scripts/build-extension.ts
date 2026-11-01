@@ -30,6 +30,12 @@ export const EXTENSION_FILES = [
   ...FONT_LICENSES.map((name) => `fonts/${name}`),
   ...FONT_FILES.map((name) => `fonts/${name}`),
 ];
+/**
+ * The Chrome Web Store assigns its own ID, different from the unpacked build's
+ * (which comes from manifest.json's key). Set it here once the listing exists;
+ * the web app then talks to whichever build is installed.
+ */
+const STORE_EXTENSION_ID = '';
 export function extensionId(key: WithImplicitCoercion<string>) {
   return createHash('sha256')
     .update(Buffer.from(key, 'base64'))
@@ -112,7 +118,8 @@ export async function buildExtension({
   const id = extensionId(manifest.key);
   const idFile = path.join(project, 'public', 'js', 'extension-id.json');
   await mkdir(path.dirname(idFile), { recursive: true });
-  await writeFile(idFile, `${JSON.stringify({ id }, null, 2)}\n`);
+  const ids = [id, STORE_EXTENSION_ID].filter((value) => /^[a-p]{32}$/.test(value));
+  await writeFile(idFile, `${JSON.stringify({ ids }, null, 2)}\n`);
   return { outdir, extensionId: id, version: manifest.version };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

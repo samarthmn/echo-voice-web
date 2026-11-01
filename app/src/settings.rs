@@ -96,6 +96,27 @@ pub fn Settings(
                     },
                 }
             }
+            footer { class: "settings-about", "aria-label": "About Echo",
+                span { "Echo {env!(\"CARGO_PKG_VERSION\")}" }
+                a {
+                    href: "https://echo-web.samarthmn.com/docs/",
+                    target: "_blank",
+                    rel: "noopener",
+                    "Documentation"
+                }
+                a {
+                    href: "https://github.com/samarthmn/echo-voice-web",
+                    target: "_blank",
+                    rel: "noopener",
+                    "Source code"
+                }
+                a {
+                    href: "https://github.com/samarthmn/echo-voice-web/releases",
+                    target: "_blank",
+                    rel: "noopener",
+                    "Release notes"
+                }
+            }
         }
     }
 }

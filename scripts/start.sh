@@ -11,7 +11,7 @@ done
 url="$(echo_url)"
 port="${url##*:}"
 if lsof -nP -iTCP:"$port" -sTCP:LISTEN; then
-  echo "Port $port is in use. Stop the process above or set ECHO_BIND to another port." >&2
+  echo "Port $port is in use. Stop the process above or set ECHO_BIND to another port (docs/configuration.md)." >&2
   exit 1
 fi
 printf 'Echo is available at %s\nPress Ctrl+C to stop.\n' "$url"

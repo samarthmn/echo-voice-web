@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://echo-web.samarthmn.com/docs/
+    about: Install, configuration, troubleshooting and FAQ.
+  - name: Report a security vulnerability
+    url: https://github.com/samarthmn/echo-voice-web/security/advisories/new
+    about: Please report security problems privately.

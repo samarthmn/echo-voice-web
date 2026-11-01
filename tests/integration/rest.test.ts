@@ -260,7 +260,15 @@ void test(
         assert.equal(response.status, status, `${method} ${path}: ${JSON.stringify(value)}`);
         return value;
       };
-      assert.equal((await api('/health'))['storage'], 'local');
+      const health = await api('/health');
+      assert.equal(health['storage'], 'local');
+      assert.equal(health['library'], 'open');
+      assert.equal(typeof health['version'], 'string');
+      assert.equal(typeof health['diskFreeBytes'], 'number');
+      assert.equal(health['ollama'], null, 'the default health check never probes Ollama');
+      assert.ok(
+        ['reachable', 'unreachable'].includes(String((await api('/health?deep'))['ollama'])),
+      );
       assert.deepEqual((await api('/meetings'))['meetings'], []);
       assert.match(
         text(

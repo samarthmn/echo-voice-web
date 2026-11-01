@@ -1293,6 +1293,9 @@ fn NewMeeting(
                     }
                     span { "I have permission from everyone being recorded." }
                 }
+                p { class: "consent-note",
+                    "You are responsible for getting consent and following the recording laws where you and the other participants are."
+                }
                 if !error().is_empty() {
                     div { class: "inline-error", role: "alert",
                         Icon { name: "alert" }

@@ -2379,3 +2379,9 @@ textarea.input {
   font-weight: 600;
   color: var(--color-text);
 }
+.consent-note {
+  margin: -4px 0 12px 26px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}

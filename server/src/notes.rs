@@ -131,6 +131,26 @@ fn settings_url() -> Result<String, ApiError> {
     )
 }
 
+/// Whether the configured local Ollama answers quickly, for the health report.
+pub(crate) async fn ollama_reachable() -> bool {
+    let Ok(Ok(base)) = tokio::task::spawn_blocking(settings_url).await else {
+        return false;
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_millis(800))
+        .no_proxy()
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(format!("{base}/api/tags"))
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
 /// Fetch and normalize available local model names.
 async fn model_list(base: &str) -> Result<Vec<String>, ApiError> {
     let value = bounded_json(checked(client(5)?.get(format!("{base}/api/tags"))).await?).await?;

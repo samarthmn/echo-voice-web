@@ -1153,3 +1153,17 @@
     min-height: 44px;
   }
 }
+.settings-about {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-divider);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.settings-about a {
+  color: var(--color-accent-text);
+  text-underline-offset: 3px;
+}

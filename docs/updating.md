@@ -12,6 +12,14 @@ Echo updates from Git. A newer server migrates your library forward on first sta
 
 ## Update
 
+The quickest way is the update script. It refuses to run over local changes, pulls with `--ff-only`, rebuilds with `setup.sh`, and restarts the login agent if you installed it:
+
+```bash
+./scripts/update.sh
+```
+
+If you use `start.sh`, restart it afterwards. To update by hand instead:
+
 1. Stop Echo: Ctrl+C in the `start.sh` Terminal, or `./scripts/uninstall-service.sh` if it runs at login.
 2. Pull and rebuild:
 
