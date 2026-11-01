@@ -82,6 +82,9 @@ export default defineConfig({
       ],
       customCss: ['./src/styles/tokens.generated.css', './src/styles/starlight.css'],
       sidebar,
+      // Code sits on the page ground: on the darker surface the theme's comment colour
+      // falls just under 4.5:1 in dark mode.
+      expressiveCode: { styleOverrides: { codeBackground: 'var(--color-bg)' } },
       lastUpdated: false,
       pagination: true,
     }),
