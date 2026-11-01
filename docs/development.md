@@ -90,6 +90,8 @@ Fonts are self-hosted in `public/fonts/`: Caprasimo for headings and Figtree for
 
 Icons are [Lucide](https://lucide.dev) at stroke width 2.75. `scripts/build-icons.ts` (`pnpm build:icons`) reads the pinned `lucide-static` devDependency and generates `app/src/icons.rs`, which maps the app's icon names (`Icon { name: "mic" }`) to Lucide markup. To add an icon, add a line to the name map in the script and rerun it. `check.sh --lint` fails (`icons-fresh`) if the generated file is stale.
 
+The logo and every raster brand asset (favicons, extension and store icons, social images) live in `brand/`; see [brand/README.md](../brand/README.md). `pnpm build:brand` re-renders them from `brand/logo.svg` with Chromium.
+
 ## Building and packaging the extension
 
 ```bash
