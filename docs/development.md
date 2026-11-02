@@ -110,8 +110,8 @@ Packaging rebuilds, refuses symlinks and unexpected executables, and zips only t
 
 `.github/workflows/verify.yml` runs on pushes to `main` and on pull requests as three parallel jobs that together cover `./scripts/check.sh --all`:
 
-- **Rust lint and tests** (`macos-14`): stable Rust with the wasm target, then `./scripts/check.sh --rust`.
-- **App build and browser tests** (`macos-14`): Node 22.18+, pnpm, stable Rust, a prebuilt `wasm-bindgen` matching `Cargo.lock`, `./scripts/setup.sh`, Playwright Chromium, then `./scripts/check.sh --app`.
+- **Rust lint and tests** (`macos-15`): stable Rust with the wasm target, then `./scripts/check.sh --rust`.
+- **App build and browser tests** (`macos-15`): Node 22.18+, pnpm, stable Rust, a prebuilt `wasm-bindgen` matching `Cargo.lock`, `./scripts/setup.sh`, Playwright Chromium, then `./scripts/check.sh --app`.
 - **Lint and types** (`ubuntu-latest`, 15-minute timeout): Node 22.18+, pnpm with its dependency cache, a frozen lockfile install, prebuilt actionlint 1.7.12 and a version check for preinstalled ShellCheck, then `./scripts/check.sh --lint`, which also builds the website (`site/`). No Rust toolchain is needed.
 
 The two macOS jobs keep their Rust build cache even when a run fails (`cache-on-failure`), so a red run still makes the next one fast. The cache is keyed on the Rust version, so the first run after a new stable Rust release rebuilds from scratch.
