@@ -50,7 +50,7 @@ fn seconds() -> i64 {
     chrono::Utc::now().timestamp()
 }
 fn hash(data: impl AsRef<[u8]>) -> String {
-    format!("{:x}", Sha256::digest(data.as_ref()))
+    crate::digest::sha256_hex(data.as_ref())
 }
 fn uid(raw: &str) -> Result<()> {
     if Uuid::parse_str(raw).is_err() || raw.len() != 36 {

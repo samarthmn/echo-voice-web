@@ -1,6 +1,5 @@
 //! Authenticate an offline local library, including unindexed recovery files.
 use crate::{security::ApiError, store};
-use sha2::{Digest, Sha256};
 use std::path::Path;
 
 fn verify_protected_tree(path: &Path, depth: usize) -> Result<(), ApiError> {
@@ -94,8 +93,7 @@ pub(crate) fn verify() -> Result<(), ApiError> {
         }
         let path = store::data_dir()?.join(area).join(id).join(file);
         let data = zeroize::Zeroizing::new(store::read_protected(&path)?);
-        if data.len() as u64 != bytes || format!("{:x}", Sha256::digest(data.as_slice())) != digest
-        {
+        if data.len() as u64 != bytes || crate::digest::sha256_hex(data.as_slice()) != digest {
             return Err(ApiError::bad("The selected library contains missing or damaged audio. Restore a complete backup; the original has not been changed."));
         }
     }

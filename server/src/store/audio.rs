@@ -81,7 +81,7 @@ pub(crate) fn add_audio(
     if sequence.is_some_and(|s| !(0..=1_000_000).contains(&s)) {
         return Err(ApiError::bad("Invalid audio sequence."));
     }
-    let digest = format!("{:x}", Sha256::digest(data));
+    let digest = crate::digest::sha256_hex(data);
     let mut written: Option<PathBuf> = None;
     let result = with_db(|db| {
         let tx = db.transaction()?;
@@ -120,7 +120,7 @@ pub(crate) fn add_audio(
             }
             let path = data_dir()?.join("audio").join(key).join(file);
             let saved = read_protected(&path)?;
-            if saved.len() as u64 != bytes || format!("{:x}", Sha256::digest(&saved)) != hash {
+            if saved.len() as u64 != bytes || crate::digest::sha256_hex(&saved) != hash {
                 return Err(ApiError::new(
                     410,
                     "The saved audio chunk is damaged. Restore the recording from a backup.",

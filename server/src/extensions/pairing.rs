@@ -5,7 +5,7 @@ use super::{
     ApiError, Connection, HeaderMap, IntoResponse, Json, OptionalExtension, Path, Response, Result,
     StatusCode, Uuid, Value, LIBRARY_ID,
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use std::sync::{Mutex, OnceLock};
 
 /// A request stays decidable for this long; decided rows are kept as long again for claim retries.
@@ -86,7 +86,7 @@ fn consume_intent(value: &str, now: i64) -> Result<bool> {
 /// Issue a single-use, two-minute token that pre-approves one Echo-initiated pairing.
 pub(super) async fn intent() -> Result<Json<Value>> {
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    UnwrapErr(SysRng).fill_bytes(&mut bytes);
     let value = bytes
         .iter()
         .flat_map(|byte| [byte >> 4, byte & 0x0f])

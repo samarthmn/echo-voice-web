@@ -7,7 +7,7 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hkdf::Hkdf;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::{
@@ -171,7 +171,7 @@ pub(crate) fn library_key(root: &Path) -> Result<LibraryKey> {
         let entry = keyring::Entry::new("com.echo.voice.library", &key_id)
             .map_err(|e| std::io::Error::other(format!("Keychain entry: {e}")))?;
         let mut bytes = Zeroizing::new([0u8; 32]);
-        OsRng.fill_bytes(bytes.as_mut());
+        UnwrapErr(SysRng).fill_bytes(bytes.as_mut());
         let encoded = Zeroizing::new(STANDARD.encode(bytes.as_ref()));
         entry
             .set_password(&encoded)
@@ -361,12 +361,12 @@ pub(crate) fn write_file(
     }
     let mut header = [0u8; 48];
     header[..8].copy_from_slice(MAGIC);
-    OsRng.fill_bytes(&mut header[8..40]);
+    UnwrapErr(SysRng).fill_bytes(&mut header[8..40]);
     header[40..].copy_from_slice(&(plaintext.len() as u64).to_le_bytes());
     let cipher = key.cipher(&header[8..40], context)?;
     let tag = cipher
         .encrypt(
-            Nonce::from_slice(&nonce(0)),
+            &Nonce::from(nonce(0)),
             Payload {
                 msg: &[],
                 aad: &header,
@@ -380,7 +380,7 @@ pub(crate) fn write_file(
         let sequence = index as u64 + 1;
         let sealed = cipher
             .encrypt(
-                Nonce::from_slice(&nonce(sequence)),
+                &Nonce::from(nonce(sequence)),
                 Payload {
                     msg: block,
                     aad: &binding(&header, sequence),
@@ -419,7 +419,7 @@ impl Reader {
         file.read_exact(&mut tag)?;
         cipher
             .decrypt(
-                Nonce::from_slice(&nonce(0)),
+                &Nonce::from(nonce(0)),
                 Payload {
                     msg: &tag,
                     aad: &header,
@@ -456,7 +456,7 @@ impl Reader {
             let plaintext = Zeroizing::new(
                 self.cipher
                     .decrypt(
-                        Nonce::from_slice(&nonce(index + 1)),
+                        &Nonce::from(nonce(index + 1)),
                         Payload {
                             msg: &sealed,
                             aad: &binding(&self.header, index + 1),
@@ -557,6 +557,29 @@ mod tests {
             fs::remove_file(active).unwrap();
         }
     }
+    /// Written by the crates this library shipped with (hkdf 0.12, aes-gcm 0.10).
+    /// Encrypted files already on users' disks must keep opening after upgrades.
+    const SHIPPED_FILE: &str = "RUNIT0VOQzHSchOcIAW11v+NueCHpGmnMm29t8k2z+FrAVflw+4AAigAAAAAAAAAKM54pF2rdmSj7g3URH63j+Fz2p2FVOqUCYlRhrwSEIV7XNhCJ/5hpztO57cgcImXmvaeYQyzDbsEQaW0Qx2Ac0Yv7+WT+qCW";
+
+    #[test]
+    fn files_written_by_shipped_crates_still_open() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let dir = fixture();
+        let path = dir.path().join("shipped");
+        fs::write(&path, STANDARD.decode(SHIPPED_FILE).unwrap()).unwrap();
+        let key = LibraryKey::from_bytes([7; 32]);
+        let data: Vec<u8> = (0u8..40).collect();
+        let mut reader = Reader::open(&key, &path, "audio:fixture:part-1").unwrap();
+        assert_eq!(reader.read_all().unwrap(), data);
+        assert!(Reader::open(&key, &path, "audio:fixture:part-2").is_err());
+        assert!(Reader::open(
+            &LibraryKey::from_bytes([8; 32]),
+            &path,
+            "audio:fixture:part-1"
+        )
+        .is_err());
+    }
+
     #[test]
     fn ranges_and_empty_files_are_authenticated() {
         let dir = fixture();

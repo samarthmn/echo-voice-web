@@ -3,7 +3,7 @@ use super::{
     list_db, list_meetings, migrate_legacy_notes_settings, mkdir, now, object, params,
     read_protected, settings_db, string, timestamp, unique, valid_id, validate_meeting,
     validate_settings, validate_vocabulary, vocabulary_db, with_db, write_protected_for, ApiError,
-    Digest, Engine, HashMap, Path, PathBuf, Result, Sha256, Value, MAX_AUDIO, MAX_BACKUP, STANDARD,
+    Engine, HashMap, Path, PathBuf, Result, Value, MAX_AUDIO, MAX_BACKUP, STANDARD,
 };
 use std::fmt::Write as _;
 
@@ -68,7 +68,7 @@ pub(crate) fn export_library() -> Result<Value> {
                 return Err(ApiError::new(500, "Audio links cannot be exported."));
             }
             let data = read_protected(&path)?;
-            if data.len() as u64 != bytes || format!("{:x}", Sha256::digest(&data)) != digest {
+            if data.len() as u64 != bytes || crate::digest::sha256_hex(&data) != digest {
                 return Err(ApiError::new(
                     410,
                     "An audio file is incomplete. Restore it before creating a backup.",
@@ -337,7 +337,7 @@ pub(crate) fn import_library(input: &Value) -> Result<Value> {
                         chunk.filename,
                         i64::try_from(chunk.data.len())
                             .map_err(|_| ApiError::bad("Audio chunk is too large."))?,
-                        format!("{:x}", Sha256::digest(&chunk.data))
+                        crate::digest::sha256_hex(&chunk.data)
                     ],
                 )?;
             }

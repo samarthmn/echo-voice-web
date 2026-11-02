@@ -7,7 +7,7 @@ Echo itself is released under the [MIT licence](../LICENSE).
 
 ## Dependencies
 
-Rust dependencies are checked by `cargo deny check` (see `deny.toml`) on every CI run. Only permissive licences are allowed: MIT, Apache-2.0 (with or without the LLVM exception), BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, BSL-1.0, MPL-2.0 and CDLA-Permissive-2.0. A crate offered under several licences passes if one of them is on that list.
+Rust dependencies are checked by `cargo deny check` (see `deny.toml`) on every CI run. Only permissive licences are allowed: MIT, Apache-2.0 (with or without the LLVM exception), BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, BSL-1.0, MPL-2.0 and CDLA-Permissive-2.0. A crate offered under several licences passes if one of them is on that list. One exception: `sqlcipher-src`, the SQLCipher source behind the encrypted library, also carries SQLite's public-domain "blessing" and libtomcrypt's WTFPL, both more permissive than MIT, so `deny.toml` allows those two for that crate only.
 
 The runtime JavaScript dependencies:
 
