@@ -7,3 +7,5 @@ allowBuilds:
   esbuild: true
   onnxruntime-node: true
   protobufjs: false
+patchedDependencies:
+  '@huggingface/transformers@4.3.2': patches/@huggingface__transformers@4.3.2.patch

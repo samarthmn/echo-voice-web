@@ -11,6 +11,18 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Pinned and patched speech runtime: upgrade deliberately, see docs/development.md.
+      - dependency-name: '@huggingface/transformers'
+      - dependency-name: onnxruntime-web
+      - dependency-name: onnxruntime-node
+      # typescript-eslint and astro check need TypeScript 6's JavaScript API;
+      # TypeScript 7 is installed separately as typescript-native.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # Types track the oldest supported Node.js (22.18), not the newest.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       npm:
         patterns: ['*']

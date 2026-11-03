@@ -73,8 +73,7 @@ async function refreshState() {
   if (state.recoveryError) showError(new Error(state.recoveryError));
   if (!initialized) {
     const saved = (await chrome.storage.local.get('onboardingChoices'))['onboardingChoices'] as
-      | Partial<typeof choices>
-      | undefined;
+      Partial<typeof choices> | undefined;
     choices = { callOnly: saved?.callOnly === true };
     initialized = true;
   }

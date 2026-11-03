@@ -1,0 +1,285 @@
+diff --git a/dist/transformers.node.cjs b/dist/transformers.node.cjs
+index 4d58c96fa30a65d99494a97f58ad9c6296f29dc1..77087013eea9a9b8af46324711311546949795a2 100644
+--- a/dist/transformers.node.cjs
++++ b/dist/transformers.node.cjs
+@@ -16204,11 +16204,11 @@ function quantize_embeddings(tensor, precision) {
+ }
+ 
+ // src/utils/model_registry/get_tokenizer_files.js
+-async function get_tokenizer_files(modelId) {
++async function get_tokenizer_files(modelId, { cache_dir = null, local_files_only = false, revision = "main" } = {}) {
+   if (!modelId) {
+     throw new Error("modelId is required for get_tokenizer_files");
+   }
+-  const metadata = await get_file_metadata(modelId, "tokenizer_config.json", {});
++  const metadata = await get_file_metadata(modelId, "tokenizer_config.json", { cache_dir, local_files_only, revision });
+   if (metadata.exists) {
+     return ["tokenizer.json", "tokenizer_config.json"];
+   }
+@@ -16217,7 +16217,7 @@ async function get_tokenizer_files(modelId) {
+ 
+ // src/tokenization_utils.js
+ async function loadTokenizer(pretrained_model_name_or_path, options) {
+-  const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
++  const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path, options);
+   return await Promise.all(
+     tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options))
+   );
+@@ -26496,8 +26496,8 @@ function get_config(modelId, { config = null, cache_dir = null, local_files_only
+     () => AutoConfig.from_pretrained(modelId, { config, cache_dir, local_files_only, revision })
+   );
+ }
+-async function get_model_files(modelId, { config = null, dtype: overrideDtype = null, device: overrideDevice = null, model_file_name = null } = {}) {
+-  config = await get_config(modelId, { config });
++async function get_model_files(modelId, { config = null, dtype: overrideDtype = null, device: overrideDevice = null, model_file_name = null, cache_dir = null, local_files_only = false, revision = "main" } = {}) {
++  config = await get_config(modelId, { config, cache_dir, local_files_only, revision });
+   const files = [
+     // Add config.json (always loaded)
+     "config.json"
+@@ -35680,11 +35680,11 @@ var TASK_ALIASES = Object.freeze({
+ });
+ 
+ // src/utils/model_registry/get_processor_files.js
+-async function get_processor_files(modelId) {
++async function get_processor_files(modelId, { cache_dir = null, local_files_only = false, revision = "main" } = {}) {
+   if (!modelId) {
+     throw new Error("modelId is required");
+   }
+-  const metadata = await get_file_metadata(modelId, IMAGE_PROCESSOR_NAME, {});
++  const metadata = await get_file_metadata(modelId, IMAGE_PROCESSOR_NAME, { cache_dir, local_files_only, revision });
+   return metadata.exists ? [IMAGE_PROCESSOR_NAME] : [];
+ }
+ 
+@@ -35695,15 +35695,19 @@ async function get_files(modelId, {
+   device = null,
+   model_file_name = null,
+   include_tokenizer = true,
+-  include_processor = true
++  include_processor = true,
++  cache_dir = null,
++  local_files_only = false,
++  revision = "main"
+ } = {}) {
+-  const files = await get_model_files(modelId, { config, dtype, device, model_file_name });
++  const lookup = { cache_dir, local_files_only, revision };
++  const files = await get_model_files(modelId, { config, dtype, device, model_file_name, ...lookup });
+   if (include_tokenizer) {
+-    const tokenizerFiles = await get_tokenizer_files(modelId);
++    const tokenizerFiles = await get_tokenizer_files(modelId, lookup);
+     files.push(...tokenizerFiles);
+   }
+   if (include_processor) {
+-    const processorFiles = await get_processor_files(modelId);
++    const processorFiles = await get_processor_files(modelId, lookup);
+     files.push(...processorFiles);
+   }
+   return files;
+@@ -35766,12 +35770,16 @@ async function pipeline(task, model = null, {
+   }
+   const expected_files = await get_pipeline_files(task, model, {
+     device,
+-    dtype
++    dtype,
++    config,
++    cache_dir,
++    local_files_only,
++    revision
+   });
+   let files_loading = {};
+   if (progress_callback) {
+     try {
+-      const metadata = await Promise.all(expected_files.map(async (file) => get_file_metadata(model, file)));
++      const metadata = await Promise.all(expected_files.map(async (file) => get_file_metadata(model, file, { cache_dir, local_files_only, revision })));
+       metadata.forEach((m, i) => {
+         if (m.exists) {
+           files_loading[expected_files[i]] = {
+diff --git a/dist/transformers.node.mjs b/dist/transformers.node.mjs
+index 34fa052a869e29fa8bc4c4bb7bfd086d0657e950..fb0442fbdd6919f10ad8728d133c53e551d68b2f 100644
+--- a/dist/transformers.node.mjs
++++ b/dist/transformers.node.mjs
+@@ -15205,11 +15205,11 @@ function quantize_embeddings(tensor, precision) {
+ }
+ 
+ // src/utils/model_registry/get_tokenizer_files.js
+-async function get_tokenizer_files(modelId) {
++async function get_tokenizer_files(modelId, { cache_dir = null, local_files_only = false, revision = "main" } = {}) {
+   if (!modelId) {
+     throw new Error("modelId is required for get_tokenizer_files");
+   }
+-  const metadata = await get_file_metadata(modelId, "tokenizer_config.json", {});
++  const metadata = await get_file_metadata(modelId, "tokenizer_config.json", { cache_dir, local_files_only, revision });
+   if (metadata.exists) {
+     return ["tokenizer.json", "tokenizer_config.json"];
+   }
+@@ -15218,7 +15218,7 @@ async function get_tokenizer_files(modelId) {
+ 
+ // src/tokenization_utils.js
+ async function loadTokenizer(pretrained_model_name_or_path, options) {
+-  const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
++  const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path, options);
+   return await Promise.all(
+     tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options))
+   );
+@@ -25497,8 +25497,8 @@ function get_config(modelId, { config = null, cache_dir = null, local_files_only
+     () => AutoConfig.from_pretrained(modelId, { config, cache_dir, local_files_only, revision })
+   );
+ }
+-async function get_model_files(modelId, { config = null, dtype: overrideDtype = null, device: overrideDevice = null, model_file_name = null } = {}) {
+-  config = await get_config(modelId, { config });
++async function get_model_files(modelId, { config = null, dtype: overrideDtype = null, device: overrideDevice = null, model_file_name = null, cache_dir = null, local_files_only = false, revision = "main" } = {}) {
++  config = await get_config(modelId, { config, cache_dir, local_files_only, revision });
+   const files = [
+     // Add config.json (always loaded)
+     "config.json"
+@@ -34681,11 +34681,11 @@ var TASK_ALIASES = Object.freeze({
+ });
+ 
+ // src/utils/model_registry/get_processor_files.js
+-async function get_processor_files(modelId) {
++async function get_processor_files(modelId, { cache_dir = null, local_files_only = false, revision = "main" } = {}) {
+   if (!modelId) {
+     throw new Error("modelId is required");
+   }
+-  const metadata = await get_file_metadata(modelId, IMAGE_PROCESSOR_NAME, {});
++  const metadata = await get_file_metadata(modelId, IMAGE_PROCESSOR_NAME, { cache_dir, local_files_only, revision });
+   return metadata.exists ? [IMAGE_PROCESSOR_NAME] : [];
+ }
+ 
+@@ -34696,15 +34696,19 @@ async function get_files(modelId, {
+   device = null,
+   model_file_name = null,
+   include_tokenizer = true,
+-  include_processor = true
++  include_processor = true,
++  cache_dir = null,
++  local_files_only = false,
++  revision = "main"
+ } = {}) {
+-  const files = await get_model_files(modelId, { config, dtype, device, model_file_name });
++  const lookup = { cache_dir, local_files_only, revision };
++  const files = await get_model_files(modelId, { config, dtype, device, model_file_name, ...lookup });
+   if (include_tokenizer) {
+-    const tokenizerFiles = await get_tokenizer_files(modelId);
++    const tokenizerFiles = await get_tokenizer_files(modelId, lookup);
+     files.push(...tokenizerFiles);
+   }
+   if (include_processor) {
+-    const processorFiles = await get_processor_files(modelId);
++    const processorFiles = await get_processor_files(modelId, lookup);
+     files.push(...processorFiles);
+   }
+   return files;
+@@ -34767,12 +34771,16 @@ async function pipeline(task, model = null, {
+   }
+   const expected_files = await get_pipeline_files(task, model, {
+     device,
+-    dtype
++    dtype,
++    config,
++    cache_dir,
++    local_files_only,
++    revision
+   });
+   let files_loading = {};
+   if (progress_callback) {
+     try {
+-      const metadata = await Promise.all(expected_files.map(async (file) => get_file_metadata(model, file)));
++      const metadata = await Promise.all(expected_files.map(async (file) => get_file_metadata(model, file, { cache_dir, local_files_only, revision })));
+       metadata.forEach((m, i) => {
+         if (m.exists) {
+           files_loading[expected_files[i]] = {
+diff --git a/dist/transformers.web.js b/dist/transformers.web.js
+index a86f15e936b5b03d960037ed3e82a175dd5a0ffb..f7aff40d1c5822ef8c5f4c6bbad87b10fc86d564 100644
+--- a/dist/transformers.web.js
++++ b/dist/transformers.web.js
+@@ -11224,11 +11224,11 @@ function quantize_embeddings(tensor, precision) {
+ }
+ 
+ // src/utils/model_registry/get_tokenizer_files.js
+-async function get_tokenizer_files(modelId) {
++async function get_tokenizer_files(modelId, { cache_dir = null, local_files_only = false, revision = "main" } = {}) {
+   if (!modelId) {
+     throw new Error("modelId is required for get_tokenizer_files");
+   }
+-  const metadata = await get_file_metadata(modelId, "tokenizer_config.json", {});
++  const metadata = await get_file_metadata(modelId, "tokenizer_config.json", { cache_dir, local_files_only, revision });
+   if (metadata.exists) {
+     return ["tokenizer.json", "tokenizer_config.json"];
+   }
+@@ -11237,7 +11237,7 @@ async function get_tokenizer_files(modelId) {
+ 
+ // src/tokenization_utils.js
+ async function loadTokenizer(pretrained_model_name_or_path, options) {
+-  const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
++  const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path, options);
+   return await Promise.all(
+     tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options))
+   );
+@@ -21525,8 +21525,8 @@ function get_config(modelId, { config = null, cache_dir = null, local_files_only
+     () => AutoConfig.from_pretrained(modelId, { config, cache_dir, local_files_only, revision })
+   );
+ }
+-async function get_model_files(modelId, { config = null, dtype: overrideDtype = null, device: overrideDevice = null, model_file_name = null } = {}) {
+-  config = await get_config(modelId, { config });
++async function get_model_files(modelId, { config = null, dtype: overrideDtype = null, device: overrideDevice = null, model_file_name = null, cache_dir = null, local_files_only = false, revision = "main" } = {}) {
++  config = await get_config(modelId, { config, cache_dir, local_files_only, revision });
+   const files = [
+     // Add config.json (always loaded)
+     "config.json"
+@@ -30709,11 +30709,11 @@ var TASK_ALIASES = Object.freeze({
+ });
+ 
+ // src/utils/model_registry/get_processor_files.js
+-async function get_processor_files(modelId) {
++async function get_processor_files(modelId, { cache_dir = null, local_files_only = false, revision = "main" } = {}) {
+   if (!modelId) {
+     throw new Error("modelId is required");
+   }
+-  const metadata = await get_file_metadata(modelId, IMAGE_PROCESSOR_NAME, {});
++  const metadata = await get_file_metadata(modelId, IMAGE_PROCESSOR_NAME, { cache_dir, local_files_only, revision });
+   return metadata.exists ? [IMAGE_PROCESSOR_NAME] : [];
+ }
+ 
+@@ -30724,15 +30724,19 @@ async function get_files(modelId, {
+   device = null,
+   model_file_name = null,
+   include_tokenizer = true,
+-  include_processor = true
++  include_processor = true,
++  cache_dir = null,
++  local_files_only = false,
++  revision = "main"
+ } = {}) {
+-  const files = await get_model_files(modelId, { config, dtype, device, model_file_name });
++  const lookup = { cache_dir, local_files_only, revision };
++  const files = await get_model_files(modelId, { config, dtype, device, model_file_name, ...lookup });
+   if (include_tokenizer) {
+-    const tokenizerFiles = await get_tokenizer_files(modelId);
++    const tokenizerFiles = await get_tokenizer_files(modelId, lookup);
+     files.push(...tokenizerFiles);
+   }
+   if (include_processor) {
+-    const processorFiles = await get_processor_files(modelId);
++    const processorFiles = await get_processor_files(modelId, lookup);
+     files.push(...processorFiles);
+   }
+   return files;
+@@ -30795,12 +30799,16 @@ async function pipeline2(task, model = null, {
+   }
+   const expected_files = await get_pipeline_files(task, model, {
+     device,
+-    dtype
++    dtype,
++    config,
++    cache_dir,
++    local_files_only,
++    revision
+   });
+   let files_loading = {};
+   if (progress_callback) {
+     try {
+-      const metadata = await Promise.all(expected_files.map(async (file) => get_file_metadata(model, file)));
++      const metadata = await Promise.all(expected_files.map(async (file) => get_file_metadata(model, file, { cache_dir, local_files_only, revision })));
+       metadata.forEach((m, i) => {
+         if (m.exists) {
+           files_loading[expected_files[i]] = {

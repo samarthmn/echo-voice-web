@@ -4,6 +4,8 @@ All notable changes to Echo are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+- Changed: the speech runtime is now Transformers.js 4.3.2 with ONNX Runtime 1.30 (native) and 1.31 (browser). Word timings and transcripts were checked against the previous runtime on real speech, and models still load only from their pinned versions, including offline.
+
 ## [1.0.0] - 2026-11-01
 
 The first public release: Echo as an open-source, self-hosted product.

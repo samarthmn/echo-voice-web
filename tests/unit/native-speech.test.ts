@@ -135,18 +135,37 @@ void test('native output requires actual finite ordered word timestamps within t
 });
 
 void test('pinned Large V3 alignment uses its original heads and actual stride-two encoder frame count', () => {
-  const calls: unknown[] = [],
-    model = {
-      _extract_token_timestamps(...args: unknown[]) {
-        calls.push(args);
-        return 'aligned';
-      },
-    };
-  correctPinnedAlignment(model);
-  const outputs = { actual: true };
-  assert.equal(model._extract_token_timestamps(outputs, [[9, 19]], 1301, 0.02), 'aligned');
-  assert.deepEqual(calls[0], [
-    outputs,
+  const slices: unknown[] = [];
+  const layer = (index: number) => ({
+    slice: (...range: unknown[]) => {
+      slices.push([index, ...range]);
+      return {};
+    },
+  });
+  const ops = {
+    cat: (tensors: { slice: unknown }[]) => defined(tensors[0]),
+    stack: () => {
+      throw new Error('heads recorded');
+    },
+  } as unknown as Parameters<typeof correctPinnedAlignment>[1];
+  const model = {
+    config: { decoder_layers: 32 },
+    generate: () => Promise.resolve(),
+    _extract_token_timestamps: () => {
+      throw new Error('the 4.3.2 extraction must be replaced');
+    },
+  } as unknown as Parameters<typeof correctPinnedAlignment>[0];
+  correctPinnedAlignment(model, ops);
+  const outputs = {
+    cross_attentions: [Array.from({ length: 32 }, (_, index) => layer(index))],
+    sequences: {},
+  } as unknown as Parameters<typeof model._extract_token_timestamps>[0];
+  assert.throws(
+    () => model._extract_token_timestamps(outputs, [[9, 19]], 1301, 0.02),
+    /heads recorded/,
+  );
+  assert.deepEqual(
+    slices,
     [
       [7, 0],
       [10, 17],
@@ -158,10 +177,8 @@ void test('pinned Large V3 alignment uses its original heads and actual stride-t
       [21, 4],
       [24, 1],
       [25, 6],
-    ],
-    650,
-    0.02,
-  ]);
+    ].map(([index, head]) => [index, null, head, null, [0, 650]]),
+  );
   assert.throws(() => model._extract_token_timestamps(outputs, [], undefined), /actual audio/);
 });
 

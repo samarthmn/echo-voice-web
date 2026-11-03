@@ -17,6 +17,11 @@ import {
   AutoProcessor,
   AutoModelForAudioFrameClassification,
   AutoModelForXVector,
+  Tensor,
+  cat,
+  mean,
+  stack,
+  std_mean,
 } from '@huggingface/transformers';
 import {
   assertModel,
@@ -190,7 +195,7 @@ async function handleMessage(event: MessageEvent<unknown>) {
         });
         const speech = speechModel(transcriber.model);
         assertWordTimestampSupport(speech.sessions['decoder_model_merged']?.outputNames);
-        correctWhisperAlignment(speech);
+        correctWhisperAlignment(speech, { Tensor, cat, mean, stack, std_mean });
         loadedModel = modelId;
       }
       if (!download) {
