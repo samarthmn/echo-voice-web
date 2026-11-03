@@ -42,7 +42,7 @@ async function main() {
     const buffer = await response.arrayBuffer(),
       view = new DataView(buffer);
     let format, channels, rate, bits, start, length;
-    for (let cursor = 12; cursor + 8 <= view.byteLength; ) {
+    for (let cursor = 12; cursor + 8 <= view.byteLength;) {
       const tag = String.fromCharCode(...new Uint8Array(buffer, cursor, 4));
       const size = view.getUint32(cursor + 4, true);
       if (tag === 'fmt ') {

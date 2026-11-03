@@ -18,6 +18,8 @@ The runtime JavaScript dependencies:
 | `onnxruntime-node` | MIT | The native runtime for Whisper Large V3 |
 | `@scure/bip39` | MIT | The recovery phrase word list |
 
+`web/whisper-alignment.ts` contains code ported from Transformers.js 3.8.1 (Copyright Hugging Face, Apache-2.0), and `patches/` holds a patch to Transformers.js 4.3.2 under the same licence.
+
 Development-only packages (build tools, linters, test runners) are not shipped with Echo. CI runs `pnpm audit --prod` on every push.
 
 ## Fonts and icons

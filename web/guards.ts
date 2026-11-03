@@ -376,7 +376,7 @@ export function heartbeat(value: unknown): { restored?: string[] } {
 }
 type RuntimeSpeechModel = Pick<
   WhisperForConditionalGeneration,
-  'generate' | '_extract_token_timestamps'
+  'config' | 'generate' | '_extract_token_timestamps'
 > & {
   sessions: Record<string, Pick<InferenceSession, 'run'> & { outputNames: readonly string[] }>;
 };
@@ -386,6 +386,8 @@ export function speechModel(value: unknown): RuntimeSpeechModel {
   if (
     typeof v['generate'] !== 'function' ||
     typeof v['_extract_token_timestamps'] !== 'function' ||
+    typeof v['config'] !== 'object' ||
+    v['config'] === null ||
     !['model', 'decoder_model_merged'].every(
       (key) => typeof record(sessions[key])['run'] === 'function',
     ) ||

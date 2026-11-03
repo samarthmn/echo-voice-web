@@ -46,7 +46,11 @@ import { constants } from 'node:fs';
 import { createDecipheriv } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { inspect } from 'node:util';
-import { correctWhisperAlignment, validatedWhisperWords } from '../web/whisper-alignment.ts';
+import {
+  correctWhisperAlignment,
+  validatedWhisperWords,
+  type TensorOps,
+} from '../web/whisper-alignment.ts';
 
 export const MODEL_ID = 'onnx-community/whisper-large-v3';
 export const CHECKPOINT = 'Xenova/whisper-large-v3';
@@ -78,16 +82,11 @@ const LARGE_V3_ALIGNMENT_HEADS = [
   [25, 6],
 ];
 
-// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- Preserve the wrapped model method’s concrete input and output types when replacing it.
-export function correctPinnedAlignment<Output, Result>(model: {
-  _extract_token_timestamps: (
-    outputs: Output,
-    heads: number[][],
-    frames?: number,
-    precision?: number,
-  ) => Result;
-}) {
-  correctWhisperAlignment(model, LARGE_V3_ALIGNMENT_HEADS);
+export function correctPinnedAlignment(
+  model: Parameters<typeof correctWhisperAlignment>[0],
+  ops: TensorOps,
+) {
+  correctWhisperAlignment(model, ops, LARGE_V3_ALIGNMENT_HEADS);
 }
 
 const LANGUAGES: Record<string, string> = {
@@ -417,7 +416,8 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
   if (!downloading) {
     audio = await readEncryptedPCM(request);
   }
-  const { env, pipeline } = await import('@huggingface/transformers');
+  const { env, pipeline, Tensor, cat, mean, stack, std_mean } =
+    await import('@huggingface/transformers');
   env.cacheDir = request.cacheDir;
   env.useFSCache = true;
   env.useBrowserCache = false;
@@ -465,7 +465,7 @@ async function runNative(input: unknown, emit: (message: unknown) => void) {
       )
     )
       throw new Error('The pinned native model cannot create word timestamps.');
-    correctPinnedAlignment(speechModel(transcriber.model));
+    correctPinnedAlignment(speechModel(transcriber.model), { Tensor, cat, mean, stack, std_mean });
     if (downloading) {
       await validateWeights(request.cacheDir);
       const forwarded = new Set<string>();

@@ -71,8 +71,7 @@ async function showApprovalTab(link: Waiting): Promise<void> {
 }
 async function closeApprovalTab(requestId: string): Promise<void> {
   const tab = (await chrome.storage.session.get('approvalTab'))['approvalTab'] as
-    | ApprovalTab
-    | undefined;
+    ApprovalTab | undefined;
   if (tab?.requestId !== requestId) return;
   await chrome.storage.session.remove('approvalTab');
   const current = await chrome.tabs.get(tab.id).catch(() => undefined); // Closed by the user.
@@ -283,8 +282,7 @@ interface ConnectRequest {
 }
 export async function pendingConnect() {
   const pending = (await chrome.storage.session.get('connectRequest'))['connectRequest'] as
-    | ConnectRequest
-    | undefined;
+    ConnectRequest | undefined;
   if (!pending) return undefined;
   const link = await readLink();
   return {
@@ -295,8 +293,7 @@ export async function pendingConnect() {
 }
 export async function confirmConnect(id: string, previous?: string) {
   const pending = (await chrome.storage.session.get('connectRequest'))['connectRequest'] as
-    | ConnectRequest
-    | undefined;
+    ConnectRequest | undefined;
   const view = await pendingConnect();
   if (!pending || !view || pending.id !== id || view.previous !== previous)
     throw new Error('The connection request changed. Review it and try again.');

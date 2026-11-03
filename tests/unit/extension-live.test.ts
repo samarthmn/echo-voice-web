@@ -832,7 +832,14 @@ void test('actual live worker stays warm, loads no speaker models, and validates
     MODEL_MANIFEST_CACHE: 'manifest',
     modelManifestUrl() {},
     wasmThreadCount: () => 1,
-    correctWhisperAlignment() {},
+    Tensor() {},
+    cat() {},
+    mean() {},
+    stack() {},
+    std_mean() {},
+    correctWhisperAlignment(_model: unknown, ops: Record<string, unknown>) {
+      assert.deepEqual(Object.keys(ops).sort(), ['Tensor', 'cat', 'mean', 'stack', 'std_mean']);
+    },
     validatedWhisperWords,
     AutoModelForAudioFrameClassification: {
       from_pretrained: () => {

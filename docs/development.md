@@ -81,6 +81,13 @@ Markdownlint uses `.markdownlint-cli2.jsonc` for root `*.md` and `docs/**/*.md`,
 
 Use Node.js 22.18 or newer, which runs `.ts` files through built-in type stripping. Browser, extension, script, and test projects extend `tsconfig.base.json`; relative TypeScript imports include `.ts`. TypeScript 6.0.3 provides the JavaScript API for editors and tooling, while `typescript-native` pins 7.0.2 for `pnpm typecheck`; `pnpm typecheck:compat` checks compiler drift. Both scripts use explicit compiler paths because both packages publish a `tsc` binary. Both compilers require declarations for cross-project references, so solution builds emit declarations and build metadata under `node_modules/.cache/tsbuild/`; esbuild owns JavaScript assets.
 
+**The speech runtime is pinned and patched.** `@huggingface/transformers` is pinned to 4.3.2, and `onnxruntime-web` and `onnxruntime-node` to the exact versions it depends on, so one copy of each runtime is installed and `scripts/copy-wasm.ts` ships the WebAssembly that matches the bundled JavaScript. Two 4.3.2 defects are worked around:
+
+- `patches/@huggingface__transformers@4.3.2.patch` (applied by pnpm through `patchedDependencies` in `pnpm-workspace.yaml`) makes `pipeline()`, `AutoTokenizer` and the processor lookup pass `revision`, `cache_dir` and `local_files_only` to the files they probe. Unpatched, they probe the repository's `main` branch, which fetches unpinned files and breaks loading offline.
+- `web/whisper-alignment.ts` restores 3.8.1's word timestamps: word mode does not predict timestamp tokens, and token times come from a port of 3.8.1's DTW, cropped to the real audio. 4.3.2's own word timestamps are one token late and hallucinate text at chunk boundaries.
+
+Dependabot ignores these three packages. To upgrade them, drop or re-create the patch, then run real Whisper on real speech (in Node and in Chromium) with the current and new versions and compare the word timings before merging. Unit tests stub the models, so they cannot catch alignment regressions.
+
 Tests are grouped into `tests/unit/`, `tests/integration/`, and `tests/e2e/`, with shared fixtures in `tests/helpers/`. Run one unit test with `node --test tests/unit/foo.test.ts`. Integration files run serially to isolate server and extension fixtures; `scripts/test-browser.ts` preserves the browser suite's defined order. Scripts and tests execute directly as TypeScript; generated browser bundle names remain unchanged.
 
 ## Design tokens, fonts and icons

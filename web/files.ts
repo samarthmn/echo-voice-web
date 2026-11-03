@@ -1,8 +1,6 @@
 import { errorInfo, parseJson } from './guards.ts';
 export type JsonFileResult =
-  | { cancelled: true }
-  | { name: string; value: unknown }
-  | { error: string | undefined };
+  { cancelled: true } | { name: string; value: unknown } | { error: string | undefined };
 /** Open a connected file input so native browser pickers can reliably target it. */
 export function chooseJsonFile() {
   return new Promise<JsonFileResult>((resolve) => {

@@ -23,11 +23,7 @@ export interface TranscriptResult {
   duration?: number;
 }
 export type WorkerOperation =
-  | 'download'
-  | 'download-companions'
-  | 'transcribe'
-  | 'diarize'
-  | 'transcribe-live';
+  'download' | 'download-companions' | 'transcribe' | 'diarize' | 'transcribe-live';
 export type WorkerRequest =
   | {
       id: string;
@@ -49,5 +45,4 @@ export type WorkerReply =
   | { id: string; type: 'result'; result?: LiveResult | TranscriptResult };
 
 export type WorkerEnvelope =
-  | Exclude<WorkerReply, { type: 'result' }>
-  | { id: string; type: 'result'; result?: unknown };
+  Exclude<WorkerReply, { type: 'result' }> | { id: string; type: 'result'; result?: unknown };
