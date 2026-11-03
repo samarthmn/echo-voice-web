@@ -1,6 +1,7 @@
 #![warn(unreachable_pub)]
 mod api;
 mod config;
+mod digest;
 mod extensions;
 mod integrations;
 mod library_schema;

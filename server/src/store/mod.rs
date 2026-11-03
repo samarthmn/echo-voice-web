@@ -6,7 +6,6 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -268,11 +267,7 @@ fn open_protected_database(root: &Path, key: &LibraryKey) -> Result<Connection> 
             source.execute_batch("PRAGMA encrypted.cipher_compatibility=4;")?;
             source.query_row("SELECT sqlcipher_export('encrypted')", [], |_| Ok(()))?;
             let schema: i64 = source.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            source.pragma_update(
-                Some(rusqlite::DatabaseName::Attached("encrypted")),
-                "user_version",
-                schema,
-            )?;
+            source.pragma_update(Some("encrypted"), "user_version", schema)?;
             source.execute_batch("DETACH DATABASE encrypted;")?;
             let verified = unlock_database(&staged, key)?;
             let check: String = verified.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
@@ -570,8 +565,7 @@ fn migrate_file(path: &Path, expected: Option<(u64, &str)>) -> Result<()> {
         fs::read(path)?
     };
     if let Some((bytes, digest)) = expected {
-        if plaintext.len() as u64 != bytes || format!("{:x}", Sha256::digest(&plaintext)) != digest
-        {
+        if plaintext.len() as u64 != bytes || crate::digest::sha256_hex(&plaintext) != digest {
             return Err(ApiError::new(
                 410,
                 "A legacy audio file is damaged. Migration paused without replacing it.",

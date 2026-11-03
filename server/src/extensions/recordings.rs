@@ -183,7 +183,7 @@ fn verify_complete_files(db: &Connection, r: &Value) -> Result<()> {
             plaintext.fill(0);
             offset += count as u64;
         }
-        if format!("{:x}", digest.finalize()) != expected_digest {
+        if crate::digest::lower_hex(&digest.finalize()) != expected_digest {
             return Err(damaged());
         }
     }

@@ -13,7 +13,6 @@ use axum::{
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
     path::{Component, Path as FsPath, PathBuf},
@@ -354,10 +353,7 @@ impl Drop for UploadGuard {
 /// Name transient audio by canonical library identity, never by a shared machine temp path.
 fn spool_namespace(project: &FsPath, data: &FsPath) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(data)?;
-    let identity = format!(
-        "{:x}",
-        Sha256::digest(canonical.as_os_str().as_encoded_bytes())
-    );
+    let identity = crate::digest::sha256_hex(canonical.as_os_str().as_encoded_bytes());
     let temporary = project.join("tmp");
     let namespace = temporary.join(format!("native-speech-{identity}"));
     for folder in [&temporary, &namespace] {

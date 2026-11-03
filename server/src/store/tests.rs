@@ -97,7 +97,7 @@ fn database_bytes(root: &Path) -> Vec<(String, String)> {
         .filter_map(|name| {
             fs::read(root.join(name))
                 .ok()
-                .map(|bytes| (name.into(), format!("{:x}", Sha256::digest(bytes))))
+                .map(|bytes| (name.into(), crate::digest::sha256_hex(bytes)))
         })
         .collect()
 }
@@ -183,7 +183,7 @@ fn legacy_database_and_files_migrate_resumably_and_wrong_keys_fail_closed() {
                 sequence,
                 format!("legacy-{sequence}.chunk"),
                 audio.len(),
-                format!("{:x}", Sha256::digest(audio))
+                crate::digest::sha256_hex(audio)
             ],
         )
         .unwrap();

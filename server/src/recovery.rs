@@ -13,7 +13,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bip39::{Language, Mnemonic};
 use hkdf::Hkdf;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -69,10 +69,10 @@ fn key_for(secret: &[u8], salt: &str, purpose: &str) -> Result<Aes256Gcm> {
 }
 fn seal(cipher: &Aes256Gcm, data: &[u8], context: &[u8]) -> Result<Sealed> {
     let mut nonce = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce);
+    UnwrapErr(SysRng).fill_bytes(&mut nonce);
     let ciphertext = cipher
         .encrypt(
-            Nonce::from_slice(&nonce),
+            &Nonce::from(nonce),
             Payload {
                 msg: data,
                 aad: context,
@@ -93,10 +93,11 @@ fn open(
     if sealed.nonce.len() != 16 || sealed.ciphertext.len() > ((max + 16).div_ceil(3) * 4) {
         return Err(failure());
     }
-    let nonce = STANDARD.decode(&sealed.nonce).map_err(|_| failure())?;
-    if nonce.len() != 12 {
-        return Err(failure());
-    }
+    let nonce: [u8; 12] = STANDARD
+        .decode(&sealed.nonce)
+        .map_err(|_| failure())?
+        .try_into()
+        .map_err(|_| failure())?;
     let ciphertext = STANDARD.decode(&sealed.ciphertext).map_err(|_| failure())?;
     if ciphertext.len() > max + 16 {
         return Err(failure());
@@ -104,7 +105,7 @@ fn open(
     Ok(Zeroizing::new(
         cipher
             .decrypt(
-                Nonce::from_slice(&nonce),
+                &Nonce::from(nonce),
                 Payload {
                     msg: &ciphertext,
                     aad: context,
@@ -173,7 +174,7 @@ fn validate_recovery(recovery: &Recovery, master: &[u8; 32]) -> Result<()> {
 }
 fn make_recovery(master: &[u8; 32]) -> Result<(Recovery, Zeroizing<String>)> {
     let mut entropy = Zeroizing::new([0u8; 32]);
-    OsRng.fill_bytes(entropy.as_mut());
+    UnwrapErr(SysRng).fill_bytes(entropy.as_mut());
     let phrase = Zeroizing::new(
         Mnemonic::from_entropy(entropy.as_ref())
             .map_err(|_| failure())?
@@ -511,6 +512,31 @@ fn decode_backup(backup: &Backup, key: &[u8; 32]) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sealed by the crates this library shipped with (bip39 2.2, hkdf 0.12,
+    /// aes-gcm 0.10, sha2 0.10). Libraries and recovery phrases already saved by
+    /// users must keep opening after dependency upgrades. Synthetic test vector:
+    /// the phrase protects the fixed test key `[42; 32]`, not a real library.
+    const SHIPPED_RECOVERY: &str = r#"{"version":1,"id":"dc25e00a-2ced-4996-92c1-9a5d57ceec24","fingerprint":"FZyjxA4b74aKKeOcrJveZwpsXQewXWQVGfLZumKJJQI=","sealed":{"nonce":"8HlI59EOoZ61ieat","ciphertext":"FGhI+BnDZhCHBGw3mobNhW++G2MAd29YmZB/ujr3mz9M5mJoJY4VfzC4TKkQnKFP"},"integrity":{"nonce":"GPXxI/SzTyj2pSLm","ciphertext":"up5VIm/QWcvD3eA4hc38Cg=="}}"#;
+    const SHIPPED_PHRASE: &str = "salute arrive door age nominee danger follow real same share blossom general trip wrap cradle bird baby demand coil zero settle erase avoid shallow";
+
+    #[test]
+    fn recovery_envelopes_sealed_by_shipped_crates_still_open() {
+        let recovery: Recovery = serde_json::from_str(SHIPPED_RECOVERY).unwrap();
+        assert_eq!(*recover_key(&recovery, SHIPPED_PHRASE).unwrap(), [42; 32]);
+        validate_recovery(&recovery, &[42; 32]).unwrap();
+        let mut wrong = SHIPPED_PHRASE.split(' ').collect::<Vec<_>>();
+        wrong.swap(0, 1);
+        assert!(recover_key(&recovery, &wrong.join(" ")).is_err());
+    }
+
+    #[test]
+    fn recovery_phrases_match_the_bip39_english_test_vector() {
+        let phrase = Mnemonic::from_entropy(&[0; 32]).unwrap().to_string();
+        assert_eq!(phrase, format!("{}art", "abandon ".repeat(23)));
+        let parsed = Mnemonic::parse_in(Language::English, &phrase).unwrap();
+        assert_eq!(parsed.to_entropy(), vec![0; 32]);
+    }
     #[test]
     fn library_recovery_ignores_legacy_chatgpt_files() {
         let _guard = store::TEST_LIBRARY_LOCK.blocking_lock();

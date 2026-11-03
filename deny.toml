@@ -24,6 +24,12 @@ allow = [
   "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
+# The SQLCipher amalgamation bundled for the encrypted library. SQLite itself is
+# public domain ("blessing") and libtomcrypt is WTFPL/public domain; both are more
+# permissive than MIT. Scoped to this crate so neither licence is allowed elsewhere.
+exceptions = [
+  { crate = "sqlcipher-src", allow = ["blessing", "WTFPL"] },
+]
 
 [bans]
 multiple-versions = "allow"

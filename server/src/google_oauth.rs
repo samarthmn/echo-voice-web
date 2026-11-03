@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
@@ -74,7 +74,7 @@ pub(super) fn config() -> Result<Config, ApiError> {
 }
 fn random_secret() -> Zeroizing<String> {
     let mut bytes = Zeroizing::new([0; 32]);
-    OsRng.fill_bytes(bytes.as_mut());
+    UnwrapErr(SysRng).fill_bytes(bytes.as_mut());
     Zeroizing::new(URL_SAFE_NO_PAD.encode(bytes.as_ref()))
 }
 fn same_secret(a: &str, b: &str) -> bool {

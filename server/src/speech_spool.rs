@@ -4,7 +4,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
     Aes256Gcm, Nonce,
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use zeroize::{Zeroize, Zeroizing};
@@ -22,7 +22,7 @@ pub(super) struct Writer {
 impl Writer {
     pub(super) async fn create(path: &Path) -> std::io::Result<Self> {
         let mut key = Zeroizing::new([0; 32]);
-        OsRng.fill_bytes(key.as_mut());
+        UnwrapErr(SysRng).fill_bytes(key.as_mut());
         let cipher = Aes256Gcm::new_from_slice(key.as_ref())
             .map_err(|_| std::io::Error::other("Invalid speech spool key."))?;
         let mut options = tokio::fs::OpenOptions::new();
@@ -68,7 +68,7 @@ impl Writer {
             let encrypted = self
                 .cipher
                 .encrypt(
-                    Nonce::from_slice(&nonce),
+                    &Nonce::from(nonce),
                     Payload {
                         msg: block,
                         aad: &binding,
