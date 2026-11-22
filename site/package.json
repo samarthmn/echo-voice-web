@@ -9,10 +9,10 @@
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview"
   },
   "dependencies": {
-    "@astrojs/markdown-remark": "7.3.5",
-    "@astrojs/sitemap": "3.7.4",
-    "@astrojs/starlight": "0.42.8",
-    "astro": "7.4.4",
+    "@astrojs/markdown-remark": "7.3.10",
+    "@astrojs/sitemap": "3.7.6",
+    "@astrojs/starlight": "0.43.1",
+    "astro": "7.4.13",
     "github-slugger": "2.0.0"
   },
   "devDependencies": {
